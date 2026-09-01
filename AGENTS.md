@@ -1,0 +1,347 @@
+# Shared standards for all agents
+
+Everything in this file applies to EVERY agent working in this
+repository, regardless of harness or model family (Claude Code,
+Antigravity/Gemini, or anything added later). Agents are
+model-agnostic roles; which model family backs a given agent is a
+deployment pin that can change without changing these standards.
+
+Harness-specific configuration — verified model tiers, cache and cost
+mechanics, context ceilings, session behavior rules — lives in
+[CLAUDE.md](CLAUDE.md) (Claude Code) and [GEMINI.md](GEMINI.md)
+(Gemini/Antigravity); both defer to this file for everything below.
+Keep one source of truth: a rule that applies to all agents belongs
+here, never duplicated per harness file.
+
+Persona-specific standards (reviewer protocols, implementer rules,
+authority levels) are NOT in this file: they belong to the canonical
+persona definitions under `personas/` and are compiled per harness.
+This file carries only what binds every agent equally.
+
+## Document map and reading order
+
+Every session starts by walking the same chain, in this order. Each
+document answers one question; do not look for an answer in the wrong
+document.
+
+1. **AGENTS.md** (this file) — *how every agent works here.* Binding
+   on all agents. The harness entry point (CLAUDE.md or GEMINI.md)
+   loads alongside it and adds only harness mechanics: verified model
+   bindings, cache pricing, context ceilings.
+2. **INTENT.md** — *why the system exists and where it is going.*
+   The founding intent, the persona cast, the lifecycle every change
+   follows, and the open questions. Read it before proposing
+   anything, so you don't re-open what is already decided or settled
+   as out of scope.
+3. **docs/SPEC.md** — *what the system does right now.* The living
+   spec, upserted by every behavior-changing PR. Trust it over
+   memory, chat history, or intuition about earlier sessions. Until
+   it exists, INTENT.md's Proposed outcome is the nearest truth.
+4. **The work item** — *what this session is for.* The GitHub issue
+   being worked, its labels (the lifecycle state), its thread (the
+   handoff trail), and its `intent/<issue>-<slug>/` folder: intent.md
+   (what was asked), spec.md (what was decided, with the Decisions
+   table), plan.md (how to build it) — read whichever the completed
+   stage gates have produced.
+5. **The persona file**, when acting as one — *who you are in this
+   session.* The persona's compiled instructions for this harness
+   govern role behavior (protocol, authority, tier); this file still
+   binds everything else.
+
+Reference material, read on demand rather than at session start:
+docs/BLOG.md (the playbook this system implements) and
+docs/CONTEXT.md (prior art and adopted conventions) inform design
+sessions; implementation sessions rarely need them. Never treat
+compiled targets (`.claude/agents/`, `.agents/agents/`) as sources —
+the canonical definitions live in `personas/`, and CI fails the build
+if the two drift.
+
+## Sessions are ephemeral — state lives in the tracker
+
+No fact may live only in a session. A transcript is gone (or too
+expensive to carry) by the next session, and the next session may be
+a different harness, model, persona, or person. Handoff between
+sessions therefore has exactly one mechanism: the GitHub issue.
+
+- **One session, one work item.** A session serves one issue at one
+  lifecycle stage (the one-session-per-phase rule above, made
+  concrete). Name the issue at session start; every artifact the
+  session produces traces to it.
+- **The issue thread is the session's memory.** Decisions, state, and
+  pointers to artifacts land in the issue thread and the committed
+  files it references — never only in chat. Lifecycle state lives in
+  the issue's labels, never in prose.
+- **Every session ends with a handoff comment** on its issue, in this
+  shape:
+
+  ```text
+  Done:    what changed, with artifact paths and PR links
+  Decided: each decision on one line (or "none")
+  Next:    the single next action, concrete enough to start cold
+  Blocked: what needs a human, or "nothing"
+  ```
+
+  The bar: a stranger on a different harness resumes from the
+  handoff comment plus the document chain above, without the
+  transcript. If they couldn't, the handoff is not done.
+- **Session-end reconciliation** (extends the run-folder bookkeeping
+  above): before ending, every decision discussed is an issue, a PR,
+  or an explicit "deferred, no tracker" line in the handoff; every
+  run artifact carries its disposition; uncommitted or unpushed work
+  is named in the handoff, not left implicit.
+- **Bootstrap exception:** until the GitHub repo and its issues
+  exist, INTENT.md is the tracker of record and handoffs append to
+  its disposition footnote. This exception ends the day the first
+  issue is filed.
+
+## Working the tracker: pick, claim, work, hand off
+
+The repository is `github.com/evekhm/agentic-sdlc`. This is the
+session workflow — the same loop whether the session is a human
+driving a harness, a compiled persona, or (later) an automated
+workflow. It is what makes parallel sessions safe and any session
+resumable cold.
+
+1. **Pick.** Open the pinned **tracker issue** — the index of all
+   work, grouped by bootstrap rung, one checklist line per issue. An
+   issue is *claimable* when: it has no `in-progress` label, every
+   issue named in its "Depends on" line is closed, and no `hold`
+   label is present anywhere it points.
+2. **Claim.** Add `in-progress` and comment one line: who (persona or
+   human+harness) and what stage is being worked. The claim is the
+   mutex: **the issue is the unit of parallelism** — two sessions
+   never work the same issue, and any number of sessions may work
+   different claimable issues concurrently. Scope issues to disjoint
+   paths so parallel PRs don't collide.
+3. **Read.** Walk the document chain (above), then the issue thread
+   bottom-up: the last handoff comment says exactly where to resume.
+4. **Work.** On a branch named `<actor>/<issue>-<slug>`, produce the
+   artifact the current lifecycle stage owes (see INTENT.md's
+   lifecycle: intent.md → spec.md → plan.md → code+tests). Everything
+   reaches `main` by PR; the PR body carries `Closes #<n>` only when
+   it completes the issue's final stage.
+5. **Hand off.** End with the Done/Decided/Next/Blocked comment on
+   the issue (format above). If pausing rather than finishing, remove
+   `in-progress` so another session can claim. Tick the tracker
+   issue's checklist line when an issue closes.
+6. **Gate.** A human merges. The merge *is* the state transition that
+   makes the next stage claimable — state advances only through the
+   tracker and `main`, never through anyone's memory.
+
+**There is no STATUS.md.** Status in a committed file goes stale the
+moment two sessions run in parallel, and every update costs a
+commit/PR that can conflict. The pinned tracker issue plus per-issue
+handoff comments carry the same information append-only and
+conflict-free. "Where do I pick up?" is always answered by: tracker
+issue → first unchecked line whose issue is claimable → its last
+handoff comment.
+
+## Outputs go in timestamped run folders
+
+- All experiment, eval, analysis, and working outputs go in
+  `runs/YYYY-MM-DD_<slug>/` (e.g. `runs/2026-09-01_intent-draft/`) —
+  never loose files in the repo root that get overwritten by the next
+  session.
+- `runs/` is local scratch and is gitignored. Anything worth keeping
+  graduates from a run folder into a real, reviewed location (`docs/`,
+  a script, a PR) — sanitized first.
+- **Bookkeeping: every run artifact records its disposition.** By the
+  time a session ends, every artifact the session produced carries a
+  disposition naming what became of it: the issue or PR it turned
+  into, the doc it graduated into, or an explicit "deferred, no
+  tracker". Record it at the moment the action happens; artifacts
+  still disposition-less at session end get reconciled then (that is
+  when "deferred, no tracker" is written, so no artifact ends the
+  session unaccounted). For prose and text artifacts, append the
+  disposition as a footnote at the end of the file. For
+  machine-readable artifacts (JSON, CSV, JSONL — anything a parser
+  consumes), never append to the file itself: put the same line in a
+  sidecar `<name>.disposition.md` next to it. Reading an artifact (or
+  its sidecar) must answer "was this accounted for?" without
+  searching. Format:
+
+  ```text
+  ---
+  Disposition (YYYY-MM-DD): filed as #<issue>; graduated to <path> via PR #<n>.
+  ```
+
+## No document sprawl
+
+- Consolidate into existing docs; do not create a new doc when an
+  existing one covers the topic. Before creating any file, search for
+  an existing one that already serves the purpose.
+- Never generate derivative twins of a document (summaries, HTML
+  exports, `_v2` copies) as checked-in files.
+
+## The living spec (docs/SPEC.md)
+
+[docs/SPEC.md](docs/SPEC.md) specifies what the system does. It is
+maintained by the PRs that change behavior — never regenerated
+wholesale — and this discipline binds every implementer that opens a
+PR here (agent or human), regardless of harness:
+
+- **Any PR that changes system behavior updates docs/SPEC.md in the
+  same PR**: add entries for new behavior, reword superseded entries
+  in place, move an *Agreed, not yet built* entry into the spec body
+  when its implementing PR opens, and delete entries a revert
+  removes. Upsert, never append duplicates; git history is the
+  archive.
+- Entries are keyed by stable dotted capability IDs
+  (`component.capability`). An ID survives rewording and changes
+  only when the capability itself is replaced. An entry added or
+  changed after the spec's initial version cites its PR inline:
+  `(PR #123)`.
+- Statements are present tense and describe merged code only. Where
+  behavior is shipped-but-broken, disabled, or prompt-only rather
+  than code-enforced, the entry or the Deployment status section
+  says so plainly. Planned work goes only to *Agreed, not yet
+  built*, and only when an explicit material decision is on the
+  record (issue or thread reference required) — never filler.
+- A PR that touches behavior-bearing paths without changing behavior
+  (refactor, comments, test-only) declares that in the PR body with
+  the machine marker line `Spec-impact: none — <reason>`.
+- CI enforcement (a spec check failing the PR unless the diff touches
+  docs/SPEC.md or the body carries the marker) is to be ported from
+  the predecessor repo (`agentic-experiments-lab`:
+  `scripts/ci/spec_check.sh` + `.github/workflows/spec-check.yml`);
+  until then the rule is prompt-enforced.
+- Spec entries are claims and are reviewed like claims: reviewers
+  verify each added or changed statement against the diff that ships
+  it, and flag spec statements the diff does not support.
+
+## Context and cost discipline
+
+Long sessions on large-context models burn money through cache reads:
+every API call re-reads the entire accumulated context. Keep the main
+conversation lean.
+
+- Delegate implementation-heavy work to subagents where the harness
+  supports them: multi-file greps, batch edits, running test suites,
+  reading large files or diffs. The subagent's tool output stays out
+  of the main context; only its summary returns. The main loop is for
+  decisions, design discussion, and review of results — not for
+  running 100+ shell/edit calls directly.
+- Never pull large tool output into the main conversation. Pipe
+  through `head`/`grep`/`jq`, read file excerpts rather than whole
+  files, or delegate the reading to a search subagent. A large dump
+  is re-read (and re-billed) on every later call in the session.
+- **200K is the working ceiling for any single context** — main
+  session or subagent, on every harness. Crossing it either re-prices
+  the whole request at a long-context premium (both vendors) or
+  degrades quality, usually both. When a session approaches the
+  ceiling, compact or hand off to a fresh session; the harness file
+  states the exact mechanics and pricing for its vendor.
+- One session per phase. When work shifts phase (design →
+  implementation, implementation → review) or scope changes
+  materially, say so and recommend ending the session and starting
+  fresh from the spec or issue instead of carrying the transcript
+  forward.
+- **Warn before it gets expensive.** When the conversation has grown
+  very large (deep into a long multi-hour session), the agent
+  proactively flags that the context is expensive — stating the
+  approximate accumulated context size — and suggests compacting or a
+  fresh session with a short handoff. Silence while the meter runs is
+  a protocol violation, not politeness.
+- Route mechanical, fully specified subagent work (batch edits from a
+  spec, greps/searches, running tests, formatting sweeps) to a cheaper
+  model tier than the main conversation, where the harness supports
+  per-agent models. The harness file (CLAUDE.md / GEMINI.md) names the
+  tiers verified for that harness. Reserve the frontier tier for
+  design, review, and debugging that genuinely needs it.
+
+## Before filing an issue
+
+Search the tracker first, every time, before creating a new issue:
+
+1. List open issues carrying the relevant `area:*` label
+   (e.g. `gh issue list --state open --label area:personas`).
+2. Search open issues and PRs by the feature's key terms in title and
+   body (e.g. `gh search issues --repo <owner>/<repo> --state open
+   "<term>"` and the same query via `gh search prs`).
+3. Read the matches — including their comment threads. Agreed findings
+   in an existing thread are settled design; do not re-propose what a
+   thread has already killed.
+
+Then act on what you found:
+
+- A matching open issue exists → comment on it or extend its plan; do
+  not open a duplicate.
+- Related issues exist but none covers the ask → the new issue must
+  name each related issue and state the relationship explicitly:
+  absorbs, refines, depends on, or proposes superseding. Import their
+  agreed findings as constraints.
+- Nothing related exists → say so in the new issue ("tracker searched,
+  no prior art: <labels/terms searched>").
+
+A new issue that ignores an existing thread duplicates tracking,
+splits the discussion, and burns reviewer rounds re-litigating
+settled findings.
+
+## Subagent model tiers
+
+Per the context and cost discipline above, mechanical subagent work
+runs on a cheaper model tier. The tier ladder is semantic and shared
+across harnesses — five grades, each defined by the work it is
+trusted with:
+
+- `FAST_TIER` — deterministic sweeps, trivial lookups and searches,
+  routing, wrapping a deterministic script and reporting its result.
+- `MECHANICAL_TIER` — mechanical, fully specified work: batch edits
+  from an explicit spec, multi-file greps/searches, running test
+  suites and reporting results, formatting sweeps, applying a
+  reviewer's named fixes. No decisions.
+- `IMPLEMENTATION_TIER` — spec-driven implementation: a
+  dispatch-ready spec (target SHA, file-level steps, test plan,
+  acceptance criteria) with no open design decisions.
+- `REVIEW_TIER` — evidence-based review and analysis: reading a diff
+  against a protocol, diagnosing from logs and metrics.
+- `FRONTIER_TIER` — design, architecture, adversarial spec grilling,
+  tricky debugging.
+
+Which model serves each tier is a harness fact, not a shared
+standard: [CLAUDE.md](CLAUDE.md) binds the tiers for interactive
+Claude Code sessions, [GEMINI.md](GEMINI.md) for Gemini/Antigravity
+sessions. Never hardcode vendor model IDs in persona instructions or
+shared specs — personas name a semantic tier; the tier→model mapping
+lives in one central config per harness (`config/model_tiers.yaml`
+once the compiler exists). Adjacent tiers may share one model on a
+given harness; the ladder still holds, because the tier names the
+task contract (what the agent may decide), not just the price.
+Workflow-driven agents without a subagent tool are exempt: they run
+single-loop on the model their workflow pins.
+
+## Cost of execution
+
+The harness never reports what a strategy costs at the moment it is
+chosen; the only feedback channel is the invoice, days later. These
+rules substitute for the missing signal, on every harness. The
+numbers cited were measured in the predecessor repo
+(`agentic-experiments-lab`, docs/COST_LESSONS.md there).
+
+- Before any read-many task (N threads, N files, N logs), ask whether
+  item N needs item N−1's context. If not, fan out to parallel
+  subagents. Reading N items sequentially in one context is O(N²):
+  item 40 re-sends items 1–39 alongside it. Measured: 102 review
+  threads read by 15 subagents cost $121.66 ($0.27/message); the
+  undelegated slice of the same session ran $1.44/message.
+- Spawning subagents is not delegating. If the parent still reads the
+  raw material, the fan-out bought nothing — the parent must receive
+  summaries and never the source.
+- **Looping and polling: match the cadence to the prompt-cache TTL,
+  and pick both together.** An interval longer than the TTL turns
+  every pass into a full cache write with no read to amortize it.
+  The TTLs, knobs, and prices are harness facts — see the harness
+  file. A 15-minute loop on a 5-minute default TTL cost ~$952 of one
+  session's $1,057.
+- Long-lived contexts only grow. Finish a task, start a fresh
+  session. Every tool result is permanent context: dump a 5,000-line
+  file once and it is re-sent on every remaining turn. A high cache
+  hit rate does not fix this — one session ran at 95% and still cost
+  $2,576, because it averaged 441K tokens per message.
+- Rank spend in dollars, never in tokens. Cache writes cost a
+  multiple of base input while reads cost a fraction, so a token
+  ranking and a dollar ranking of the same week name different
+  culprits. Measure with the harness's spend tooling (the harness
+  file names it) and read two numbers: hit rate
+  `read/(read+write+fresh)` for price, and tokens-per-message for
+  volume. Both, always — either one alone hides the other.
