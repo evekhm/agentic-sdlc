@@ -59,8 +59,9 @@ identity, and token NAME only; sub-agents carry no authority and
 cannot spawn sub-agents. Shared protocol text lives once in
 `personas/skills/` (`spec-adversary.md`, `review-protocol.md` —
 which defers to root REVIEW.md — and `trusted-posting.md`) and is
-inlined by the compiler in declared order. Validation is manual
-until the compiler (#5) and CI (#6) enforce it.
+inlined by the compiler in declared order. Every source is validated
+against the schema on every build (`personas.compiler`); running
+that build in CI is #6.
 
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
@@ -74,6 +75,33 @@ per harness, with declared fallback text for optional capabilities a
 harness cannot map. Swapping a vendor is an edit to these files,
 never to a persona source.
 
+### personas.compiler
+`scripts/sync_agents.py` compiles `personas/` + `config/` into every
+harness target (#5, `intent/5-compiler/`): `.claude/agents/<name>.md`
+for Claude Code and `.agents/agents/<name>/{agent.json,config.yaml,
+instructions.md}` for Antigravity, all committed. The build is pure
+and deterministic — no timestamps, no machine state — so the drift
+gate is a plain rebuild-and-diff. Five stages: validate every source
+against `personas/schema.json`; resolve tier→model, persona→harness
+and capability→tools from `config/`; assemble one instruction body
+(role, skills inlined verbatim in declared order, authority and
+bounds, execution caps, a pointer to AGENTS.md, and fallbacks
+GENERATED from `tools.yaml` for optional capabilities the harness
+cannot map — a required one fails the build); emit through one
+emitter per harness; sanitize before write, refusing any output
+carrying a home path, a token shape, an inline credential value, or a
+site-specific string named at run time in `SYNC_AGENTS_DENY` (never
+committed — hard-coding what you are hiding is the leak itself).
+A persona is emitted only for its pinned harness; a sub-agent is
+emitted for every harness, because it inherits its dispatcher's.
+Every emitted file carries a generated-file marker, which is also how
+the build prunes targets no source emits. Modes: default builds,
+`--check` reports drift and exits 1, `--verify` re-parses the emitted
+targets and asserts each carries its resolved model, mapped tools and
+full skill text. Proof: `scripts/ci/compiler_roundtrip.sh` (schema
+check, determinism, drift, roundtrip, a throwaway persona compiled
+end-to-end, sanitizer refusal). Wiring these into CI is #6.
+
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
@@ -86,9 +114,6 @@ spec body when its implementing PR merges.
 
 - **review.policy** — REVIEW.md, protocol v2 port (#3).
 - **lifecycle.labels** — the full label state machine (#4).
-- **personas.compiler** — `scripts/sync_agents.py` emitting
-  `.claude/agents/` and `.agents/agents/` targets deterministically,
-  with roundtrip validation (#5).
 - **ci.gates** — drift check, sanitization scanners, spec check (#6).
 - **identity.bots** — Athena/Daedalus/Cassandra identities (#7).
 - **review.automation** — Argus workflow, Atlas sidecar, consensus
