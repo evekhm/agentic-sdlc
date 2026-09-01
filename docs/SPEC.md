@@ -45,6 +45,28 @@ are live state); `{{slug}}` cross-references resolve to issue
 numbers, and a forward reference fails the run. Filenames define
 dependency order.
 
+### review.policy
+`REVIEW.md` is the review protocol the reviewer personas compile
+against (PR #14). It defines: four severity tiers
+(`security`/`high`/`normal`/`suggestion`) with a closed `high` list
+and a failure-scenario requirement; the three-round funnel (round 1
+full from both reviewers, rounds 2–3 verification with blocking-only
+new findings, security-only past round 3); per-reviewer finding ID
+namespaces (`R<round>-<n>`, `R<issue>-<n>`, `AT-<n>`) stable from
+first appearance; the ledger row fields and the header/trailer
+signature convention; consensus rules (independent round 1, dual
+sign-off on `security` only, evidence arbitrates, verdict format,
+three-exchange dispute cap); consensus keyed to Decision IDs where
+the spec under review has a Decisions table; label derivation from
+ledger state; merge-anytime with one post-merge follow-up issue; and
+the deep-review grant. The two reviewers are deployment-pinned to
+different model families; which family backs which reviewer is a
+`config/` fact and appears nowhere in the policy. The document is
+normative for the ported automation: no recorder, workflow, or
+scheduled sweep exists yet (#8, #9), so every rule is currently
+prompt-enforced with a human backstop, and the label names it uses
+are provisional until the taxonomy in #4 lands.
+
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
@@ -60,7 +82,6 @@ spec body when its implementing PR merges.
 - **config.bindings** — `config/model_tiers.yaml`,
   `deployments.yaml`, `tools.yaml`: tier→model, persona→harness, and
   capability→tool mappings (#2).
-- **review.policy** — REVIEW.md, protocol v2 port (#3).
 - **lifecycle.labels** — the full label state machine (#4).
 - **personas.compiler** — `scripts/sync_agents.py` emitting
   `.claude/agents/` and `.agents/agents/` targets deterministically,
