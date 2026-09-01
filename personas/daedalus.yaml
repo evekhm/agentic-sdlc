@@ -33,8 +33,11 @@ authority:
   paths:
     - "intent/**"
     - "tests/**"
-  identity: "TBD"   # resolved by the bot-identity decision (#7)
-  token: DAEDALUS_BOT_TOKEN
+  identity: "evekhm-daedalus-app[bot]"
+  app_id: 4798773
+  client_id: "Iv23lisVWUKRkKNnqCbE"
+  installation_id: 158352631
+  token: DAEDALUS_APP_PRIVATE_KEY
 
 delegates_to: [explorer, contract-writer]
 

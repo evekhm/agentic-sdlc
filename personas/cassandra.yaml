@@ -31,8 +31,11 @@ capabilities:
 
 authority:
   github_write: "issues"
-  identity: "TBD"   # resolved by the bot-identity decision (#7)
-  token: CASSANDRA_BOT_TOKEN
+  identity: "evekhm-cassandra-app[bot]"
+  app_id: 4798777
+  client_id: "Iv23liQilYGZ13ngaEnU"
+  installation_id: 158352276
+  token: CASSANDRA_APP_PRIVATE_KEY
 
 delegates_to: [scanner, explorer]
 

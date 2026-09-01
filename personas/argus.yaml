@@ -31,8 +31,11 @@ capabilities:
 
 authority:
   github_write: "comments"
-  identity: "evekhm-argus"
-  token: ARGUS_BOT_TOKEN
+  identity: "evekhm-argus-app[bot]"
+  app_id: 4798860
+  client_id: "Iv23liIJK1FwUbkpdwIs"
+  installation_id: 158352416
+  token: ARGUS_APP_PRIVATE_KEY
 
 delegates_to: [explorer]
 
