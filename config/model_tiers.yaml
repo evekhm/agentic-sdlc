@@ -1,0 +1,24 @@
+# Tier -> model bindings, per harness. THE ONLY LAYER (with the other
+# config/ files) where vendor names appear; persona sources never name
+# models (personas/schema.json, D3). Adjacent tiers may share a model:
+# the tier names the task contract, not the price (AGENTS.md).
+# Where a workflow pins a model in an env var, that pin wins over this
+# file until the compiler (#5) starts generating the workflows.
+
+harnesses:
+  claude-code:
+    FAST: haiku                 # alias; enabled on this deployment
+    MECHANICAL: claude-sonnet-5 # exact ID required: the "sonnet" alias
+                                # resolves to sonnet-4.5, NOT enabled here
+    IMPLEMENTATION: claude-sonnet-5
+    REVIEW: opus
+    FRONTIER: opus              # interactive sessions may inherit the
+                                # session model instead (costlier; only
+                                # when frontier reasoning is warranted)
+
+  antigravity:
+    FAST: gemini-3.7-flash-medium   # or -low; `agy models` lists runtime
+    MECHANICAL: gemini-3.7-flash-high
+    IMPLEMENTATION: gemini-3.7-flash-high
+    REVIEW: gemini-3.1-pro-high
+    FRONTIER: gemini-3.1-pro-high

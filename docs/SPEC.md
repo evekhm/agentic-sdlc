@@ -62,6 +62,18 @@ which defers to root REVIEW.md — and `trusted-posting.md`) and is
 inlined by the compiler in declared order. Validation is manual
 until the compiler (#5) and CI (#6) enforce it.
 
+### config.bindings
+`config/` is the only layer where vendor, model, and tool names
+appear (#2, `intent/2-config/`): `model_tiers.yaml` binds the five
+semantic tiers to models per harness (claude-code, antigravity);
+`deployments.yaml` pins each persona to a harness — sub-agents
+inherit their dispatcher's harness — and carries the machine-checked
+constraint that the two reviewers resolve to different model
+families; `tools.yaml` maps abstract capabilities to concrete tools
+per harness, with declared fallback text for optional capabilities a
+harness cannot map. Swapping a vendor is an edit to these files,
+never to a persona source.
+
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
@@ -72,9 +84,6 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **config.bindings** — `config/model_tiers.yaml`,
-  `deployments.yaml`, `tools.yaml`: tier→model, persona→harness, and
-  capability→tool mappings (#2).
 - **review.policy** — REVIEW.md, protocol v2 port (#3).
 - **lifecycle.labels** — the full label state machine (#4).
 - **personas.compiler** — `scripts/sync_agents.py` emitting
