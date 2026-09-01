@@ -127,7 +127,8 @@ authority it holds (enforced by branch protections and path checks,
 not by prompt), the tier it thinks at, and the GitHub identity it
 acts as. Never the model behind it.
 
-**Athena — the product owner** *(Plan + Design · new bot, name TBD)*
+**Athena — the product owner** *(Plan + Design · GitHub App
+`evekhm-athena-app`)*
 Owns the two gates where words become commitments. Brainstorms in the
 intake issue (scope, users, constraints, success), opens the PR
 adding `intent.md`, and after acceptance drafts `spec.md` — then
@@ -137,14 +138,15 @@ recommending; every resolution lands as a numbered row in the
 Decisions table. Authority: comments and PRs touching `intent/` only.
 Tier: FRONTIER.
 
-**Daedalus — the architect** *(Build · new bot, name TBD)*
+**Daedalus — the architect** *(Build · GitHub App
+`evekhm-daedalus-app`)*
 Converts an approved spec into a micro-stepped `plan.md`: the files
 that change, the order of work, the tests that prove it — committed
 before any code exists. Reads code freely, never writes it.
 Authority: PRs touching plan files only. Tier: FRONTIER.
 
-**Odyssey — the implementer** *(Implement · `evekhm-odyssey-bot`,
-carry-over)*
+**Odyssey — the implementer** *(Implement · GitHub App
+`evekhm-odyssey-app`, carry-over identity, now App-backed)*
 Dispatched at a pinned SHA (`{repo, sha, branch, issue}`), works TDD
 against the contract tests, and ships one PR carrying three things:
 the diff, the `plan.md` sync (any deviation updates the plan in the
@@ -152,8 +154,9 @@ same commit), and the `docs/SPEC.md` upsert. Authority: writes only
 `odyssey/*` branches, never the default branch. Tier:
 IMPLEMENTATION, escalating to FRONTIER when debugging demands it.
 
-**Argus and Atlas — the two reviewers** *(Review · `evekhm-argus`
-and `evekhm-atlas-bot`, carry-overs)*
+**Argus and Atlas — the two reviewers** *(Review · GitHub Apps
+`evekhm-argus-app` and `evekhm-atlas-app`, carry-over identities, now
+App-backed)*
 Two independent voices running the same protocol v2 — severity
 tiers, per-finding IDs, consensus keyed to Decision IDs — with all
 GitHub writes through trusted posting steps. Argus is event-driven;
@@ -162,7 +165,8 @@ value is disagreement resolved by evidence, which is why deployment
 pins them to different model families. Authority: comment-only, for
 both. Tier: REVIEW.
 
-**Cassandra — the maintainer** *(Maintain · new bot, name TBD)*
+**Cassandra — the maintainer** *(Maintain · GitHub App
+`evekhm-cassandra-app`)*
 Deterministic watchers compare live metrics to control bands; she
 responds in proportion: log at 1σ, diagnose read-only at 2σ, propose
 at 3σ — and a proposal is a new issue labeled `intent:new`, which is
@@ -244,8 +248,13 @@ Carry-overs are proven in the predecessor repo.
    adapters (already seeded).
 5. **Identity/auth separation:** credentials never in persona
    sources; env wrappers on Claude Code, token files +
-   `inherit_user: false` on Antigravity; deploy-key or bot-PAT per
-   identity.
+   `inherit_user: false` on Antigravity. Each of the six personas is
+   its own GitHub App (`evekhm-<name>-app[bot]`); no static PATs. A
+   session mints a ~1-hour installation token on demand
+   (`scripts/auth/mint_app_token.py <persona>`) from the App's
+   private key — the only secret, held in an Actions secret or a
+   local `~/.keys/*.private-key.pem` file, never a long-lived token
+   committed or stored as a login credential.
 6. **Gates in CI:** drift check (hand-edited compiled files fail the
    build), secret/path sanitization of everything compiled
    (deterministic scanner scripts in CI, not invoke-me-maybe skills —
@@ -350,10 +359,17 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
 
 ## Open questions
 
-1. **New bot identities** (Athena, Daedalus, Cassandra): PAT-backed
-   bot users like the existing three, or GitHub Apps with short-lived
-   installation tokens (ARGUS_SETUP.md appendix path)? And exact
-   account names.
+1. ~~**New bot identities**~~ — RESOLVED (#7): all six personas are
+   GitHub Apps with short-lived installation tokens (no PAT-backed
+   bot users), one App per persona so each keeps a distinct identity;
+   the existing three carry-overs (Odyssey, Argus, Atlas) migrate off
+   their PAT accounts onto Apps named `evekhm-<name>-app` — every App
+   uses an `-app` suffix (not `-bot`) since the pre-existing PAT
+   accounts held the bare `-bot`/plain names at registration time and
+   App slugs share the username namespace. Names, per-persona
+   permissions, and webhook events are recorded on issue #7; the
+   `personas/*.yaml` authority blocks and `scripts/auth/mint_app_token.py`
+   carry the mechanism.
 2. **Hosting**: which org/repo for the shared demo; is the take-home
    template the same repo or a sanitized twin?
 3. **Runtime placement**: Athena/Daedalus as label-triggered Actions
