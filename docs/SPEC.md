@@ -55,7 +55,9 @@ Sources conform to `personas/schema.json` (JSON Schema 2020-12):
 `tier` takes only the five semantic grades; tooling is abstract
 `capabilities`; `authority` declares the GitHub write ladder
 (`none` < `comments` < `issues` < `branch:<glob>`), path allowlist,
-identity, and token NAME only; sub-agents carry no authority and
+identity, GitHub App `app_id`/`installation_id` (public, once
+registered), and token NAME only — never a credential value;
+sub-agents carry no authority and
 cannot spawn sub-agents. Shared protocol text lives once in
 `personas/skills/` (`spec-adversary.md`, `review-protocol.md` —
 which defers to root REVIEW.md — and `trusted-posting.md`) and is
@@ -90,7 +92,10 @@ spec body when its implementing PR merges.
   `.claude/agents/` and `.agents/agents/` targets deterministically,
   with roundtrip validation (#5).
 - **ci.gates** — drift check, sanitization scanners, spec check (#6).
-- **identity.bots** — Athena/Daedalus/Cassandra identities (#7).
+- **identity.bots** — one GitHub App per persona for all six
+  (Athena, Daedalus, Cassandra new; Odyssey, Argus, Atlas migrated
+  off their PAT bot accounts), short-lived installation tokens minted
+  by `scripts/auth/mint_app_token.py` (#7).
 - **review.automation** — Argus workflow, Atlas sidecar, consensus
   (#8, #9).
 - **intake.automation** — headless Athena on `intent:new` (#10).
