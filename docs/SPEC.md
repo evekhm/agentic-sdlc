@@ -45,6 +45,23 @@ are live state); `{{slug}}` cross-references resolve to issue
 numbers, and a forward reference fails the run. Filenames define
 dependency order.
 
+### personas.sources
+Every actor is defined once, canonically and vendor-agnostically, in
+`personas/<name>.yaml` (#1, `intent/1-personas/`): six personas
+(athena, daedalus, odyssey, argus, atlas, cassandra) and five
+sub-agents (mechanic, coder, contract-writer, scanner, explorer).
+Sources conform to `personas/schema.json` (JSON Schema 2020-12):
+`kind` splits GitHub-identity personas from compiled sub-agents;
+`tier` takes only the five semantic grades; tooling is abstract
+`capabilities`; `authority` declares the GitHub write ladder
+(`none` < `comments` < `issues` < `branch:<glob>`), path allowlist,
+identity, and token NAME only; sub-agents carry no authority and
+cannot spawn sub-agents. Shared protocol text lives once in
+`personas/skills/` (`spec-adversary.md`, `review-protocol.md` —
+which defers to root REVIEW.md — and `trusted-posting.md`) and is
+inlined by the compiler in declared order. Validation is manual
+until the compiler (#5) and CI (#6) enforce it.
+
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
@@ -55,8 +72,6 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **personas.sources** — persona schema, six persona sources, five
-  sub-agent sources in `personas/`, vendor-agnostic (#1).
 - **config.bindings** — `config/model_tiers.yaml`,
   `deployments.yaml`, `tools.yaml`: tier→model, persona→harness, and
   capability→tool mappings (#2).
