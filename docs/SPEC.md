@@ -8,12 +8,18 @@ version cite their PR inline.
 
 ## Deployment status
 
-Bootstrap phase (Rung 0–1 of the pinned tracker, issue #12). CI
-enforcement of this spec (spec check, drift, sanitization — #6) does
-not exist yet: every rule below is convention-enforced. During
-Rung 0, commits landed on `main` directly; this seed entry records
-that state. From this file's first commit forward, behavior-bearing
-changes go through PRs per the tracker workflow in AGENTS.md.
+Bootstrap phase (Rung 0–2 of the pinned tracker, issue #12). CI
+enforcement of this spec arrives with `ci.gates` below (#6): from the
+merge of that PR, the drift, sanitization and spec checks run on every
+pull request, so the living-spec rule and the generated-target rule
+are machine-enforced rather than convention-enforced. Making the three
+checks *required* to merge is a branch-protection setting a human
+applies to `main`; until it is applied, a red check is visible but not
+blocking. Every other rule in this file remains convention-enforced.
+During Rung 0, commits landed on `main` directly; this seed entry
+records that state. From this file's first commit forward,
+behavior-bearing changes go through PRs per the tracker workflow in
+AGENTS.md.
 
 ## Capabilities
 
@@ -60,8 +66,8 @@ cannot spawn sub-agents. Shared protocol text lives once in
 `personas/skills/` (`spec-adversary.md`, `review-protocol.md` —
 which defers to root REVIEW.md — and `trusted-posting.md`) and is
 inlined by the compiler in declared order. Every source is validated
-against the schema on every build (`personas.compiler`); running
-that build in CI is #6.
+against the schema on every build (`personas.compiler`); the drift
+gate runs that build on every pull request (`ci.gates`).
 
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
@@ -100,7 +106,35 @@ the build prunes targets no source emits. Modes: default builds,
 targets and asserts each carries its resolved model, mapped tools and
 full skill text. Proof: `scripts/ci/compiler_roundtrip.sh` (schema
 check, determinism, drift, roundtrip, a throwaway persona compiled
-end-to-end, sanitizer refusal). Wiring these into CI is #6.
+end-to-end, sanitizer refusal). Both run on every pull request as the
+drift gate (`ci.gates`).
+
+### ci.gates
+`.github/workflows/ci-gates.yml` runs three deterministic gates on
+every pull request — and the first two also on pushes to `main` — as
+three independent jobs, so one push returns all three verdicts (#6,
+`intent/6-ci-gates/`). **Drift:** `python3 scripts/sync_agents.py
+--check` plus `scripts/ci/compiler_roundtrip.sh`; a hand-edited or
+stale compiled target under `.claude/agents/` or `.agents/` fails.
+**Sanitization:** `scripts/ci/sanitize_check.sh` scans every tracked
+file for absolute home-directory paths and home-variable references,
+credential shapes (GitHub token and fine-grained PAT, AWS access key
+id, `sk-` key, Slack token, private-key block) and, inside
+`personas/**` only, vendor/model/family names — which is how the
+vendor-agnostic rule for persona sources is enforced. All-caps secret
+NAMES stay allowed. The matched text is never printed, only
+`path:line: <label>`; exemptions live in
+`scripts/ci/sanitize_allowlist.txt`, each scoped to one rule and one
+exact path with its reason inline. **Spec check:**
+`scripts/ci/spec_check.sh` fails a PR that touches behavior-bearing
+paths (`scripts/**`, `personas/**`, `config/**`,
+`.github/workflows/**`, `AGENTS.md`, `REVIEW.md` — compiled targets
+excluded, the drift gate owns those) unless the same diff touches this
+file or the PR body carries `Spec-impact: none — <reason>`; it checks
+that the choice was made, never whether the entry or the reason is
+good. All three are scripts runnable locally by the same command CI
+runs; the workflow needs no secrets and grants only
+`contents: read`.
 
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
@@ -114,7 +148,6 @@ spec body when its implementing PR merges.
 
 - **review.policy** — REVIEW.md, protocol v2 port (#3).
 - **lifecycle.labels** — the full label state machine (#4).
-- **ci.gates** — drift check, sanitization scanners, spec check (#6).
 - **identity.bots** — Athena/Daedalus/Cassandra identities (#7).
 - **review.automation** — Argus workflow, Atlas sidecar, consensus
   (#8, #9).

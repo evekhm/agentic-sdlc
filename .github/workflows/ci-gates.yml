@@ -1,0 +1,131 @@
+# The three CI gates (#6, intent/6-ci-gates/). Everything AGENTS.md
+# asks of a contributor that a machine can check, checked by a machine:
+#
+#   drift      personas/ + config/ recompile to exactly the committed
+#              targets — a hand-edited compiled file cannot merge
+#   sanitize   no home paths, no credential shapes, no vendor names in
+#              personas/ — deterministic, tree-wide, every run
+#   spec-check a PR touching behavior-bearing paths updates
+#              docs/SPEC.md or declares `Spec-impact: none — <reason>`
+#
+# All three are deterministic scripts, runnable locally by the same
+# command CI runs. No model tokens, no vendor API calls, no secrets:
+# `permissions: contents: read` is the whole grant, so this workflow is
+# safe to run on a fork PR. The jobs are independent and run in
+# parallel — a PR sees all three verdicts on one push, not the first
+# failure only.
+#
+# `edited` is in the trigger list so adding the Spec-impact marker to a
+# PR body re-runs the check without a push. The PR body reaches the
+# script through a file, never through `${{ }}` interpolated into a run
+# script — that is code injection.
+
+name: CI gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: drift — compiled targets match their sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install compiler dependencies
+        # The compiler's whole dependency budget (#5, D10).
+        run: python3 -m pip install --disable-pip-version-check pyyaml jsonschema
+
+      - name: Rebuild and diff against the committed targets
+        run: python3 scripts/sync_agents.py --check
+
+      - name: Compiler roundtrip
+        # Schema check, determinism, drift, re-parse of every emitted
+        # target, a throwaway persona compiled end-to-end, and two
+        # sanitizer refusals. Nothing here touches the working tree.
+        run: bash scripts/ci/compiler_roundtrip.sh
+
+  sanitize:
+    name: sanitize — no leaked paths, credentials or vendor names
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Scan every tracked file
+        run: bash scripts/ci/sanitize_check.sh
+
+  spec-check:
+    name: spec-check — docs/SPEC.md obligation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # There is no PR body to read on a push to main; the obligation is
+    # checked where it can be satisfied, on the pull request.
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure the base and head commits are present
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for sha in "${BASE_SHA:-}" "${HEAD_SHA:-}"; do
+            if [ -z "$sha" ]; then
+              echo "::error::spec-check: the event payload carries no base/head SHA"
+              exit 1
+            fi
+            # fetch-depth 0 on the merge ref normally brings both; a
+            # fork head that origin does not have is the case this
+            # guard exists for. Never fetch what is already here.
+            if git cat-file -e "${sha}^{commit}"; then
+              echo "present: $sha"
+            elif git fetch --no-tags origin "$sha"; then
+              echo "fetched: $sha"
+            else
+              echo "::error::spec-check: commit $sha is neither local nor fetchable; the diff cannot be computed"
+              exit 1
+            fi
+          done
+
+      - name: Enforce the living-spec obligation
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # An empty body is valid input; a missing file is not, so the
+          # file is always written before the script runs.
+          body_file="$(mktemp)"
+          printf '%s' "${PR_BODY:-}" > "$body_file"
+          # Diff against the merge base, not the base branch tip: an
+          # advancing base must not hand this PR another PR's files.
+          if ! merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"; then
+            echo "::error::spec-check: no merge base for $BASE_SHA and $HEAD_SHA"
+            exit 1
+          fi
+          BASE_SHA="$merge_base" PR_BODY_FILE="$body_file" \
+            bash scripts/ci/spec_check.sh
