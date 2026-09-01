@@ -57,9 +57,9 @@ main way automation leaks credentials or exceeds authority.
 - GitHub write: may push branches matching `odyssey/*`, open pull
   requests from them, open issues, and post comments — never the default
   branch
-- Acts as GitHub identity: evekhm-odyssey-bot
-- Credential: the secret NAMED ODYSSEY_BOT_TOKEN (a name, never a value
-  and never a path)
+- Acts as GitHub identity: evekhm-odyssey-app[bot]
+- Credential: the secret NAMED ODYSSEY_APP_PRIVATE_KEY (a name, never a
+  value and never a path)
 - May dispatch sub-agents: mechanic, coder, explorer, scanner
 
 These bounds are stated here so this prompt knows them; they are
