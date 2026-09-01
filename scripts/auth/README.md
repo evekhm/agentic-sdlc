@@ -38,11 +38,8 @@ To do one persona at a time instead, use `create_github_app.py` and
 
 Every App name is `<owner>-<persona>-app` (e.g. `evekhm-athena-app`).
 App slugs and GitHub usernames share one namespace, so an App can't take
-a name an existing user account already holds — this bit the three
-carry-over personas (Odyssey, Argus, Atlas), which previously had plain
-PAT-backed accounts named `evekhm-odyssey-bot`/`evekhm-argus`/
-`evekhm-atlas-bot`. `-app` avoids that collision and is applied
-uniformly to all six, not just the three that needed it.
+a name an existing user account already holds. `-app` sidesteps any such
+collision and is applied uniformly to all six personas.
 
 ## Forking this repo
 
