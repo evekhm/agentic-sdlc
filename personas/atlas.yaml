@@ -31,8 +31,11 @@ capabilities:
 
 authority:
   github_write: "comments"
-  identity: "evekhm-atlas-bot"
-  token: ATLAS_BOT_TOKEN
+  identity: "evekhm-atlas-app[bot]"
+  app_id: 4798864
+  client_id: "Iv23liI88isA3rBA4aBw"
+  installation_id: 158352498
+  token: ATLAS_APP_PRIVATE_KEY
 
 delegates_to: [explorer]
 

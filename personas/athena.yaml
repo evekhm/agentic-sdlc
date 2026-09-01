@@ -36,8 +36,11 @@ authority:
   github_write: "branch:athena/*"
   paths:
     - "intent/**"
-  identity: "TBD"   # resolved by the bot-identity decision (#7)
-  token: ATHENA_BOT_TOKEN
+  identity: "evekhm-athena-app[bot]"
+  app_id: 4798768
+  client_id: "Iv23liRMIMwftlrG6dq0"
+  installation_id: 158352210
+  token: ATHENA_APP_PRIVATE_KEY
 
 delegates_to: [explorer, scanner]
 
