@@ -16,5 +16,5 @@ compiled.
 **Done when:** decision recorded here, accounts exist with tokens
 stored per the rule, INTENT.md open question 1 closed by PR.
 
-**Depends on:** nothing — claimable any time; blocks Rung 3's
-{{athena-headless}} and Rung 4.
+**Depends on:** nothing — claimable any time; blocks Rung 3's Athena
+intake automation and Rung 4 (Cassandra).
