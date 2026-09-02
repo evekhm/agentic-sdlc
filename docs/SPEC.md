@@ -71,6 +71,28 @@ inlined by the compiler in declared order. Every source is validated
 against the schema on every build (`personas.compiler`); the drift
 gate runs that build on every pull request (`ci.gates`).
 
+### identity.bots
+Each of the six personas (athena, daedalus, cassandra, odyssey,
+argus, atlas) is its own GitHub App — no shared App, no PAT-backed
+bot users (#7; migrates the three carry-overs, odyssey/argus/atlas,
+off their prior PAT accounts). Names are uniformly
+`<owner>-<persona>-app`: App slugs and GitHub usernames share one
+namespace, so `-app` avoids colliding with an existing account.
+`personas/<name>.yaml`'s `authority` block carries the public
+identifiers (`identity`, `app_id`, `client_id`, `installation_id`);
+the private key never lives in the repo or a persona source.
+`scripts/auth/create_all_apps.py` registers all six through GitHub's
+Manifest flow, skipping any persona that already has an `app_id`;
+`scripts/auth/mint_app_token.py <persona>` signs a JWT with the
+persona's private key and exchanges it for a ~1-hour installation
+token, usable directly as `GH_TOKEN`. The private key is the only
+secret — an Actions secret or a local
+`~/.keys/<slug>.<date>.private-key.pem` file. Nothing is hardcoded to
+one owner: `_github_app.py:get_repo_info()` derives `(owner, repo)`
+from the checkout's `origin` remote, so forking the repo and
+re-running `create_all_apps.py` registers independently-named Apps
+with no script edits.
+
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
 appear (#2, `intent/2-config/`): `model_tiers.yaml` binds the five
@@ -193,8 +215,10 @@ different model families; which family backs which reviewer is a
 `config/` fact and appears nowhere in the policy. The document is
 normative for the ported automation: no recorder, workflow, or
 scheduled sweep exists yet (#8, #9), so every rule is currently
-prompt-enforced with a human backstop, and the label names it uses
-are provisional until the taxonomy in #4 lands.
+prompt-enforced with a human backstop; the label names it references
+(findings/suggestions/escalation) now resolve to the concrete
+taxonomy landed in `lifecycle.labels` (#4) — `status:review-stuck` is
+the escalation label.
 
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
@@ -206,10 +230,6 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **identity.bots** — one GitHub App per persona for all six
-  (Athena, Daedalus, Cassandra new; Odyssey, Argus, Atlas migrated
-  off their PAT bot accounts), short-lived installation tokens minted
-  by `scripts/auth/mint_app_token.py` (#7).
 - **review.automation** — Argus workflow, Atlas sidecar, consensus
   (#8, #9).
 - **intake.automation** — headless Athena on `intent:new` (#10).

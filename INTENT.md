@@ -389,9 +389,20 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
    of local/github-actions/vm/agent-platform/cloud-run) and Cassandra's
    watcher cadence and seeded-incident mechanism — decided when each
    issue is picked up, not now.
-4. **Label taxonomy**: adopt agent-farm's `status:*` state machine
-   names verbatim or align with the predecessor's `argus:*` /
-   `review:*` labels? One taxonomy must win before workflows exist.
+4. ~~**Label taxonomy**~~ — RESOLVED (#4): a merged taxonomy, not a
+   verbatim adoption of either candidate. Five labels are
+   human-facing (`intent:new`, `in-progress`, `hold`, `blocked`,
+   `bootstrap`) plus a single `status:*` stage ladder
+   (`status:planning` → `status:spec` → `status:build` →
+   `status:implementing` → `status:in-review`, agent-farm-style, at
+   most one set at a time) and the predecessor's
+   `review:1`/`review:2`/`review:3` round counters, escalating to
+   `status:review-stuck`. Provisioned idempotently by
+   `scripts/setup/bootstrap_tracker.sh`;
+   `.github/workflows/lifecycle.yml` mirrors intent/spec/plan merges
+   into the ladder deterministically, no model call. Full taxonomy
+   and mechanism recorded on #4; `docs/SPEC.md`'s `lifecycle.labels`
+   entry and `AGENTS.md`'s tracker-workflow section carry it.
 5. **Dispatched implementer transport**: predecessor's
    watcher-daemon Odyssey (mention-summoned, headless CLI dispatch)
    vs the lab's Agent-Runtime dispatch at pinned SHA — or show both
