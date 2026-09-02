@@ -1,0 +1,20 @@
+# Persona -> harness pins. Deployment facts live HERE, never in
+# persona sources: swapping a harness or model family is an edit to
+# this file, not to any persona. Sub-agents carry no pin — they run
+# inside their dispatching persona's harness and resolve tiers through
+# that harness's column in model_tiers.yaml.
+
+personas:
+  athena:    { harness: claude-code }
+  daedalus:  { harness: antigravity }
+  odyssey:   { harness: claude-code }
+  argus:     { harness: claude-code }
+  atlas:     { harness: antigravity }
+  cassandra: { harness: claude-code }
+
+constraints:
+  # The two reviewers must resolve to DIFFERENT model families
+  # (INTENT.md non-negotiable). Checked by CI (#6) against
+  # model_tiers.yaml at the reviewers' tier; a violating pin fails
+  # the build.
+  distinct_model_families: [argus, atlas]

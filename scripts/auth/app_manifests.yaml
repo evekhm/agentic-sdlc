@@ -1,0 +1,92 @@
+# Reviewable source data for GitHub App registration (issue #7 decision).
+# Consumed by create_github_app.py. Editing a persona here only affects
+# Apps created AFTER the edit — it does not retroactively change an
+# already-registered App (change that on github.com instead).
+#
+# slug_suffix is combined with the repo owner from `git remote` at
+# creation time (e.g. owner "evekhm" + "athena-app" -> App name
+# "evekhm-athena-app"), so a fork automatically gets its own
+# non-colliding App names without editing this file.
+#
+# Every slug_suffix ends in "-app", not "-bot": App slugs and GitHub
+# usernames share one namespace, so "-app" keeps every persona's App
+# name distinct from any plain user account of the bare persona name
+# (e.g. a legacy PAT bot account) that exists now or gets created later.
+#
+# Permission values follow the GitHub App manifest schema: "read",
+# "write", or the key omitted entirely for no access. `metadata: read`
+# is mandatory on every App.
+
+athena:
+  slug_suffix: athena-app
+  description: >-
+    Product owner persona for agentic-sdlc. Brainstorms scope in intake
+    issues, drafts intent.md and spec.md, then adversarially grills her
+    own spec draft until every ambiguity resolves into a Decision ID.
+    Authority: comments and PRs touching intent/ only.
+  default_permissions:
+    contents: write
+    pull_requests: write
+    issues: write
+    metadata: read
+
+daedalus:
+  slug_suffix: daedalus-app
+  description: >-
+    Architect persona for agentic-sdlc. Converts an approved spec into
+    a micro-stepped plan.md before any code exists. Reads code freely,
+    never writes it. Authority: PRs touching plan files only.
+  default_permissions:
+    contents: write
+    pull_requests: write
+    issues: read
+    metadata: read
+
+cassandra:
+  slug_suffix: cassandra-app
+  description: >-
+    Maintainer/watcher persona for agentic-sdlc. Compares live metrics
+    to control bands: logs at 1-sigma, diagnoses read-only at 2-sigma,
+    proposes a fix as a new intent:new issue at 3-sigma. Authority:
+    comments and issues only.
+  default_permissions:
+    issues: write
+    contents: read
+    metadata: read
+
+odyssey:
+  slug_suffix: odyssey-app
+  description: >-
+    Implementer persona for agentic-sdlc. Dispatched at a pinned SHA,
+    works TDD against contract tests, ships one PR carrying the diff,
+    the plan.md sync, and the docs/SPEC.md upsert. Never touches the
+    default branch.
+  default_permissions:
+    contents: write
+    pull_requests: write
+    issues: write
+    metadata: read
+
+argus:
+  slug_suffix: argus-app
+  description: >-
+    Reviewer persona for agentic-sdlc. One of two independent voices
+    running review protocol v2 — severity tiers, per-finding IDs,
+    consensus keyed to Decision IDs. Comment-only.
+  default_permissions:
+    pull_requests: write
+    issues: read
+    contents: read
+    metadata: read
+
+atlas:
+  slug_suffix: atlas-app
+  description: >-
+    Reviewer persona for agentic-sdlc — the second independent voice,
+    deployment-pinned to a different model family than Argus, making
+    consensus meaningful. Comment-only, same protocol as Argus.
+  default_permissions:
+    pull_requests: write
+    issues: read
+    contents: read
+    metadata: read
