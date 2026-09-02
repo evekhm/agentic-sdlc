@@ -200,11 +200,14 @@ PR here (agent or human), regardless of harness:
 - A PR that touches behavior-bearing paths without changing behavior
   (refactor, comments, test-only) declares that in the PR body with
   the machine marker line `Spec-impact: none — <reason>`.
-- CI enforcement (a spec check failing the PR unless the diff touches
-  docs/SPEC.md or the body carries the marker) is to be ported from
-  the predecessor repo (`agentic-experiments-lab`:
-  `scripts/ci/spec_check.sh` + `.github/workflows/spec-check.yml`);
-  until then the rule is prompt-enforced.
+- CI enforces this: `scripts/ci/spec_check.sh`, run by the
+  `spec-check` job in `.github/workflows/ci-gates.yml`, fails a PR
+  that touches behavior-bearing paths unless the diff touches
+  docs/SPEC.md or the body carries the marker. Run it before you push
+  — `bash scripts/ci/spec_check.sh <base-ref>` — rather than
+  discovering it as a red X. The check verifies that the choice was
+  made; whether the entry or the reason is *good* stays with the
+  reviewers.
 - Spec entries are claims and are reviewed like claims: reviewers
   verify each added or changed statement against the diff that ships
   it, and flag spec statements the diff does not support.

@@ -1,0 +1,17 @@
+# Exemptions for scripts/ci/sanitize_check.sh.
+#
+# One `<rule> <path>  # reason` per line. An entry scopes to exactly
+# one rule (home, secret, vendor) and exactly one path — never a
+# directory, never all rules at once — so an exemption written for a
+# checker cannot silently cover the next file added beside it.
+#
+# Every line here is a claim reviewers verify like any other: the file
+# named must be one that DISCUSSES or IMPLEMENTS the pattern, not one
+# that leaks it.
+
+home scripts/ci/sanitize_check.sh          # the gate's own patterns and its help text
+home scripts/sync_agents.py                # the compiler's emit-time sanitizer patterns (#5, D8)
+home scripts/ops/session_spend.sh          # refuses to scan the home directory; the variable IS the mechanism
+home scripts/ops/tests/session_spend_test.sh  # exercises that refusal in every spelling
+home intent/5-compiler/spec.md             # D8 states the rule the compiler enforces
+home intent/6-ci-gates/spec.md             # D3 states the rule this gate enforces
