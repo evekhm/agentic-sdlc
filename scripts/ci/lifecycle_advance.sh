@@ -119,6 +119,10 @@ rank_of() { # stage -> rank; plan is furthest along the lifecycle
     esac
 }
 
+# Plain counter: `${#BEST_STAGE[@]}` on a never-assigned associative
+# array trips `set -u`'s unbound-variable check on an empty push, so
+# count issues explicitly instead.
+n_crossings=0
 while IFS=$'\t' read -r _status path; do
     [ -n "${path:-}" ] || continue
     [[ "$path" =~ ^intent/([0-9]+)-[^/]+/(intent|spec|plan)\.md$ ]] || continue
@@ -126,6 +130,7 @@ while IFS=$'\t' read -r _status path; do
     issue="$((10#${BASH_REMATCH[1]}))"
     stage="${BASH_REMATCH[2]}"
     rank="$(rank_of "$stage")"
+    [ -n "${ALL_FILES[$issue]:-}" ] || n_crossings=$((n_crossings + 1))
     ALL_FILES[$issue]="${ALL_FILES[$issue]:-}${ALL_FILES[$issue]:+ }${stage}.md"
     if [ "$rank" -gt "${BEST_RANK[$issue]:-0}" ]; then
         BEST_RANK[$issue]="$rank"
@@ -134,12 +139,12 @@ while IFS=$'\t' read -r _status path; do
     fi
 done <<<"$added"
 
-if [ "${#BEST_STAGE[@]}" -eq 0 ]; then
+if [ "$n_crossings" -eq 0 ]; then
     log "==> no intent/<issue>-<slug>/{intent,spec,plan}.md added in $BEFORE..$AFTER — nothing to advance"
     exit 0
 fi
 
-log "==> $GITHUB_REPO · range ${BEFORE:0:12}..${AFTER:0:12} · ${#BEST_STAGE[@]} issue(s) with a gate crossing"
+log "==> $GITHUB_REPO · range ${BEFORE:0:12}..${AFTER:0:12} · $n_crossings issue(s) with a gate crossing"
 if [ "$DRY_RUN" = "1" ]; then
     log "==> DRY_RUN=1 — no write will be executed"
 fi
