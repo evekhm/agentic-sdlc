@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/evekhm/agentic-sdlc/personas/schema.json",
+  "title": "Canonical persona / sub-agent source",
+  "description": "Vendor-agnostic actor definition (intent/1-personas/spec.md, D1-D9). No model IDs, harness names, or tool names appear here or in any conforming source; tiers are semantic and capabilities abstract. CI additionally greps personas/** for vendor leakage (D3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "kind", "tier", "role", "capabilities"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z-]*$",
+      "description": "Actor name; must equal the source filename minus .yaml."
+    },
+    "kind": {
+      "enum": ["persona", "subagent"],
+      "description": "persona = GitHub-identity actor owning lifecycle stages; subagent = compiled worker with no identity (D2)."
+    },
+    "stage": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "enum": ["intake", "plan", "design", "build", "implement", "review", "deploy", "maintain"]
+      },
+      "description": "Lifecycle stages the persona owns. Personas only; sub-agents serve any stage through their parent."
+    },
+    "tier": { "$ref": "#/$defs/tier" },
+    "escalation_tier": {
+      "$ref": "#/$defs/tier",
+      "description": "Optional higher grade the actor may escalate to (e.g. implementation work hitting a debugging wall)."
+    },
+    "role": {
+      "type": "string",
+      "minLength": 80,
+      "description": "The behavioral contract: what the actor does, what it refuses to do, and how it hands control back."
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z-]*\\.md$" },
+      "description": "Filenames in personas/skills/, inlined by the compiler in declared order (D5)."
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z_]*$",
+            "description": "Abstract capability; mapped to concrete tools per harness in config/tools.yaml (D4)."
+          },
+          "required": {
+            "type": "boolean",
+            "default": true,
+            "description": "true: a harness that cannot map it fails compilation. false: the compiler emits a generated fallback instruction instead (D4)."
+          }
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["github_write", "identity", "token"],
+      "description": "Declared here so compiled prompts state their bounds; ENFORCED mechanically by branch protection, merge-gate path checks, and token scopes — never by prompt (D6).",
+      "properties": {
+        "github_write": {
+          "type": "string",
+          "pattern": "^(none|comments|issues|branch:.+)$",
+          "description": "Write ladder, each grade including the ones below: none < comments < issues (issues + comments) < branch:<glob> (push matching branches + PRs + issues + comments). Never the default branch."
+        },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Repo path globs the actor's PRs may touch; checked at the merge gate."
+        },
+        "identity": {
+          "type": "string",
+          "description": "GitHub App bot login the actor acts as, e.g. 'evekhm-athena-app[bot]', or 'TBD' until the identity decision (#7) resolves it."
+        },
+        "app_id": {
+          "type": "integer",
+          "description": "GitHub App ID (public — visible on the App's settings page, safe to commit). Legacy JWT issuer; prefer client_id (GitHub's current recommendation). Omitted until the App is registered (#7)."
+        },
+        "client_id": {
+          "type": "string",
+          "pattern": "^Iv[0-9A-Za-z]+$",
+          "description": "GitHub App's Client ID (public, safe to commit) — the JWT `iss` claim GitHub now recommends over the legacy numeric app_id. Omitted until the App is registered (#7)."
+        },
+        "installation_id": {
+          "type": "integer",
+          "description": "Installation ID of the App on this repo (public, safe to commit). Omitted until the App is installed (#7)."
+        },
+        "token": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "Secret NAME (Actions secret / env var, or looked up under ~/.keys/ locally per scripts/auth/_github_app.py) holding the App's private key. Never a value, never a path (D6)."
+        }
+      }
+    },
+    "delegates_to": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z-]*$" },
+      "description": "Sub-agent names this persona may dispatch. Personas only; sub-agents never spawn sub-agents (D7)."
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_turns", "timeout_mins"],
+      "properties": {
+        "max_turns": { "type": "integer", "minimum": 1 },
+        "timeout_mins": { "type": "integer", "minimum": 1 }
+      },
+      "description": "Execution caps. Required for personas (D9); optional for sub-agents (harness defaults apply)."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "persona" } } },
+      "then": { "required": ["stage", "authority", "limits"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "subagent" } } },
+      "then": {
+        "properties": {
+          "stage": false,
+          "authority": false,
+          "delegates_to": false
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "tier": {
+      "enum": ["FAST", "MECHANICAL", "IMPLEMENTATION", "REVIEW", "FRONTIER"],
+      "description": "The five-grade semantic ladder from AGENTS.md; bound to models per harness in config/model_tiers.yaml, never here (D3)."
+    }
+  }
+}

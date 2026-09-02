@@ -45,6 +45,37 @@ are live state); `{{slug}}` cross-references resolve to issue
 numbers, and a forward reference fails the run. Filenames define
 dependency order.
 
+### personas.sources
+Every actor is defined once, canonically and vendor-agnostically, in
+`personas/<name>.yaml` (#1, `intent/1-personas/`): six personas
+(athena, daedalus, odyssey, argus, atlas, cassandra) and five
+sub-agents (mechanic, coder, contract-writer, scanner, explorer).
+Sources conform to `personas/schema.json` (JSON Schema 2020-12):
+`kind` splits GitHub-identity personas from compiled sub-agents;
+`tier` takes only the five semantic grades; tooling is abstract
+`capabilities`; `authority` declares the GitHub write ladder
+(`none` < `comments` < `issues` < `branch:<glob>`), path allowlist,
+identity, GitHub App `app_id`/`installation_id` (public, once
+registered), and token NAME only — never a credential value;
+sub-agents carry no authority and
+cannot spawn sub-agents. Shared protocol text lives once in
+`personas/skills/` (`spec-adversary.md`, `review-protocol.md` —
+which defers to root REVIEW.md — and `trusted-posting.md`) and is
+inlined by the compiler in declared order. Validation is manual
+until the compiler (#5) and CI (#6) enforce it.
+
+### config.bindings
+`config/` is the only layer where vendor, model, and tool names
+appear (#2, `intent/2-config/`): `model_tiers.yaml` binds the five
+semantic tiers to models per harness (claude-code, antigravity);
+`deployments.yaml` pins each persona to a harness — sub-agents
+inherit their dispatcher's harness — and carries the machine-checked
+constraint that the two reviewers resolve to different model
+families; `tools.yaml` maps abstract capabilities to concrete tools
+per harness, with declared fallback text for optional capabilities a
+harness cannot map. Swapping a vendor is an edit to these files,
+never to a persona source.
+
 ### review.policy
 `REVIEW.md` is the review protocol the reviewer personas compile
 against (PR #14). It defines: four severity tiers
@@ -77,17 +108,15 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **personas.sources** — persona schema, six persona sources, five
-  sub-agent sources in `personas/`, vendor-agnostic (#1).
-- **config.bindings** — `config/model_tiers.yaml`,
-  `deployments.yaml`, `tools.yaml`: tier→model, persona→harness, and
-  capability→tool mappings (#2).
 - **lifecycle.labels** — the full label state machine (#4).
 - **personas.compiler** — `scripts/sync_agents.py` emitting
   `.claude/agents/` and `.agents/agents/` targets deterministically,
   with roundtrip validation (#5).
 - **ci.gates** — drift check, sanitization scanners, spec check (#6).
-- **identity.bots** — Athena/Daedalus/Cassandra identities (#7).
+- **identity.bots** — one GitHub App per persona for all six
+  (Athena, Daedalus, Cassandra new; Odyssey, Argus, Atlas migrated
+  off their PAT bot accounts), short-lived installation tokens minted
+  by `scripts/auth/mint_app_token.py` (#7).
 - **review.automation** — Argus workflow, Atlas sidecar, consensus
   (#8, #9).
 - **intake.automation** — headless Athena on `intent:new` (#10).

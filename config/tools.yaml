@@ -1,0 +1,45 @@
+# Capability -> tool bindings, per harness (personas/schema.json, D4).
+# Persona sources declare abstract capabilities; the compiler (#5)
+# resolves them here. A REQUIRED capability with no mapping for the
+# target harness fails compilation; an OPTIONAL one compiles to the
+# generated fallback instruction declared under `fallback`.
+
+capabilities:
+  read_repo:
+    claude-code: [Read, Grep, Glob]
+    antigravity: [view_file, grep_search, find_by_name]
+
+  write_repo:
+    claude-code: [Edit, Write]
+    antigravity: [write_to_file, replace_file_content]
+
+  run_commands:
+    claude-code: [Bash]
+    antigravity: [run_command]
+
+  github_read:
+    # Read-only gh calls through the shell capability; no token needed
+    # beyond repo read scope.
+    claude-code: [Bash]
+    antigravity: [run_command]
+
+  github_write:
+    # NEVER raw API calls: all writes go through the repository's
+    # trusted posting scripts (personas/skills/trusted-posting.md),
+    # which own auth (token by secret NAME), escaping, truncation,
+    # and the fallback ladder. Scripts land with #8/#9.
+    claude-code: [Bash]
+    antigravity: [run_command]
+
+  delegate:
+    claude-code: [Agent]
+    antigravity: [subagent_dispatch]
+
+  ask_user:
+    claude-code: [AskUserQuestion]
+    antigravity: null   # no native tool: optional -> fallback applies
+    fallback: >-
+      No interactive question tool is available on this harness. Write
+      the question out in full — the options, and the concrete case
+      where they differ — post it where the workflow's human gate will
+      read it, and stop; do not proceed on an assumed answer.
