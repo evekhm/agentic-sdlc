@@ -1,0 +1,62 @@
+# Stage advance on merge (#4, intent/4-labels/). INTENT.md's lifecycle
+# says the merge IS the state transition; this workflow is the thin
+# thing that mirrors that transition into the issue's labels so humans
+# and later automation can read the stage without reading the diff.
+#
+# All the logic lives in scripts/ci/lifecycle_advance.sh, runnable
+# locally by the same command this file runs — a workflow nobody can
+# reproduce on a laptop is a workflow nobody debugs. Zero model calls:
+# a merged path and a `Status:` line are the whole input.
+#
+# The comments this posts come from github-actions[bot], the default
+# token's identity. That is deliberate and it is NOT a persona: the
+# six personas (INTENT.md) are named actors with their own GitHub
+# identities and their own authority; this is infrastructure moving a
+# label, so it speaks as infrastructure and holds nothing but
+# `issues: write`. When #7 lands the persona bot identities, this
+# workflow keeps using the default token — it has no opinions to sign.
+#
+# Concurrency queues rather than cancels: two pushes landing close
+# together are two different ranges, and dropping the older one loses
+# its transitions for good.
+
+name: Lifecycle
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: lifecycle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  advance:
+    name: advance — mirror merge gates into status labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # The whole job is a diff between two commits; a shallow
+          # clone has neither of them.
+          fetch-depth: 0
+
+      - name: Advance the stage labels for this push
+        env:
+          GITHUB_REPO: ${{ github.repository }}
+          # The default token. No PAT, no secret, no persona identity.
+          GH_TOKEN: ${{ github.token }}
+          # Event data reaches the script through env, never through
+          # `${{ }}` interpolated into the run body — the same rule
+          # ci-gates.yml follows for the PR body (#6, D10). These two
+          # are SHAs today; the habit is what keeps the next field
+          # someone adds here from being an injection.
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: bash scripts/ci/lifecycle_advance.sh "$BEFORE_SHA" "$AFTER_SHA"

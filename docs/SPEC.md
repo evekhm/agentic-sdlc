@@ -138,6 +138,42 @@ good. All three are scripts runnable locally by the same command CI
 runs; the workflow needs no secrets and grants only
 `contents: read`.
 
+### lifecycle.labels
+Lifecycle state lives in GitHub issue labels (#4,
+`intent/4-labels/`). Five labels are human-facing — `intent:new`,
+`in-progress`, `hold`, `blocked`, `bootstrap` — and the stage is a
+single `status:*` label on the ladder `status:planning` →
+`status:spec` → `status:build` → `status:implementing` →
+`status:in-review`, with **at most one set at a time**. `review:1`,
+`review:2` and `review:3` count reviewer iterations; `review:3`
+escalates to `status:review-stuck`. All 14 are provisioned
+idempotently by `scripts/setup/bootstrap_tracker.sh`, whose
+`--labels-only` mode runs the label section and exits before anything
+reads or files an issue. `.github/workflows/lifecycle.yml` writes the
+ladder on every push to `main` by running
+`scripts/ci/lifecycle_advance.sh <before-sha> <after-sha>`, which is
+deterministic bash + `gh` + `jq` with no model call and is runnable
+locally by the same command (`DRY_RUN=1` prints every mutation instead
+of executing it). It reads the pushed range for ADDED files matching
+`intent/<issue>-<slug>/{intent,spec,plan}.md` and mirrors the merge
+gate into the label: intent.md → `status:spec`, spec.md →
+`status:build` **only if the merged file carries `Status: Approved`**
+(a Draft spec gets a warning comment and no advance), plan.md →
+`status:implementing`; each transition posts one comment naming what
+the next stage owes. `hold` is checked first and halts the issue
+absolutely; more than one `status:*` is treated as corrupted state —
+the script comments, applies `hold`, and stops processing that issue;
+a push adding several of the triple for one issue applies only the
+furthest transition, in one comment. Every write is idempotent (a
+label already present is not re-added; a comment whose
+`<!-- lifecycle:<stage>:<sha> -->` marker is already in the thread is
+not re-posted), so re-running a range is a no-op. A closed or missing
+issue is logged and skipped. The workflow uses the default
+`GITHUB_TOKEN` and posts as `github-actions[bot]` — infrastructure,
+not a persona — with `issues: write, contents: read` and no secrets.
+`status:in-review` and the `review:N` counter exist in the taxonomy
+but are not written by this workflow; their writers arrive with #8/#9.
+
 ### review.policy
 `REVIEW.md` is the review protocol the reviewer personas compile
 against (PR #14). It defines: four severity tiers
@@ -170,7 +206,6 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **lifecycle.labels** — the full label state machine (#4).
 - **identity.bots** — one GitHub App per persona for all six
   (Athena, Daedalus, Cassandra new; Odyssey, Argus, Atlas migrated
   off their PAT bot accounts), short-lived installation tokens minted

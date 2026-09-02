@@ -128,6 +128,25 @@ resumable cold.
    makes the next stage claimable — state advances only through the
    tracker and `main`, never through anyone's memory.
 
+**The labels are the state machine** (#4, `intent/4-labels/`). Five
+are human-facing and filed by people: `intent:new` (intake),
+`in-progress` (the claim mutex above), `hold`, `blocked`, and
+`bootstrap`. The lifecycle stage is a single `status:*` label — the
+ladder `status:planning` → `status:spec` → `status:build` →
+`status:implementing` → `status:in-review` — and **at most one is set
+at a time**: a pair is not a stage, it is two state machines
+disagreeing, so automation that finds one applies `hold` and stops.
+`hold` is the circuit breaker and it is absolute: while it is present
+no automation touches the issue, checked before anything else.
+Reviewers count their rounds with `review:1`/`review:2`/`review:3`;
+`review:3` escalates to `status:review-stuck`, where humans take over.
+Nobody sets a stage label by hand as a way of moving work:
+`.github/workflows/lifecycle.yml` mirrors the merge gates into the
+ladder (intent.md merged → `status:spec`, an *Approved* spec.md →
+`status:build`, plan.md → `status:implementing`), deterministically
+and with no model call, because the merge is still the transition and
+the label is only its shadow.
+
 **There is no STATUS.md.** Status in a committed file goes stale the
 moment two sessions run in parallel, and every update costs a
 commit/PR that can conflict. The pinned tracker issue plus per-issue

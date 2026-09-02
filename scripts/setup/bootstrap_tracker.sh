@@ -9,6 +9,12 @@
 # existing tracker issue's body is NEVER overwritten (its checkboxes
 # are live state).
 #
+# `--labels-only` runs the label section and exits before anything
+# touches an issue. The label taxonomy (#4) outlives the bootstrap
+# backlog and gets extended long after the issue bodies here have
+# drifted, so growing the taxonomy must never depend on the issue
+# half of this script still being accurate.
+#
 # Issue body files may reference each other as {{slug}} (slug = the
 # filename after NN-). Files are processed in filename order, so a
 # body may only reference slugs from earlier files; the tracker
@@ -18,24 +24,40 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
   export GITHUB_REPO="<owner>/<repo>"    # default: evekhm/agentic-sdlc
-  bash scripts/setup/bootstrap_tracker.sh
+  bash scripts/setup/bootstrap_tracker.sh                 # labels + issues + tracker
+  bash scripts/setup/bootstrap_tracker.sh --labels-only   # labels only, then exit
+
+--labels-only provisions the label taxonomy and NOTHING else: no issue
+is read, filed, or pinned, and scripts/setup/issues/ is not even
+required to exist. That mode is the one to reach for when the taxonomy
+grows, because the issue body files drift as the backlog is worked
+(numbers move, bodies are edited on GitHub) and re-filing against
+drifted bodies is not a thing anyone wants to risk for a label.
 
 Prerequisites: gh (authenticated as an identity with write access to
 the repo: labels need push, issues need triage or better), jq.
-The label set here is the bootstrap minimum; the full lifecycle
-taxonomy is decided in the label-taxonomy issue — extend this script
-there so provisioning stays re-runnable.
 EOF
 }
 
 GITHUB_REPO="${GITHUB_REPO:-evekhm/agentic-sdlc}"
 ISSUE_DIR="$(cd "$(dirname "$0")" && pwd)/issues"
 
+LABELS_ONLY=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --labels-only) LABELS_ONLY=1; shift;;
+    -h|--help)     usage; exit 0;;
+    *) echo "ERROR: unknown argument '$1'." >&2; usage; exit 1;;
+  esac
+done
+
 # --- Preflight ---------------------------------------------------------------
 for cmd in gh jq; do
   command -v "$cmd" >/dev/null || { echo "ERROR: $cmd is not installed." >&2; usage; exit 1; }
 done
-[ -d "$ISSUE_DIR" ] || { echo "ERROR: $ISSUE_DIR not found — run from the repo checkout." >&2; exit 1; }
+if [ "$LABELS_ONLY" -eq 0 ]; then
+  [ -d "$ISSUE_DIR" ] || { echo "ERROR: $ISSUE_DIR not found — run from the repo checkout." >&2; exit 1; }
+fi
 
 perm="$(gh repo view "$GITHUB_REPO" --json viewerPermission --jq .viewerPermission 2>/dev/null || true)"
 case "$perm" in
@@ -45,29 +67,65 @@ case "$perm" in
      exit 1;;
 esac
 
-# --- Labels (bootstrap minimum; label-taxonomy issue extends this) -----------
+# --- Labels (the lifecycle taxonomy; #4) --------------------------------------
+# One listing call, cached: ensure_label is called a dozen-plus times and
+# re-listing per call is a dozen-plus API round trips to learn the same
+# answer. A failed listing is an ERROR, never an empty tree — reading it
+# as "no labels exist" would make every ensure_label attempt a create.
+LABELS_CACHE=""
+refresh_labels() {
+  LABELS_CACHE="$(gh label list --repo "$GITHUB_REPO" --limit 200 --json name --jq '.[].name')" \
+    || { echo "ERROR: cannot list labels on $GITHUB_REPO." >&2; exit 1; }
+}
+has_label() { printf '%s\n' "$LABELS_CACHE" | grep -Fxq "$1"; }
+
 ensure_label() { # name color description
-  if gh label list --repo "$GITHUB_REPO" --limit 100 --json name \
-       --jq '.[].name' | grep -Fxq "$1"; then
+  if has_label "$1"; then
     echo "    label '$1' exists — kept"
   elif gh label create "$1" --repo "$GITHUB_REPO" --color "$2" --description "$3" \
        >/dev/null 2>&1; then
+    LABELS_CACHE="$LABELS_CACHE
+$1"
     echo "    label '$1' created"
   else
-    # Re-check: a create failure is fine iff the label now exists (race).
-    gh label list --repo "$GITHUB_REPO" --limit 100 --json name \
-      --jq '.[].name' | grep -Fxq "$1" \
-      || { echo "ERROR: could not create label '$1'." >&2; exit 1; }
+    # Re-check against a FRESH listing: a create failure is fine iff the
+    # label now exists (race with another run, or a colour-only change).
+    refresh_labels
+    has_label "$1" || { echo "ERROR: could not create label '$1'." >&2; exit 1; }
     echo "    label '$1' raced an existing label — kept"
   fi
 }
 
 echo "==> Labels"
+refresh_labels
+
+# Human-facing: filed by people, read by people, honoured by automation.
 ensure_label "bootstrap"   "1D76DB" "Bootstrap backlog: building the system that builds itself"
 ensure_label "intent:new"  "0E8A16" "Intake: a proposed change entering the lifecycle"
 ensure_label "in-progress" "FBCA04" "Claimed by a session (the parallelism mutex)"
 ensure_label "hold"        "B60205" "Circuit breaker: halts all automation while present"
 ensure_label "blocked"     "D93F0B" "Needs a human or an unmet dependency"
+
+# Machine-driven stage state (#4): at most ONE status:* per issue, ever.
+# One hue family, darkening along the ladder, so the stage of a board is
+# legible at a glance and a stray pair is visibly wrong.
+ensure_label "status:planning"     "D4C5F9" "Stage: intent.md is being drafted (PLAN gate open)"
+ensure_label "status:spec"         "BFA8F0" "Stage: spec.md is being drafted (DESIGN gate open)"
+ensure_label "status:build"        "A98BE8" "Stage: plan.md + contract tests (BUILD gate open)"
+ensure_label "status:implementing" "936FDD" "Stage: implementation at a pinned SHA"
+ensure_label "status:in-review"    "7D52D1" "Stage: reviewers hold it (written by #8/#9, not by lifecycle.yml)"
+# Escalation, deliberately outside the ladder's hue: humans take over.
+ensure_label "status:review-stuck" "E11D21" "Review counter tripped at review:3 — humans take over"
+
+# Review iteration counter (predecessor convention); review:3 escalates.
+ensure_label "review:1" "C2F0EA" "Review iteration 1"
+ensure_label "review:2" "76D7C4" "Review iteration 2"
+ensure_label "review:3" "117A65" "Review iteration 3 — sets status:review-stuck"
+
+if [ "$LABELS_ONLY" -eq 1 ]; then
+  echo "==> Done (--labels-only). No issue was read, filed, or pinned."
+  exit 0
+fi
 
 # --- Issues -------------------------------------------------------------------
 issue_number_by_title() { # exact title -> number or empty
