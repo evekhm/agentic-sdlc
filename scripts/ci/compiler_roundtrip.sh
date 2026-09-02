@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# Roundtrip proof for the persona compiler (scripts/sync_agents.py).
+#
+# One command takes the canonical sources all the way to working harness
+# targets and back:
+#
+#   1. schema-check — every personas/*.yaml validates and compiles
+#   2. determinism  — two independent builds are byte-identical
+#   3. no drift     — the committed targets equal a fresh build
+#   4. roundtrip    — the emitted targets are re-parsed from disk and
+#                     asserted to carry the resolved model, the mapped
+#                     tools, and the full text of every declared skill
+#   5. new persona  — a throwaway source compiles end-to-end in a temp
+#                     tree (pinned harness only, generated fallback for
+#                     an optional capability the harness cannot map)
+#   6. sanitizer    — a source carrying a home path is REFUSED
+#
+# Exit 0 means the compiler is honest about its own output. This is the
+# script CI (#6) runs; nothing here touches the working tree.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+COMPILER="$REPO/scripts/sync_agents.py"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/compiler-roundtrip.XXXXXX")"
+trap 'rm -rf "$TMP"' EXIT
+
+[ -f "$COMPILER" ] || { echo "ERROR: $COMPILER not found." >&2; exit 1; }
+command -v python3 >/dev/null || { echo "ERROR: python3 is not installed." >&2; exit 1; }
+
+step() { printf '\n=== %s\n' "$1"; }
+fail() { echo "FAIL: $1" >&2; exit 1; }
+
+# assert_in <needle> <file> <what>
+assert_in() {
+  grep -qF -- "$1" "$2" || fail "$3 (expected '$1' in ${2#"$TMP"/})"
+  echo "  ok: $3"
+}
+
+# --- 1. schema-check + full build --------------------------------------------
+step "1. schema-check: all sources validate and compile"
+python3 "$COMPILER" --root "$REPO" --out "$TMP/build-a" >/dev/null \
+  || fail "sources do not compile"
+count="$(find "$TMP/build-a/.claude/agents" "$TMP/build-a/.agents/agents" -type f | wc -l)"
+echo "  ok: $count target files emitted from $(ls "$REPO"/personas/*.yaml | wc -l) sources"
+
+# --- 2. determinism -----------------------------------------------------------
+step "2. determinism: two builds are byte-identical"
+python3 "$COMPILER" --root "$REPO" --out "$TMP/build-b" >/dev/null
+diff -r "$TMP/build-a" "$TMP/build-b" || fail "two builds of the same sources differ"
+echo "  ok: build-a and build-b are identical"
+
+# --- 3. drift gate ------------------------------------------------------------
+step "3. drift: committed targets match a fresh build"
+python3 "$COMPILER" --check || fail "committed targets have drifted — rebuild and commit"
+
+# --- 4. roundtrip: re-parse the emitted targets -------------------------------
+step "4. roundtrip: emitted targets carry model, tools, and full skill text"
+python3 "$COMPILER" --verify || fail "emitted targets lost a resolved fact"
+
+# --- 5. a brand-new persona goes end-to-end -----------------------------------
+step "5. new persona: a throwaway source compiles on its pinned harness"
+SRC="$TMP/src"
+mkdir -p "$SRC"
+cp -r "$REPO/personas" "$REPO/config" "$SRC/"
+
+cat > "$SRC/personas/throwaway.yaml" <<'YAML'
+# Throwaway source created by scripts/ci/compiler_roundtrip.sh. Never
+# committed: it exists only inside the test's temp tree.
+name: throwaway
+kind: persona
+stage: [maintain]
+tier: FAST
+
+role: >-
+  A disposable actor that exists only so the compiler roundtrip can
+  prove a brand-new source reaches working harness targets without a
+  single hand edit. It reads the repository, asks the human when a
+  choice is genuinely open, and does nothing else at all.
+
+skills:
+  - trusted-posting.md
+
+capabilities:
+  - name: read_repo
+  - name: ask_user
+    required: false
+
+authority:
+  github_write: "none"
+  identity: "TBD"
+  token: THROWAWAY_BOT_TOKEN
+
+limits:
+  max_turns: 1
+  timeout_mins: 1
+YAML
+
+# Pin it to the harness that has NO native ask_user tool, so the build
+# must generate the fallback instruction from config/tools.yaml.
+sed -i '/^personas:/a\  throwaway: { harness: antigravity }' "$SRC/config/deployments.yaml"
+
+python3 "$COMPILER" --root "$SRC" --out "$TMP/new" >/dev/null \
+  || fail "the throwaway persona did not compile"
+
+AGENT="$TMP/new/.agents/agents/throwaway"
+[ -d "$AGENT" ] || fail "no antigravity target emitted for the throwaway persona"
+if [ -f "$TMP/new/.claude/agents/throwaway.md" ]; then
+  fail "throwaway is pinned to one harness but was emitted for both"
+fi
+echo "  ok: emitted for the pinned harness only"
+
+assert_in '"model": "gemini-3.7-flash-medium"' "$AGENT/agent.json" \
+  "agent.json carries the FAST-tier model for the pinned harness"
+assert_in 'view_file' "$AGENT/config.yaml" \
+  "config.yaml carries the tools mapped from read_repo"
+assert_in '# Skill: trusted-posting' "$AGENT/instructions.md" \
+  "instructions.md inlines the declared skill"
+assert_in '### ask_user' "$AGENT/instructions.md" \
+  "instructions.md carries a generated fallback section"
+assert_in 'No interactive question tool is available' "$AGENT/instructions.md" \
+  "the fallback text comes from config/tools.yaml, not a hand edit"
+assert_in 'GENERATED by scripts/sync_agents.py' "$AGENT/agent.json" \
+  "agent.json carries the generated-file marker"
+
+python3 "$COMPILER" --root "$SRC" --out "$TMP/new" --verify \
+  || fail "the throwaway targets did not roundtrip"
+
+# --- 6. the sanitizer refuses unsafe output -----------------------------------
+step "6. sanitizer: a source carrying a home path is refused"
+POISON="$TMP/poison"
+mkdir -p "$POISON"
+cp -r "$SRC/personas" "$SRC/config" "$POISON/"
+rm -f "$POISON/personas/throwaway.yaml"
+
+# Assembled from parts so that no literal absolute home path is ever
+# committed to this repository — the fixture only exists at runtime.
+LEAK_DIR=home
+LEAK_PATH="/${LEAK_DIR}/someone/secrets-file"
+
+cat > "$POISON/personas/leaky.yaml" <<YAML
+name: leaky
+kind: subagent
+tier: FAST
+
+role: >-
+  A source that leaks an absolute home path into its own contract, which
+  the compiler must refuse to emit rather than bake into a prompt that
+  ships. It reads ${LEAK_PATH} and reports whatever it finds there.
+
+capabilities:
+  - name: read_repo
+YAML
+
+if python3 "$COMPILER" --root "$POISON" --out "$TMP/poisoned" >"$TMP/poison.log" 2>&1; then
+  fail "the compiler emitted a target containing a home path"
+fi
+grep -q "REFUSING TO WRITE" "$TMP/poison.log" \
+  || fail "build failed, but not with the sanitizer's refusal message"
+if [ -d "$TMP/poisoned" ]; then
+  fail "the refused build still wrote output"
+fi
+echo "  ok: refused, and nothing was written"
+
+# The site-specific deny list is supplied at run time, never committed.
+# A word that is perfectly innocent by default must be refused once the
+# operator names it.
+if SYNC_AGENTS_DENY="disposable actor" \
+     python3 "$COMPILER" --root "$SRC" --out "$TMP/denied" >"$TMP/deny.log" 2>&1; then
+  fail "SYNC_AGENTS_DENY did not stop a denied string from being emitted"
+fi
+grep -q "denied local string" "$TMP/deny.log" \
+  || fail "build failed, but not because of the run-time deny list"
+echo "  ok: SYNC_AGENTS_DENY refuses site-specific strings at run time"
+
+printf '\nPASS: compiler roundtrip green (%s target files, 6 checks).\n' "$count"
