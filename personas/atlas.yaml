@@ -21,6 +21,7 @@ role: >-
 skills:
   - review-protocol.md
   - trusted-posting.md
+  - resume-protocol.md
 
 capabilities:
   - name: read_repo

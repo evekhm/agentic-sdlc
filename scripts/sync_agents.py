@@ -191,6 +191,68 @@ def load_skills(root: Path, personas: list[dict]) -> dict[str, str]:
     return texts
 
 
+# The skill whose prompt needs the ladder rendered under it (#36, D3).
+# Any source that declares it gets the generated `## Lifecycle stages`
+# section; no source may hand-author that table.
+RESUME_SKILL = "resume-protocol.md"
+
+LIFECYCLE_KEYS = (
+    "stage",
+    "label",
+    "artifact",
+    "advances_to",
+    "advance_message",
+    "dispatch_brief",
+)
+
+
+def load_lifecycle(root: Path) -> list[dict]:
+    """personas/lifecycle.json's `stages`, in ladder order (#36, D1/D2).
+
+    Read beside the schema and with the same stdlib, because the ladder
+    is data every actor shares: the advancer applies it, the dispatcher
+    routes on it, and this compiler renders it into the prompts. There is
+    no second copy anywhere, which is the whole point of the file.
+    """
+    path = root / "personas" / "lifecycle.json"
+    if not path.is_file():
+        raise BuildError(f"{path}: missing — the lifecycle ladder has no source.")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise BuildError(f"{path}: not valid JSON — {exc}") from exc
+    stages = data.get("stages") if isinstance(data, dict) else None
+    if not isinstance(stages, list) or not stages:
+        raise BuildError(f"{path}: expected a non-empty 'stages' array.")
+    for index, row in enumerate(stages):
+        if not isinstance(row, dict):
+            raise BuildError(f"{path}: stages[{index}] is not an object.")
+        missing = [k for k in LIFECYCLE_KEYS if k not in row]
+        if missing:
+            raise BuildError(
+                f"{path}: stages[{index}] is missing {', '.join(missing)}."
+            )
+    names = [str(row["stage"]) for row in stages]
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise BuildError(f"{path}: duplicate stage rows {duplicates}.")
+    return stages
+
+
+def stage_owners(personas: list[dict]) -> dict[str, list[str]]:
+    """stage -> sorted owning persona names. DERIVED, never stored (D2).
+
+    Ownership is not a column in lifecycle.json: it is whichever sources
+    list the stage, so moving a stage between personas edits exactly one
+    YAML file.
+    """
+    owners: dict[str, list[str]] = {}
+    for persona in personas:
+        for stage in persona.get("stage", []):
+            owners.setdefault(str(stage), []).append(persona["name"])
+    return {stage: sorted(names) for stage, names in owners.items()}
+
+
 # --- Resolve ------------------------------------------------------------------
 
 
@@ -345,7 +407,13 @@ def write_ladder(mode: str) -> str:
     return WRITE_LADDER.get(mode, mode)
 
 
-def render_body(persona: dict, fallbacks: list[tuple[str, str]], skills: dict[str, str]) -> str:
+def render_body(
+    persona: dict,
+    fallbacks: list[tuple[str, str]],
+    skills: dict[str, str],
+    lifecycle: list[dict],
+    owners: dict[str, list[str]],
+) -> str:
     """The instruction body. Identical across harnesses except for the
     generated fallbacks, which exist only where a harness lacks a tool."""
     name = persona["name"]
@@ -452,6 +520,55 @@ def render_body(persona: dict, fallbacks: list[tuple[str, str]], skills: dict[st
         for capability, text in fallbacks:
             parts += [f"### {capability}", "", wrap(text), ""]
 
+    # The ladder, GENERATED from personas/lifecycle.json joined against
+    # every source's `stage` field (#36, D3). Emitted only where the
+    # resume protocol is declared, because only an actor that claims
+    # issues needs it — and hand-authoring this table into the skill
+    # would be the second copy lifecycle.json exists to prevent.
+    if RESUME_SKILL in persona.get("skills", []):
+        parts += ["## Lifecycle stages", ""]
+        parts += [
+            wrap(
+                "The ladder below is generated from personas/lifecycle.json, "
+                "the single source of the label-to-stage relation, joined "
+                "against the stages every actor source declares. An issue's "
+                "one `status:*` label names the current stage; work it only "
+                "if you are listed as an owner of that stage, and otherwise "
+                "name the owner and stop."
+            ),
+            "",
+        ]
+        for row in lifecycle:
+            stage = str(row["stage"])
+            who = owners.get(stage) or []
+            parts += [f"### {stage}", ""]
+            parts += [
+                bullet(f"Current when the issue carries `{row['label']}`"),
+                bullet(
+                    f"Artifact: `{row['artifact']}`"
+                    if row["artifact"]
+                    else "Artifact: none — the output is code or a review"
+                ),
+                bullet(
+                    "Owner: " + ", ".join(who)
+                    if who
+                    else "Owner: none — no actor source declares this stage"
+                ),
+                bullet(
+                    (
+                        f"Advances to `{row['advances_to']}` when that "
+                        "artifact merges"
+                        if row["artifact"]
+                        else f"Advances to `{row['advances_to']}` when this "
+                        "stage's work merges"
+                    )
+                    if row["advances_to"]
+                    else "Last rung: nothing advances past it automatically"
+                ),
+                bullet(f"Brief: {row['dispatch_brief']}"),
+                "",
+            ]
+
     return "\n".join(parts).rstrip("\n") + "\n"
 
 
@@ -546,6 +663,8 @@ def compile_all(root: Path) -> list[dict]:
     """The whole pipeline, in memory. One record per persona x harness."""
     personas = load_personas(root)
     skills = load_skills(root, personas)
+    lifecycle = load_lifecycle(root)
+    owners = stage_owners(personas)
     resolver = Resolver(root)
 
     records: list[dict] = []
@@ -562,7 +681,7 @@ def compile_all(root: Path) -> list[dict]:
             who = f"personas/{persona['name']}.yaml on {harness}"
             model = resolver.model(persona["tier"], harness, who)
             tools, fallbacks = resolver.tools(persona, harness)
-            body = render_body(persona, fallbacks, skills)
+            body = render_body(persona, fallbacks, skills, lifecycle, owners)
             files = emitter.emit(persona, model, tools, body)
             for relpath, content in files.items():
                 if relpath in seen:
@@ -577,6 +696,11 @@ def compile_all(root: Path) -> list[dict]:
                     "tools": tools,
                     "fallbacks": fallbacks,
                     "skills": {s: skills[s] for s in persona.get("skills", [])},
+                    "lifecycle": (
+                        [str(row["stage"]) for row in lifecycle]
+                        if RESUME_SKILL in persona.get("skills", [])
+                        else []
+                    ),
                     "files": files,
                 }
             )
@@ -745,6 +869,20 @@ def verify(records: list[dict], out: Path) -> int:
             require(
                 flow(text)[:40] in flow(body),
                 f"{tag}: fallback text for '{capability}' is missing",
+            )
+        # A target that declares the resume protocol must carry the WHOLE
+        # generated ladder, not just the rungs it owns: refusing a stage
+        # means naming that stage's owner, and it can only do that from
+        # this block (#36, D3, D5(f)).
+        if record["lifecycle"]:
+            require(
+                "## Lifecycle stages" in body,
+                f"{tag}: declares {RESUME_SKILL} but carries no generated ladder",
+            )
+        for stage in record["lifecycle"]:
+            require(
+                f"### {stage}" in body,
+                f"{tag}: generated ladder is missing stage '{stage}'",
             )
         for relpath in record["files"]:
             content = (out / relpath).read_text(encoding="utf-8")
