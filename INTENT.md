@@ -372,10 +372,23 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
    carry the mechanism.
 2. **Hosting**: which org/repo for the shared demo; is the take-home
    template the same repo or a sanitized twin?
-3. **Runtime placement**: Athena/Daedalus as label-triggered Actions
-   workflows (agent-farm style, headless) vs presenter-driven
-   interactive sessions in v1? Cassandra's watcher cadence and the
-   seeded-incident mechanism?
+3. **Runtime placement** — PARTIALLY RESOLVED: harness (which agent
+   framework interprets a persona — Claude Code vs Antigravity, pinned
+   in `config/deployments.yaml`) and deployment/execution environment
+   (where that framework's process runs and what triggers it — local
+   interactive, GitHub Actions, a VM, Cloud Run, an agent platform) are
+   orthogonal axes. The compiler (#5) stays scoped to producing the
+   harness-native persona definition only and carries no deployment
+   knowledge; each automation issue (#8 Argus, #9 Atlas, #10 Athena
+   intake, #11 Cassandra watchers) decides its own execution
+   environment at build time rather than one upfront global pin, since
+   event-triggered review/intake and continuous watching are genuinely
+   different trigger shapes. Antigravity does support headless
+   invocation (confirmed), so atlas being antigravity-pinned does not
+   block #9. Still open: the concrete target per persona/issue (which
+   of local/github-actions/vm/agent-platform/cloud-run) and Cassandra's
+   watcher cadence and seeded-incident mechanism — decided when each
+   issue is picked up, not now.
 4. **Label taxonomy**: adopt agent-farm's `status:*` state machine
    names verbatim or align with the predecessor's `argus:*` /
    `review:*` labels? One taxonomy must win before workflows exist.
