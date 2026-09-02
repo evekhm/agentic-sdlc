@@ -78,12 +78,25 @@
         },
         "identity": {
           "type": "string",
-          "description": "GitHub login the actor acts as, or 'TBD' until the identity decision (#7) resolves it."
+          "description": "GitHub App bot login the actor acts as, e.g. 'evekhm-athena-app[bot]', or 'TBD' until the identity decision (#7) resolves it."
+        },
+        "app_id": {
+          "type": "integer",
+          "description": "GitHub App ID (public — visible on the App's settings page, safe to commit). Legacy JWT issuer; prefer client_id (GitHub's current recommendation). Omitted until the App is registered (#7)."
+        },
+        "client_id": {
+          "type": "string",
+          "pattern": "^Iv[0-9A-Za-z]+$",
+          "description": "GitHub App's Client ID (public, safe to commit) — the JWT `iss` claim GitHub now recommends over the legacy numeric app_id. Omitted until the App is registered (#7)."
+        },
+        "installation_id": {
+          "type": "integer",
+          "description": "Installation ID of the App on this repo (public, safe to commit). Omitted until the App is installed (#7)."
         },
         "token": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*$",
-          "description": "Secret NAME (Actions secret / env var) holding the credential. Never a value, never a path (D6)."
+          "description": "Secret NAME (Actions secret / env var, or looked up under ~/.keys/ locally per scripts/auth/_github_app.py) holding the App's private key. Never a value, never a path (D6)."
         }
       }
     },

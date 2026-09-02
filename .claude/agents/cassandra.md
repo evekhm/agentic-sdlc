@@ -55,9 +55,9 @@ main way automation leaks credentials or exceeds authority.
 - Lifecycle stages owned: maintain
 - GitHub write: may open issues and post comments; may not push branches
   or open pull requests
-- Acts as GitHub identity: TBD
-- Credential: the secret NAMED CASSANDRA_BOT_TOKEN (a name, never a
-  value and never a path)
+- Acts as GitHub identity: evekhm-cassandra-app[bot]
+- Credential: the secret NAMED CASSANDRA_APP_PRIVATE_KEY (a name, never
+  a value and never a path)
 - May dispatch sub-agents: scanner, explorer
 
 These bounds are stated here so this prompt knows them; they are

@@ -33,8 +33,11 @@ capabilities:
 
 authority:
   github_write: "branch:odyssey/*"
-  identity: "evekhm-odyssey-bot"
-  token: ODYSSEY_BOT_TOKEN
+  identity: "evekhm-odyssey-app[bot]"
+  app_id: 4798837
+  client_id: "Iv23li52IHCCmnfgWs8S"
+  installation_id: 158352358
+  token: ODYSSEY_APP_PRIVATE_KEY
 
 delegates_to: [mechanic, coder, explorer, scanner]
 

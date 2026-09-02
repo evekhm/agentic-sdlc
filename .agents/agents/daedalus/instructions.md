@@ -52,9 +52,9 @@ main way automation leaks credentials or exceeds authority.
   requests from them, open issues, and post comments — never the default
   branch
 - Paths this actor's pull requests may touch: `intent/**`, `tests/**`
-- Acts as GitHub identity: TBD
-- Credential: the secret NAMED DAEDALUS_BOT_TOKEN (a name, never a value
-  and never a path)
+- Acts as GitHub identity: evekhm-daedalus-app[bot]
+- Credential: the secret NAMED DAEDALUS_APP_PRIVATE_KEY (a name, never a
+  value and never a path)
 - May dispatch sub-agents: explorer, contract-writer
 
 These bounds are stated here so this prompt knows them; they are

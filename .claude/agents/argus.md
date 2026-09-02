@@ -86,9 +86,9 @@ main way automation leaks credentials or exceeds authority.
 - Lifecycle stages owned: review
 - GitHub write: may post comments on issues and pull requests; may not
   open issues, push branches, or open pull requests
-- Acts as GitHub identity: evekhm-argus
-- Credential: the secret NAMED ARGUS_BOT_TOKEN (a name, never a value
-  and never a path)
+- Acts as GitHub identity: evekhm-argus-app[bot]
+- Credential: the secret NAMED ARGUS_APP_PRIVATE_KEY (a name, never a
+  value and never a path)
 - May dispatch sub-agents: explorer
 
 These bounds are stated here so this prompt knows them; they are

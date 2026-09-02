@@ -61,7 +61,9 @@ Sources conform to `personas/schema.json` (JSON Schema 2020-12):
 `tier` takes only the five semantic grades; tooling is abstract
 `capabilities`; `authority` declares the GitHub write ladder
 (`none` < `comments` < `issues` < `branch:<glob>`), path allowlist,
-identity, and token NAME only; sub-agents carry no authority and
+identity, GitHub App `app_id`/`installation_id` (public, once
+registered), and token NAME only — never a credential value;
+sub-agents carry no authority and
 cannot spawn sub-agents. Shared protocol text lives once in
 `personas/skills/` (`spec-adversary.md`, `review-protocol.md` —
 which defers to root REVIEW.md — and `trusted-posting.md`) and is
@@ -172,6 +174,28 @@ not a persona — with `issues: write, contents: read` and no secrets.
 `status:in-review` and the `review:N` counter exist in the taxonomy
 but are not written by this workflow; their writers arrive with #8/#9.
 
+### review.policy
+`REVIEW.md` is the review protocol the reviewer personas compile
+against (PR #14). It defines: four severity tiers
+(`security`/`high`/`normal`/`suggestion`) with a closed `high` list
+and a failure-scenario requirement; the three-round funnel (round 1
+full from both reviewers, rounds 2–3 verification with blocking-only
+new findings, security-only past round 3); per-reviewer finding ID
+namespaces (`R<round>-<n>`, `R<issue>-<n>`, `AT-<n>`) stable from
+first appearance; the ledger row fields and the header/trailer
+signature convention; consensus rules (independent round 1, dual
+sign-off on `security` only, evidence arbitrates, verdict format,
+three-exchange dispute cap); consensus keyed to Decision IDs where
+the spec under review has a Decisions table; label derivation from
+ledger state; merge-anytime with one post-merge follow-up issue; and
+the deep-review grant. The two reviewers are deployment-pinned to
+different model families; which family backs which reviewer is a
+`config/` fact and appears nowhere in the policy. The document is
+normative for the ported automation: no recorder, workflow, or
+scheduled sweep exists yet (#8, #9), so every rule is currently
+prompt-enforced with a human backstop, and the label names it uses
+are provisional until the taxonomy in #4 lands.
+
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
@@ -182,8 +206,10 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **review.policy** — REVIEW.md, protocol v2 port (#3).
-- **identity.bots** — Athena/Daedalus/Cassandra identities (#7).
+- **identity.bots** — one GitHub App per persona for all six
+  (Athena, Daedalus, Cassandra new; Odyssey, Argus, Atlas migrated
+  off their PAT bot accounts), short-lived installation tokens minted
+  by `scripts/auth/mint_app_token.py` (#7).
 - **review.automation** — Argus workflow, Atlas sidecar, consensus
   (#8, #9).
 - **intake.automation** — headless Athena on `intent:new` (#10).
