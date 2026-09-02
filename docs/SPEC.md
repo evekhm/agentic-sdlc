@@ -219,8 +219,9 @@ they are read from `personas/lifecycle.json` (`personas.resume`,
 next stage owes. The one exception the script owns is the Draft
 override, which is the ladder refusing to move rather than a rung of
 it: a merged spec.md advances **only if it carries `Status:
-Approved`**, and otherwise gets a warning comment and no advance. `hold` is checked first and halts the issue
-absolutely; more than one `status:*` is treated as corrupted state —
+Approved`**, and otherwise gets a warning comment and no advance.
+`hold` is checked first and halts the issue absolutely; more than one
+`status:*` is treated as corrupted state —
 the script comments, applies `hold`, and stops processing that issue;
 a push adding several of the triple for one issue applies only the
 furthest transition, in one comment. Every write is idempotent (a
@@ -268,8 +269,11 @@ session from a number (#36, `intent/36-dispatch/`). Deterministic
 bash + `gh` + `jq`, no model call: the issue's labels, the merged
 folder layout and three committed data files are the whole input, so
 the same number always resolves the same way. It resolves a pull
-request to its issue by `Closes #<n>` in the body and then by the
-`<actor>/<n>-<slug>` branch name; the stage from the single
+request to its issue by a closing keyword and a same-repo `#<n>` in
+the body — any of the ones GitHub honours (`close`, `fix`, `resolve`
+and their `-s`/`-d` forms, case-insensitively), with two distinct
+references an exit 1 naming both rather than a guess — and then by
+the `<actor>/<n>-<slug>` branch name; the stage from the single
 `status:*` label — or the first rung when the issue is `intent:new` —
 through `personas/lifecycle.json` (`personas.resume`); the owners
 from the persona sources; the folder by reusing `intent/<n>-*/` when
@@ -283,13 +287,21 @@ checked in order before anything is dispatched and each exiting 2
 with the condition named: `hold`; closed, or `status:review-stuck`;
 `blocked`; more than one `status:*` (reported, never guessed, and
 never `hold`-ed — the advancer is the single writer of the circuit
-breaker); `in-progress` claimed by another actor, where a claim by an
-owner of the current stage is that actor resuming and proceeds; and
-`--as` naming a persona that does not own the stage. Exit 1 is
-unusable input, exit 0 is launched or printed. The script never
-writes to GitHub: the claim belongs to the session it launches, not
-to the launcher. A stage with several owners (review) prints both
-instructions and launches neither unless `--as` names one, and a
+breaker); `in-progress` claimed by another actor; and `--as` naming a
+persona that does not own the stage. The claim's holder is the
+*author* of the last comment that opens with `Claim` (AGENTS.md,
+"Working the tracker", step 2), mapped through the persona identity
+table — never a name read out of a comment body, which is an
+unauthenticated string, and never prose that merely contains the
+word. A login no identity names is a foreign claim, refused by that
+login. A claim by an owner of the current stage is that actor
+resuming and proceeds; when `--as` names one owner, the mutex binds
+against that actor alone, so one reviewer's claim stops the other.
+Exit 1 is unusable input, exit 0 is launched or printed. The script
+never writes to GitHub: the claim belongs to the session it
+launches, not to the launcher. A stage with several owners (review)
+prints both instructions and launches neither unless `--as` names
+one, and a
 harness this script cannot start prints and exits 0. `DRY_RUN=1`
 prints the resolved launch command instead of executing it; the reads
 and every guard still run. Tests: `scripts/ops/tests/work_test.sh`.

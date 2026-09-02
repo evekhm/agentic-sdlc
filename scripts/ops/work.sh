@@ -113,8 +113,9 @@ gh_json() { # <api-path>
 }
 
 # --- Resolve the number (D9) ---------------------------------------------------
-# A pull request is not the unit of work; the issue is. `Closes #<n>` in
-# the body first, then the <actor>/<n>-<slug> branch name, then give up:
+# A pull request is not the unit of work; the issue is. A closing keyword
+# and `#<n>` in the body first, then the <actor>/<n>-<slug> branch name,
+# then give up:
 # guessing which issue a PR belongs to is how two sessions end up on one
 # issue.
 view=""
@@ -126,9 +127,24 @@ ISSUE="$NUMBER"
 RESOLVED_VIA=""
 if [ "$(jq -r 'if .pull_request then "pr" else "issue" end' <<<"$view")" = "pr" ]; then
     pr_body="$(jq -r '.body // ""' <<<"$view")"
-    closes="$(grep -Eoi 'closes[[:space:]]+#[0-9]+' <<<"$pr_body" | head -1 || true)"
-    if [ -n "$closes" ]; then
-        ISSUE="${closes##*#}"
+    # Every closing keyword GitHub honours, case-insensitively, same-repo
+    # `#n` only: `Fixes #205` closes #205 on merge whether or not this
+    # script reads the word, and a dispatcher that only knows `closes`
+    # sends the session to the PR instead of the unit of work. Cross-repo
+    # `owner/repo#9` and URL forms deliberately do not match — they close
+    # an issue that is not in this tracker.
+    closes="$(grep -Eoi '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' \
+        <<<"$pr_body" | grep -Eo '[0-9]+$' | sort -un || true)"
+    closes_count=0
+    [ -z "$closes" ] || closes_count="$(grep -c . <<<"$closes")"
+    if [ "$closes_count" -gt 1 ]; then
+        # Two closing references is two units of work. D5(d)'s never-guess
+        # rule applies: report them and stop rather than take the first.
+        die "PR #$NUMBER closes more than one issue: $(sed 's/^/#/' <<<"$closes" \
+            | tr '\n' ' ')— dispatch one of them by its own number"
+    fi
+    if [ "$closes_count" -eq 1 ]; then
+        ISSUE="$closes"
         RESOLVED_VIA="Closes #$ISSUE in the body"
     else
         pr_view=""
@@ -243,33 +259,42 @@ persona_for_login() { # <login> -> persona name, or empty
     return 0
 }
 
-# (e) in-progress held by somebody else. The holder is read from the last
-#     comment that announces a claim: its author's persona if it has one,
-#     otherwise whichever actor name the body carries, otherwise the raw
-#     login. `in-progress` with a claim naming an owner of this stage is
-#     this actor resuming its own work and proceeds.
+# (e) in-progress held by somebody else. The holder is the AUTHOR of the
+#     last claim comment, mapped through the identity table in
+#     personas/*.yaml — never a name read out of the comment body. A body
+#     is an unauthenticated string, and reading an actor out of it lets
+#     any commenter decide whether dispatch refuses or proceeds, in both
+#     directions (#36, Argus R1-1).
+#     What counts as a claim is the structured line AGENTS.md "Working
+#     the tracker" step 2 prescribes: the comment OPENS with `Claim`
+#     (or `Claiming`, optionally bold). Prose that merely contains the
+#     word — "the PR claims it is byte-identical" — is not a claim and is
+#     ignored. An author no persona identity names is a foreign claim:
+#     fail closed and name the login, because an unknown actor is exactly
+#     the case where this script must not assume it is looking at itself.
+#     A claim by an owner of this stage is that actor resuming its own
+#     work and proceeds; when `--as` names one owner the mutex binds
+#     against that actor alone, since atlas holding the claim is a
+#     different actor from argus even though both own review. `--as` is
+#     itself validated against the stage's owners by (f) below, which
+#     leaves D5's refusal ORDER as written.
 claim_holder=""
 if has_label "in-progress"; then
+    resumers="$owners"
+    [ -z "$AS" ] || resumers="$AS"
     comments=""
     if comments="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE/comments")"; then
-        claim_filter='[.[] | select(.body | test("\\bclaim"; "i"))] | last'
-        claim_login="$(jq -r "$claim_filter | .user.login // \"\"" <<<"$comments")"
-        claim_body="$(jq -r "$claim_filter | .body // \"\"" <<<"$comments")"
+        claim_re='\A[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
+        claim_login="$(jq -r --arg re "$claim_re" \
+            '[.[] | select((.body // "") | test($re; "i"))] | last | .user.login // ""' \
+            <<<"$comments")"
         if [ -n "$claim_login" ]; then
             claim_holder="$(persona_for_login "$claim_login")"
-            if [ -z "$claim_holder" ]; then
-                while read -r candidate; do
-                    if grep -qi -- "\b$candidate\b" <<<"$claim_body"; then
-                        claim_holder="$candidate"
-                        break
-                    fi
-                done < <(owners_of "$stage")
-            fi
-            [ -n "$claim_holder" ] || claim_holder="$claim_login"
+            [ -n "$claim_holder" ] \
+                || refuse "in-progress on #$ISSUE is held by $claim_login, a login no persona identity names"
+            grep -Fxq "$claim_holder" <<<"$resumers" \
+                || refuse "in-progress on #$ISSUE is held by $claim_holder"
         fi
-    fi
-    if [ -n "$claim_holder" ] && ! grep -Fxq "$claim_holder" <<<"$owners"; then
-        refuse "in-progress on #$ISSUE is held by $claim_holder"
     fi
 fi
 

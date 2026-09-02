@@ -72,10 +72,16 @@ pr() {
   jq -n --arg ref "$3" '{head: {ref: $ref}}' \
     > "$FIXTURES/repos_test_repo_pulls_$1.json"
 }
-# claim <n> <login> <body>
+# claim <n> <login> <body> [<login> <body> ...]  — the thread, in order
 claim() {
-  jq -n --arg l "$2" --arg b "$3" '[{user: {login: $l}, body: $b}]' \
-    > "$FIXTURES/repos_test_repo_issues_$1_comments.json"
+  local n="$1" thread='[]'
+  shift
+  while [ "$#" -ge 2 ]; do
+    thread="$(jq -c --argjson t "$thread" --arg l "$1" --arg b "$2" \
+      -n '$t + [{user: {login: $l}, body: $b}]')"
+    shift 2
+  done
+  printf '%s\n' "$thread" > "$FIXTURES/repos_test_repo_issues_${n}_comments.json"
 }
 
 # run <expected-exit> <name> -- <args...>; stdout+stderr land in $OUT
@@ -145,6 +151,42 @@ claim 107 "evekhm-odyssey-app[bot]" "Claim: IMPLEMENT stage — odyssey."
 run 0 "D5(e): a claim by the stage's own owner is a resume and proceeds" -- 107
 has "held by odyssey" "D5(e): the resumed claim is reported, not refused"
 
+banner "D5(e) the holder is the comment's AUTHOR, never its text (Argus R1-1)"
+# Fail-open direction: a drive-by comment naming this persona must not
+# unlock an issue another actor genuinely holds.
+issue 117 open "in-progress,status:implementing" "Held, then talked about"
+claim 117 "evekhm-athena-app[bot]" "Claim: IMPLEMENT stage — athena." \
+  "drive-by-user" "I claim this for odyssey."
+run 2 "D5(e): a drive-by body naming this persona does not unlock the issue" -- 117
+has "held by athena" "D5(e): the holder is the real claimant, not the name in the prose"
+hasnt "command:" "D5(e): nothing is dispatched over a foreign claim"
+# A structured claim by a login no identity table names is a foreign
+# claim, not this persona: fail closed and say whose login it is.
+issue 125 open "in-progress,status:implementing" "Claimed by an unknown login"
+claim 125 "drive-by-user" "Claim: IMPLEMENT stage — odyssey."
+run 2 "D5(e): a claim by an unknown login exits 2" -- 125
+has "held by drive-by-user" "D5(e): the refusal names the login, not the persona it mentions"
+has "no persona identity names" "D5(e): it says why the login is not an actor"
+# Fail-closed direction: prose containing the word is not a claim line.
+issue 118 open "in-progress,status:implementing" "Held with prose in the thread"
+claim 118 "some-random-person" "The PR claims it is byte-identical."
+run 0 "D5(e): prose containing 'claims' is not a claim" -- 118
+has "held by nobody the thread names" "D5(e): a thread with no claim line names no holder"
+# The last CLAIM wins, not the last comment mentioning the word.
+issue 119 open "in-progress,status:implementing" "Claimed, then discussed"
+claim 119 "evekhm-odyssey-app[bot]" "Claim: IMPLEMENT stage — odyssey." \
+  "some-random-person" "Nobody claims this is finished yet."
+run 0 "D5(e): later prose does not displace the claim" -- 119
+has "held by odyssey" "D5(e): the holder is still the last structured claim's author"
+
+banner "D5(e) --as narrows the mutex before it is checked (Argus R1-2)"
+issue 120 open "in-progress,status:in-review" "Claimed by one of two reviewers"
+claim 120 "evekhm-atlas-app[bot]" "Claim: REVIEW stage — atlas."
+run 2 "D5(e): --as argus against an atlas claim exits 2" -- 120 --as argus
+has "held by atlas" "D5(e): the other reviewer is a different actor"
+run 0 "D5(e): --as atlas against an atlas claim is a resume" -- 120 --as atlas
+has "held by atlas" "D5(e): the holder resuming proceeds"
+
 banner "D8 a clean issue prints every resolved field and writes nothing"
 issue 108 open "status:implementing" "Deterministic dispatch: one number in"
 run 0 "D8: a clean issue exits 0" -- 108
@@ -159,7 +201,9 @@ has 'command:  claude --agent odyssey "#108"' "D8: the exact command line is pri
 has "nothing was launched and nothing was written" "D8: the dry run says so"
 
 banner "D9 a PR resolves to its issue, by Closes and by branch name"
-pr 109 "Implements the thing.\n\nCloses #108" "odyssey/108-deterministic"
+pr 109 "Implements the thing.
+
+Closes #108" "odyssey/108-deterministic"
 run 0 "D9: a PR with Closes #<n> exits 0" -- 109
 has "resolved from #109 via Closes #108" "D9: the Closes line resolves the issue"
 has "==> #108" "D9: the issue, not the PR, is the unit of work"
@@ -170,6 +214,32 @@ has "resolved from #110 via the branch name odyssey/108-deterministic" \
 pr 111 "No trailer at all." "not-a-work-branch"
 run 1 "D9: a PR that resolves to no issue exits 1" -- 111
 has "cannot resolve PR #111 to an issue" "D9: it says so rather than guessing"
+
+banner "D9 every closing keyword GitHub honours resolves (Argus R1-3)"
+for kw in Fixes fixed FIX Resolves resolved Resolve Close Closed; do
+  pr 121 "$kw #108" "not-a-work-branch"
+  run 0 "D9: '$kw #108' resolves the issue" -- 121
+  has "resolved from #121 via Closes #108" "D9: '$kw' is a closing keyword"
+done
+pr 126 "Discloses #107 — a word that merely ends in one." \
+  "odyssey/108-deterministic"
+run 0 "D9: a word ending in a keyword is not a keyword" -- 126
+has "via the branch name" "D9: 'Discloses' does not close #107"
+pr 122 "See evekhm/other#9 and https://github.com/evekhm/other/issues/9." \
+  "odyssey/108-deterministic"
+run 0 "D9: a cross-repo reference is not a closing reference" -- 122
+has "via the branch name" "D9: cross-repo and URL forms fall through to the branch"
+
+banner "D9 two closing references are two units of work, never a guess (Argus R1-4)"
+pr 123 "Closes #108
+Fixes #107" "odyssey/108-deterministic"
+run 1 "D9: a PR closing two issues exits 1" -- 123
+has "closes more than one issue" "D9: it says why"
+has "#107" "D9: the discarded issue is named"
+has "#108" "D9: both issues are named"
+pr 124 "Closes #108, and again: closes #108." "not-a-work-branch"
+run 0 "D9: the same issue named twice is still one issue" -- 124
+has "resolved from #124 via Closes #108" "D9: distinct numbers, not occurrences"
 
 banner "D9 a multi-owner stage prints both and launches neither"
 issue 112 open "status:in-review" "Under review"
