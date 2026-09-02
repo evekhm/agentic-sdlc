@@ -167,17 +167,38 @@ claim 125 "drive-by-user" "Claim: IMPLEMENT stage — odyssey."
 run 2 "D5(e): a claim by an unknown login exits 2" -- 125
 has "held by drive-by-user" "D5(e): the refusal names the login, not the persona it mentions"
 has "no persona identity names" "D5(e): it says why the login is not an actor"
-# Fail-closed direction: prose containing the word is not a claim line.
+# Prose containing the word is not a claim line: the thread then names
+# no holder, and a mutex that names nobody stops the dispatch (R2-1).
 issue 118 open "in-progress,status:implementing" "Held with prose in the thread"
 claim 118 "some-random-person" "The PR claims it is byte-identical."
-run 0 "D5(e): prose containing 'claims' is not a claim" -- 118
-has "held by nobody the thread names" "D5(e): a thread with no claim line names no holder"
+run 2 "D5(e): prose containing 'claims' is not a claim" -- 118
+has "no comment opens with a structured claim line" \
+  "D5(e): the refusal is 'no claim', not a holder read out of the prose"
+hasnt "held by some-random-person" "D5(e): the commenter is never made the holder"
 # The last CLAIM wins, not the last comment mentioning the word.
 issue 119 open "in-progress,status:implementing" "Claimed, then discussed"
 claim 119 "evekhm-odyssey-app[bot]" "Claim: IMPLEMENT stage — odyssey." \
   "some-random-person" "Nobody claims this is finished yet."
 run 0 "D5(e): later prose does not displace the claim" -- 119
 has "held by odyssey" "D5(e): the holder is still the last structured claim's author"
+
+banner "D5(e) in-progress with no structured claim fails closed (Argus R2-1)"
+# The label is the mutex. A thread that claims in prose, or does not
+# claim at all, leaves it naming nobody — and a mutex naming nobody is
+# still held. Removing in-progress is how a session hands the issue back.
+issue 127 open "in-progress,status:implementing" "Held, claimed in prose only"
+claim 127 "evekhm-odyssey-app[bot]" "Picking this up — athena."
+run 2 "D5(e): in-progress with an unstructured claim exits 2" -- 127
+has "the mutex names no holder" "D5(e): the refusal says the claim is unreadable"
+has "in-progress on #127 is set" "D5(e): it names the label that stopped it"
+hasnt "command:" "D5(e): nothing is dispatched on an unnamed mutex"
+issue 128 open "in-progress,status:implementing" "Held with an empty thread"
+run 2 "D5(e): in-progress with no comments at all exits 2" -- 128
+has "no comment opens with a structured claim line" "D5(e): an empty thread claims nothing"
+issue 129 open "in-progress,status:implementing" "Held, thread unreadable"
+rm -f "$FIXTURES/repos_test_repo_issues_129_comments.json"
+run 2 "D5(e): a thread that cannot be read exits 2" -- 129
+has "cannot be read" "D5(e): an unverifiable mutex is a held mutex"
 
 banner "D5(e) --as narrows the mutex before it is checked (Argus R1-2)"
 issue 120 open "in-progress,status:in-review" "Claimed by one of two reviewers"

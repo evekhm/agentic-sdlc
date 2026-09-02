@@ -294,7 +294,9 @@ persona that does not own the stage. The claim's holder is the
 table — never a name read out of a comment body, which is an
 unauthenticated string, and never prose that merely contains the
 word. A login no identity names is a foreign claim, refused by that
-login. A claim by an owner of the current stage is that actor
+login, and a thread with no claim line at all — or one that cannot be
+read — refuses too: the label is the mutex, and one naming nobody is
+still held. A claim by an owner of the current stage is that actor
 resuming and proceeds; when `--as` names one owner, the mutex binds
 against that actor alone, so one reviewer's claim stops the other.
 Exit 1 is unusable input, exit 0 is launched or printed. The script

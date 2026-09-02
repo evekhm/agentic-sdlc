@@ -278,24 +278,31 @@ persona_for_login() { # <login> -> persona name, or empty
 #     different actor from argus even though both own review. `--as` is
 #     itself validated against the stage's owners by (f) below, which
 #     leaves D5's refusal ORDER as written.
+#     The label alone is enough to stop: `in-progress` whose thread
+#     carries no structured claim is a mutex that names nobody, and
+#     dispatching on it would launch a second session on an issue some
+#     actor is holding without a readable claim (#36, Argus R2-1). The
+#     same goes for a thread this script cannot read — an unverifiable
+#     mutex is a held mutex. Removing `in-progress` is how a session
+#     hands the issue back (AGENTS.md, "Working the tracker", step 5).
 claim_holder=""
 if has_label "in-progress"; then
     resumers="$owners"
     [ -z "$AS" ] || resumers="$AS"
     comments=""
-    if comments="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE/comments")"; then
-        claim_re='\A[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
-        claim_login="$(jq -r --arg re "$claim_re" \
-            '[.[] | select((.body // "") | test($re; "i"))] | last | .user.login // ""' \
-            <<<"$comments")"
-        if [ -n "$claim_login" ]; then
-            claim_holder="$(persona_for_login "$claim_login")"
-            [ -n "$claim_holder" ] \
-                || refuse "in-progress on #$ISSUE is held by $claim_login, a login no persona identity names"
-            grep -Fxq "$claim_holder" <<<"$resumers" \
-                || refuse "in-progress on #$ISSUE is held by $claim_holder"
-        fi
-    fi
+    comments="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE/comments")" \
+        || refuse "in-progress on #$ISSUE is set and its thread cannot be read, so the holder cannot be established"
+    claim_re='\A[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
+    claim_login="$(jq -r --arg re "$claim_re" \
+        '[.[] | select((.body // "") | test($re; "i"))] | last | .user.login // ""' \
+        <<<"$comments")"
+    [ -n "$claim_login" ] \
+        || refuse "in-progress on #$ISSUE is set but no comment opens with a structured claim line (AGENTS.md, \"Working the tracker\", step 2): the mutex names no holder"
+    claim_holder="$(persona_for_login "$claim_login")"
+    [ -n "$claim_holder" ] \
+        || refuse "in-progress on #$ISSUE is held by $claim_login, a login no persona identity names"
+    grep -Fxq "$claim_holder" <<<"$resumers" \
+        || refuse "in-progress on #$ISSUE is held by $claim_holder"
 fi
 
 # (f) --as must name an owner of the stage the labels say is current.
@@ -394,7 +401,8 @@ echo "    artifact: $artifact"
 echo "    owner:    ${owner_list% }"
 echo "    folder:   $folder ($folder_origin)"
 if has_label "in-progress"; then
-    echo "    claim:    in-progress, held by ${claim_holder:-nobody the thread names}"
+    # Reaching here with `in-progress` means (e) established a holder.
+    echo "    claim:    in-progress, held by $claim_holder"
 fi
 
 launch_persona=""

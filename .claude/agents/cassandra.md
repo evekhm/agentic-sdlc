@@ -113,15 +113,18 @@ Checked in this order, before any write:
    labels found and stop — without guessing which is true, and
    without applying `hold`. The stage advancer is the single writer
    of the circuit breaker, and two writers is two circuit breakers.
-5. **`in-progress` is present and the last claim is another
-   actor's.** The holder is the claim comment's *author*, mapped
-   through the persona identity table — never a name read out of
-   the body, which is an unauthenticated string that would let any
-   commenter decide the mutex. A claim is a comment that opens with
-   `Claim`; prose that merely contains the word is not one. An
-   author no identity names is a foreign claim: stop and name the
-   login. Stop and name the holder. A claim by this actor is a
-   resume of its own work and proceeds.
+5. **`in-progress` is present and the last claim is not this
+   actor's.** Stop and name the holder. The holder is the claim
+   comment's *author*, mapped through the persona identity table —
+   never a name read out of the body, which is an unauthenticated
+   string that would let any commenter decide the mutex. A claim is
+   a comment that opens with `Claim`; prose that merely contains
+   the word is not one. An author no identity names is a foreign
+   claim: name the login. A thread with no claim line at all, or
+   one that cannot be read, stops the same way: the label is the
+   mutex, and one naming nobody is still held — removing
+   `in-progress` (step 7) is how a session hands the issue back. A
+   claim by this actor is a resume of its own work and proceeds.
 6. **The derived stage is not one this actor owns.** Name the
    owner(s) of that stage and stop.
 
