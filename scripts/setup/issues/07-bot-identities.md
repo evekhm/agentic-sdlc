@@ -3,11 +3,10 @@ Labels: bootstrap
 Depends:
 ---
 INTENT.md open question 1: the three new personas need GitHub
-identities. PAT-backed bot users like the existing three
-(evekhm-odyssey-bot, evekhm-argus, evekhm-atlas-bot), or GitHub Apps
-with short-lived installation tokens (the predecessor's
-ARGUS_SETUP.md appendix path)? Decide the mechanism and the exact
-account names.
+identities. PAT-backed bot users like the existing three carry-overs,
+or GitHub Apps with short-lived installation tokens (the
+predecessor's ARGUS_SETUP.md appendix path)? Decide the mechanism and
+the exact account names.
 
 **RESOLVED, scope expanded, DONE** (see issue comments for the full
 record): GitHub Apps for all six personas, one App per persona, no
@@ -16,11 +15,10 @@ PAT bot users — including migrating the three existing carry-overs
 an `-app` suffix (`evekhm-athena-app[bot]`, `evekhm-daedalus-app[bot]`,
 `evekhm-cassandra-app[bot]`, `evekhm-odyssey-app[bot]`,
 `evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`) rather than `-bot`,
-since the old PAT accounts held `evekhm-odyssey-bot`/`evekhm-argus`/
-`evekhm-atlas-bot` at registration time and App slugs share the
-username namespace; `-app` was applied uniformly to all six for
-consistency. Names/descriptions/permissions/webhook events per
-persona, the token-minting mechanism
+since App slugs and GitHub usernames share one namespace and could
+otherwise collide with an existing account; `-app` was applied
+uniformly to all six for consistency. Names/descriptions/permissions/
+webhook events per persona, the token-minting mechanism
 (`scripts/auth/mint_app_token.py`, `personas/schema.json`
 `authority.app_id`/`installation_id`/`token`), and the exact
 registration procedure (`scripts/auth/create_all_apps.py`) are
