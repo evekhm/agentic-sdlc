@@ -31,5 +31,7 @@ bin/
 ### This repo ###
 # Local scratch — run artifacts never get committed (AGENTS.md)
 runs/
-# Local harness state
-.claude/settings.local.json
+# Local harness/IDE state
+.claude/
+.idea/
+__pycache__/
