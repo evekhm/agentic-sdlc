@@ -39,7 +39,11 @@ follow pick → claim → read → work → hand off → gate (AGENTS.md,
 and the issue is the unit of parallelism; handoff comments use the
 Done/Decided/Next/Blocked format; the pinned tracker issue (#12)
 indexes the bootstrap backlog by rung; the `hold` label halts all
-automation while present. There is deliberately no STATUS.md.
+automation while present. A session is started from a number and
+nothing else — `scripts/ops/work.sh <issue-or-pr>` resolves the
+stage, owner, folder and branch from the labels and the repository
+(`ops.dispatch`), so the tracker, not the operator, says what is
+current. There is deliberately no STATUS.md.
 
 ### tracker.provisioning
 `scripts/setup/bootstrap_tracker.sh` provisions the base labels and
@@ -115,9 +119,13 @@ gate is a plain rebuild-and-diff. Five stages: validate every source
 against `personas/schema.json`; resolve tier→model, persona→harness
 and capability→tools from `config/`; assemble one instruction body
 (role, skills inlined verbatim in declared order, authority and
-bounds, execution caps, a pointer to AGENTS.md, and fallbacks
+bounds, execution caps, a pointer to AGENTS.md, fallbacks
 GENERATED from `tools.yaml` for optional capabilities the harness
-cannot map — a required one fails the build); emit through one
+cannot map — a required one fails the build — and, for a target
+whose source declares the `resume-protocol.md` skill, a
+`## Lifecycle stages` block GENERATED from
+`personas/lifecycle.json` whose owner line per rung is derived from
+the `stage` lists of the persona sources); emit through one
 emitter per harness; sanitize before write, refusing any output
 carrying a home path, a token shape, an inline credential value, or a
 site-specific string named at run time in `SYNC_AGENTS_DENY` (never
@@ -132,6 +140,30 @@ full skill text. Proof: `scripts/ci/compiler_roundtrip.sh` (schema
 check, determinism, drift, roundtrip, a throwaway persona compiled
 end-to-end, sanitizer refusal). Both run on every pull request as the
 drift gate (`ci.gates`).
+
+### personas.resume
+`personas/lifecycle.json` is the single source of the label↔stage
+relation (#36, `intent/36-dispatch/`): five rungs — plan, design,
+build, implement, review — each row carrying `stage`, `label`,
+`artifact`, `advances_to`, `advance_message` and `dispatch_brief`.
+Ownership is deliberately not a column: who works a stage is DERIVED
+from the `stage` list of every `kind: persona` source, so adding an
+owner is an edit to that persona and to nothing else. It has three
+readers and no fourth copy — `scripts/ci/lifecycle_advance.sh`
+matches on `artifact` to pick a transition (`lifecycle.labels`),
+`scripts/ops/work.sh` matches on `label` to pick a stage
+(`ops.dispatch`), and the compiler renders the whole ladder, with
+each rung's derived owners, into a generated `## Lifecycle stages`
+block in every target whose source declares the
+`personas/skills/resume-protocol.md` skill (all six personas, no
+sub-agent). That skill is the resume protocol itself and holds no
+copy of the ladder: a number is the whole instruction, and a session
+handed one reads the issue, derives the stage from its single
+`status:*` label, reuses or derives the intent folder, claims with
+`in-progress` plus one comment, works only the current stage's
+artifact, hands off in the Done/Decided/Next/Blocked format, and
+refuses in six stated conditions rather than guessing. Tests:
+`scripts/ci/tests/lifecycle_advance_test.sh`.
 
 ### ci.gates
 `.github/workflows/ci-gates.yml` runs three deterministic gates on
@@ -178,11 +210,16 @@ deterministic bash + `gh` + `jq` with no model call and is runnable
 locally by the same command (`DRY_RUN=1` prints every mutation instead
 of executing it). It reads the pushed range for ADDED files matching
 `intent/<issue>-<slug>/{intent,spec,plan}.md` and mirrors the merge
-gate into the label: intent.md → `status:spec`, spec.md →
-`status:build` **only if the merged file carries `Status: Approved`**
-(a Draft spec gets a warning comment and no advance), plan.md →
-`status:implementing`; each transition posts one comment naming what
-the next stage owes. `hold` is checked first and halts the issue
+gate into the label. WHICH label each merged artifact advances to,
+and the line posted when it does, are not written in the script:
+they are read from `personas/lifecycle.json` (`personas.resume`,
+#36), matched on the artifact column — today intent.md →
+`status:spec`, spec.md → `status:build`, plan.md →
+`status:implementing`, one comment per transition naming what the
+next stage owes. The one exception the script owns is the Draft
+override, which is the ladder refusing to move rather than a rung of
+it: a merged spec.md advances **only if it carries `Status:
+Approved`**, and otherwise gets a warning comment and no advance. `hold` is checked first and halts the issue
 absolutely; more than one `status:*` is treated as corrupted state —
 the script comments, applies `hold`, and stops processing that issue;
 a push adding several of the triple for one issue applies only the
@@ -224,6 +261,38 @@ the escalation label.
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
 tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
+
+### ops.dispatch
+`scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]` starts a
+session from a number (#36, `intent/36-dispatch/`). Deterministic
+bash + `gh` + `jq`, no model call: the issue's labels, the merged
+folder layout and three committed data files are the whole input, so
+the same number always resolves the same way. It resolves a pull
+request to its issue by `Closes #<n>` in the body and then by the
+`<actor>/<n>-<slug>` branch name; the stage from the single
+`status:*` label — or the first rung when the issue is `intent:new` —
+through `personas/lifecycle.json` (`personas.resume`); the owners
+from the persona sources; the folder by reusing `intent/<n>-*/` when
+one exists and otherwise deriving a slug from the title (cut at the
+first `:` or `;`, lowercased, runs of other characters to `-`, ≤24
+characters at a word boundary); the branch `<persona>/<n>-<slug>`;
+and the harness from `config/deployments.yaml`. There is deliberately
+no flag naming a stage, folder, artifact or branch — one would let a
+session work a stage the labels say is not current. Six refusals,
+checked in order before anything is dispatched and each exiting 2
+with the condition named: `hold`; closed, or `status:review-stuck`;
+`blocked`; more than one `status:*` (reported, never guessed, and
+never `hold`-ed — the advancer is the single writer of the circuit
+breaker); `in-progress` claimed by another actor, where a claim by an
+owner of the current stage is that actor resuming and proceeds; and
+`--as` naming a persona that does not own the stage. Exit 1 is
+unusable input, exit 0 is launched or printed. The script never
+writes to GitHub: the claim belongs to the session it launches, not
+to the launcher. A stage with several owners (review) prints both
+instructions and launches neither unless `--as` names one, and a
+harness this script cannot start prints and exits 0. `DRY_RUN=1`
+prints the resolved launch command instead of executing it; the reads
+and every guard still run. Tests: `scripts/ops/tests/work_test.sh`.
 
 ## Agreed, not yet built
 
