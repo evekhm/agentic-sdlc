@@ -79,6 +79,7 @@ role: >-
 
 skills:
   - trusted-posting.md
+  - resume-protocol.md
 
 capabilities:
   - name: read_repo
@@ -115,6 +116,12 @@ assert_in 'view_file' "$AGENT/config.yaml" \
   "config.yaml carries the tools mapped from read_repo"
 assert_in '# Skill: trusted-posting' "$AGENT/instructions.md" \
   "instructions.md inlines the declared skill"
+assert_in '## Lifecycle stages' "$AGENT/instructions.md" \
+  "instructions.md carries the ladder generated from personas/lifecycle.json"
+assert_in '### review' "$AGENT/instructions.md" \
+  "the generated ladder carries a section per rung of the ladder"
+assert_in '- Owner: argus, atlas' "$AGENT/instructions.md" \
+  "the generated ladder derives multi-owner stages, sorted"
 assert_in '### ask_user' "$AGENT/instructions.md" \
   "instructions.md carries a generated fallback section"
 assert_in 'No interactive question tool is available' "$AGENT/instructions.md" \

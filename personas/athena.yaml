@@ -22,6 +22,7 @@ role: >-
 skills:
   - spec-adversary.md
   - trusted-posting.md
+  - resume-protocol.md
 
 capabilities:
   - name: read_repo
