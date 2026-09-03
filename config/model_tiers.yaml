@@ -2,8 +2,9 @@
 # config/ files) where vendor names appear; persona sources never name
 # models (personas/schema.json, D3). Adjacent tiers may share a model:
 # the tier names the task contract, not the price (AGENTS.md).
-# Where a workflow pins a model in an env var, that pin wins over this
-# file until the compiler (#5) starts generating the workflows.
+# This file is the sole source of a run's model: it is resolved through
+# the compiled persona target for the harness pinned in
+# config/deployments.yaml
 
 harnesses:
   claude-code:

@@ -1,9 +1,10 @@
 # agentic-sdlc
 
 You are the operator at the keyboard — the presenter running this
-workshop, or an attendee following along on your own clone. This is the
-walkthrough of one change through the whole loop. Your entire job is
-two actions, repeated: typing a number, and merging a pull request.
+workshop, or an attendee following along on your own clone. The first
+four sections tell you what this repository is and why; the rest walk
+one change through the whole loop. Your entire job is two actions,
+repeated: typing a number, and merging a pull request.
 
 ## The loop in one picture
 
@@ -24,6 +25,117 @@ intent.md  spec.md   plan.md      code         findings
 
 One pull request per rung. Nothing advances because a session declares
 itself done; it advances because you merged something.
+
+## Why this exists
+
+Three motivations stack on top of each other.
+
+**The playbook made concrete.** The AI-native SDLC playbook
+([`docs/BLOG.md`](docs/BLOG.md)) argues that code is no longer the
+bottleneck; planning, review and governance are. It proposes a loop in
+which every stage commits an artifact and that commit starts the next
+stage. The playbook describes the loop in prose, for one harness.
+Nothing demonstrated the whole loop with real GitHub identities, more
+than one harness, review by two model families and cost discipline in
+one clonable repository. This repository is that demonstration.
+
+**One workflow, each harness where it fits best.** The goal is not to
+crown a harness. It is to run one lifecycle across several of them and
+to place each role on the harness and model family that returns the
+most per dollar. The working thesis: a fast, inexpensive model family
+is the workhorse and carries the bulk of the mechanical, implementation
+and review-reading work; a frontier family is uniquely strong at design
+and at the hardest code, and far more expensive, so it is spent only
+where its reasoning changes the outcome — interrogating a spec, a
+tricky design, the implementation nobody else can land. The best result
+at the best cost comes from making them work together, and the persona
+compiler plus the pins in `config/` are what let the placement change
+without touching the workflow. Which family sits where is a fact in
+[`config/model_tiers.yaml`](config/model_tiers.yaml) and
+[`config/deployments.yaml`](config/deployments.yaml), and appears in no
+other document.
+
+**A workshop that proves it live.** The format is a presenter-driven
+demo plus a take-home template. Because the demo is the system building
+itself, every rung the audience watches is a real change landing in
+this repository, and the presenter's whole job is the two actions
+above.
+
+## The cast
+
+Six personas, each its own GitHub App with its own bot identity, each
+defined once in `personas/<name>.yaml` with no vendor named:
+
+- **Athena**, the product owner, works the plan and design rungs at the
+  frontier tier. Her protocol is adversarial: one ambiguity at a time,
+  two defensible readings, never a recommendation, every resolution a
+  numbered decision.
+- **Daedalus**, the architect, works the build rung at the frontier
+  tier: the order of work and the check that proves each decision
+  landed.
+- **Odyssey**, the implementer, works the implement rung at the
+  implementation tier, dispatched at a pinned commit against an
+  approved spec and a committed plan.
+- **Argus** and **Atlas**, the two reviewers, work the review rung at
+  the review tier on two distinct model families, comment-only.
+- **Cassandra**, the maintainer, watches metrics against control bands
+  and files a new intent when one breaks, at the fast tier. Maintain
+  has no rung on the ladder yet.
+
+Five sub-agents with no GitHub identity — mechanic, coder,
+contract-writer, scanner, explorer — do the delegated work a persona
+hands off so that raw material never enters the persona's own context.
+
+**Tiers, not prices.** A persona declares the kind of work it does,
+on a five-grade ladder: fast (sweeps, lookups, routing), mechanical
+(batch edits, greps, test runs), implementation (coding against a
+dispatch-ready spec), review (evidence-based reading), frontier
+(design, interrogation, the hardest debugging). Each harness binds the
+tiers to its own models in `config/model_tiers.yaml`; adjacent tiers may
+share a model. Repinning a persona to another harness is a one-line
+change in `config/` followed by a compiler run — the tier ladder is
+[AGENTS.md, "Subagent model tiers"](AGENTS.md#subagent-model-tiers).
+
+**The compiler.** [`scripts/sync_agents.py`](scripts/sync_agents.py)
+reads `personas/` and `config/` and emits the prompt files each harness
+actually loads. The generated files are committed, and a CI gate
+recompiles them and fails the build if they drift from their sources.
+It exists because the predecessor repository hand-maintained one prompt
+per harness and they diverged within days; "one persona, every
+harness" is a demonstrated fact here rather than a claim. What it
+emits and how is [`docs/SPEC.md`](docs/SPEC.md) `personas.compiler`.
+
+## How it builds itself
+
+The system could not run its own loop before the loop existed, so its
+backlog is organised as a bootstrap ladder, indexed by one pinned
+tracker issue that lists every rung and ticks items off as they land:
+
+- **Rung 1, wizard of Oz.** A human authored the persona sources, the
+  config and the review protocol. Personas ran by hand, as sub-agents
+  of the operator's own session.
+- **Rung 2, the machinery.** The compiler, the CI gates, the label
+  taxonomy, the bot identities, the one-command dispatcher, this
+  document, and launching any persona on its own harness.
+- **Rung 3, unattended personas.** The reviewers as event-driven
+  workflows and the product owner picking up `intent:new` on her own,
+  which first needs the execution model that decides where each persona
+  runs.
+- **Rung 4, maintain.** Deterministic watchers and a seeded incident
+  that files a new intent — the loop closing on itself.
+- **Rung 5, packaging.** The personas compiled into an installable
+  plugin for the take-home.
+
+From rung 2 on, every feature of this repository is delivered through
+the repository's own ladder: an `intent/<n>-<slug>/` folder holding the
+intent, the spec and the plan; a spec authored under the persona's own
+App identity; a persona-namespaced branch; commits that cite reviewer
+finding ids. The audit trail the playbook asks for is the git history.
+Where the system cut a corner it wrote that down too, as an explicit,
+non-precedent deviation in the spec that cut it. What is merged and
+behaving today — and what is agreed but not yet built — is
+[`docs/SPEC.md`](docs/SPEC.md); trust it over any narrative, this one
+included.
 
 ## Before you start
 
@@ -91,6 +203,12 @@ Merging that pull request moves the item to review.
 ends the ladder and the human closes the item. Which label means which rung,
 and what each posts, is [`docs/SPEC.md`](docs/SPEC.md) `lifecycle.labels`.
 
+The transition itself is a deterministic workflow with no model call:
+on a merge to the default branch it reads which artifact file was
+added, looks the next stage up in `personas/lifecycle.json`, moves the
+label and posts a stamped comment. The merge is the gate; the label is
+its shadow.
+
 ## What you merge
 
 A merged pull request is the human product owner's acceptance of the
@@ -130,21 +248,32 @@ to `status:review-stuck` for a human. Each label's semantics are
 
 When merged work turns out to be wrong, file the defect as its own
 issue. If its `docs/SPEC.md` entry is unchanged, the repair skips the
-intent/spec/plan triple: issue, fix PR with a regression check, review,
-human merge. A spec-changing repair re-enters at PLAN. Ratified on #32.
+intent/spec/plan triple: issue, fix pull request with a regression
+check, review, human merge. A repair that changes a spec entry is a
+change, and re-enters at plan. The rule is stated normatively in
+[INTENT.md, "Defect repair"](INTENT.md).
 
 ## Where the rules actually live
 
 - [AGENTS.md](AGENTS.md) — the cross-harness standard every session
-  reads: working the tracker, run folders, cost discipline.
-- [INTENT.md](INTENT.md) — why this system exists and what the
-  workshop sets out to prove.
+  reads: working the tracker, run folders, cost discipline, the tier
+  ladder, the context ceiling.
+- [INTENT.md](INTENT.md) — why this system exists, what the workshop
+  sets out to prove, and the questions still open.
 - [`docs/SPEC.md`](docs/SPEC.md) — the living spec: what is built
-  today, keyed by capability.
-- [REVIEW.md](REVIEW.md) — the review protocol both reviewers compile
-  against.
-- [`docs/CONTEXT.md`](docs/CONTEXT.md) — the prior art it was built on.
+  today, keyed by capability, and what is agreed but not yet built.
+  Trust it over memory.
+- [REVIEW.md](REVIEW.md) — the protocol both reviewers compile against.
+- [`docs/BLOG.md`](docs/BLOG.md) — the playbook this loop implements.
+- [`docs/CONTEXT.md`](docs/CONTEXT.md) — the prior art it was built on,
+  and what was adopted from each.
+- [`config/`](config/) — the only place a harness, vendor or model
+  family is named: tier bindings, deployment pins, tools.
+- The pinned tracker issue in this repository's issue tracker — the
+  live dashboard of the ladder. There is deliberately no status file.
 
 This file explains and never duplicates: it is normative for nothing,
 and wherever it and one of those documents disagree, the other is
-right. A tenth topic is a link from this section, never a tenth section.
+right. A new topic is a link from this section, or a deliberate
+addition to the section list in this document's own spec under
+`intent/`, never a drop-in section that list does not name.

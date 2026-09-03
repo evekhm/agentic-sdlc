@@ -36,10 +36,12 @@ points an agent at it. It explains and never duplicates, so every
 rule it mentions that is normative elsewhere is at most one sentence
 plus a link to its owner, it is normative for nothing itself, and
 wherever it and a document it links disagree the other one wins. It
-is bounded by construction: exactly nine `##` sections in a fixed
-order, at most 150 lines, at most one diagram, and exactly one
-command shown as an instruction (`scripts/ops/work.sh <n>`) — a tenth
-topic is a link from its last section, never a tenth section.
+is bounded by construction: a fixed, ordered section list that grows
+only by a deliberate edit to that list, at most one diagram, and
+exactly one command shown as an instruction (`scripts/ops/work.sh
+<n>`). There is no line or section-count cap (the 150-line, nine-
+section ceiling of #35 D2/D4 was lifted by the product owner on
+2026-09-03).
 Reference docs live in `docs/` (BLOG.md, CONTEXT.md, this file),
 uppercase names throughout.
 
@@ -363,3 +365,12 @@ spec body when its implementing PR merges.
 - **intake.automation** — headless Athena on `intent:new` (#10).
 - **maintain.watchers** — Cassandra, control bands, seeded incident
   (#11).
+- **execution.placement** — where each persona's unattended run
+  executes (#25, `intent/25-execution-model/spec.md`, D1–D19): a
+  per-persona registry `config/execution.yaml` (`trigger`,
+  `placement`, `events`, `max_cost_usd`) resolved against runner
+  adapters under `scripts/placement/` — `vm-local` and `gh-actions`
+  in v1, `cloud-run-worker`/`cloud-run-instance`/`agent-engine`
+  reserved names with no adapter yet — plus the adapters' `post.sh`
+  hold-before-write check. Spec and plan are merged; nothing is
+  implemented.

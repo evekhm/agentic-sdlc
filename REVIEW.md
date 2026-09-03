@@ -19,18 +19,19 @@ the system does today is in [docs/SPEC.md](docs/SPEC.md).
 **Automation status.** The enforcement points below name a
 *recorder*: the trusted posting step that validates reviewer output
 against a schema and performs every GitHub write itself. No recorder
-exists in this repository yet — it ports with issues #8 and #9 — so
+exists in this repository yet — it ports with the reviewer-automation
+work tracked as `review.automation` — so
 every rule here is currently prompt-enforced with a human as the
 backstop. The rules are stated normatively anyway, so the ported code
 has exactly one target.
 
 ## The two reviewers
 
-- **Argus** (`evekhm-argus`) — the event-driven reviewer. Reviews on
+- **Argus** (`evekhm-argus-app[bot]`) — the event-driven reviewer. Reviews on
   PR open, on pushes to a PR branch, and on mention. Owns the
   findings ledger and, once the automation lands, the recorder that
   writes it.
-- **Atlas** (`evekhm-atlas-bot`) — the independent second opinion,
+- **Atlas** (`evekhm-atlas-app[bot]`) — the independent second opinion,
   the reviewer that makes consensus mean something. Runs round 1 in
   full and afterwards only where the protocol requires it.
 - Both are **comment-only**. Neither ever approves, requests changes,
@@ -115,7 +116,7 @@ including every class that stretches rounds: doc-number drift, prose
 precision, same-class-elsewhere instances outside the diff, missing
 polish on error paths that gate neither money nor security.
 
-Enforcement (recorder, not prompt — ports with #8/#9):
+Enforcement (recorder, not prompt — ports with `review.automation`):
 
 - Severity must be one of the four enum values; anything else fails
   validation.
@@ -175,7 +176,7 @@ row, then closes the ledger
   already carry the round, so the recorder needs no new state to
   enforce round-scoped rules. How the counter surfaces as a lifecycle
   label — and the escalation label that hands a stuck review to a
-  human — belongs to the label state machine (issue #4).
+  human — belongs to the label state machine (`lifecycle.labels`).
 - Underneath the funnel sits a budget gate that bounds the *number*
   of rounds: three event-driven rounds, then one consumed-on-use
   grant label per extra round, honored only when a repository admin
@@ -184,7 +185,7 @@ row, then closes the ledger
   allowed. A daily run brake and a dispute cap of three exchanges sit
   beside it. The funnel is what the gate was missing: the gate bounds
   round count, the funnel bounds round *scope*. (Gate automation
-  ports with #8/#9.)
+  ports with `review.automation`.)
 
 Why both bounds are needed, from the predecessor repo
 (`agentic-experiments-lab`): with an automated fixer as PR author and
@@ -323,8 +324,8 @@ IDs rather than to diff hunks:
 
 Labels are **derived from ledger state by the recorder**. No reviewer
 ever adds, removes, or asserts one. The label *names* below are the
-predecessor's; the taxonomy that wins here is settled by issue #4
-(INTENT.md open question 4), and these rules bind whatever names it
+predecessor's; the taxonomy that wins here is settled by
+`lifecycle.labels` (INTENT.md open question 4), and these rules bind whatever names it
 picks.
 
 - The findings label is present if and only if open **blocking** rows
@@ -398,7 +399,8 @@ the unbounded loop.
 
 ## Dispatch policy
 
-Automation ports with #8/#9; the rules bind it when it lands.
+Automation ports with `review.automation`; the rules bind it when it
+lands.
 
 - Reviews are dispatched by: PR opened, push to a PR branch (through
   the budget gate), an explicit reviewer mention, or manual dispatch.
@@ -440,7 +442,8 @@ Prompts state the rules so the reviewers aim correctly; the recorder
 enforces them so a drifting model cannot break the budget. **Every
 rule must exist in code before a prompt may describe it in the
 present tense** — a prompt that describes unbuilt behavior sends the
-agent's output into a void. Until the recorder lands (#8/#9), the
+agent's output into a void. Until the recorder lands
+(`review.automation`), the
 rows marked *recorder* are prompt-enforced with a human backstop.
 
 - Severity enum, the `high` failure-scenario requirement, and loud
