@@ -127,7 +127,7 @@ sessions therefore has exactly one mechanism: the GitHub issue.
 
 ## Working the tracker: pick, claim, work, hand off
 
-This is the
+The repository is `github.com/evekhm/agentic-sdlc`. This is the
 session workflow — the same loop whether the session is a human
 driving a harness, a compiled persona, or (later) an automated
 workflow. It is what makes parallel sessions safe and any session
@@ -159,8 +159,8 @@ resumable cold.
    it completes the issue's final stage — in the five-rung flow the
    final rung produces a review and not a pull request, so no PR in
    that flow carries `Closes #<n>` and the human closes the item; the
-   defect-repair path (INTENT.md, "Defect repair") is unchanged,
-   because there the fix PR *is* the final stage.
+   defect-repair path (#32) is unchanged, because there the fix PR
+   *is* the final stage.
 5. **Hand off.** End with the Done/Decided/Next/Blocked comment on
    the issue (format above). If pausing rather than finishing, remove
    `in-progress` so another session can claim. Tick the tracker
@@ -226,8 +226,7 @@ previews. The cadence:
   its owner unlocks it (`git worktree unlock <path>`) after checking
   the diff.
 
-**The labels are the state machine** (`lifecycle.labels`,
-`intent/4-labels/`). Five
+**The labels are the state machine** (#4, `intent/4-labels/`). Five
 are human-facing and filed by people: `intent:new` (intake),
 `in-progress` (the claim mutex above), `hold`, `blocked`, and
 `bootstrap`. The lifecycle stage is a single `status:*` label — the
@@ -324,7 +323,7 @@ PR here (agent or human), regardless of harness:
   (`component.capability`). An ID survives rewording and changes
   only when the capability itself is replaced. An entry added or
   changed after the spec's initial version cites its PR inline:
-  `(PR #<number>)`.
+  `(PR #123)`.
 - Statements are present tense and describe merged code only. Where
   behavior is shipped-but-broken, disabled, or prompt-only rather
   than code-enforced, the entry or the Deployment status section

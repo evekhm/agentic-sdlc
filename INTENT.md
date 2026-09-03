@@ -3,7 +3,7 @@
 **Author:** evekhm · **Status:** Draft
 **Sources:** [docs/BLOG.md](docs/BLOG.md) (the playbook), [docs/CONTEXT.md](docs/CONTEXT.md) (prior art and adopted conventions)
 
-This is the founding, system-level intent — the founding change of the system
+This is the founding, system-level intent — change #0 of the system
 it describes. It follows the playbook's intent template (Problem,
 Proposed outcome, Affected users and systems, Constraints, Open
 questions). Once the flow below is live, every subsequent change gets
@@ -100,13 +100,12 @@ lives in GitHub issue labels, never in a chat transcript.
 unchanged does not owe the intent/spec/plan triple: it goes issue →
 fix PR with a regression check → REVIEW → human merge, with the issue
 citing the capability it repairs. A repair that changes a spec entry is
-a change and re-enters at PLAN. Ratified on the tracker; this paragraph
-is the rule's home.
+a change and re-enters at PLAN. Ratified on #32.
 
 ### Where artifacts live
 
 ```text
-INTENT.md                     # this file: the system-level intent (founding change)
+INTENT.md                     # this file: the system-level intent (change #0)
 intent/<issue>-<slug>/        # one folder per change — the change record
   intent.md                   #   what was asked for        (Plan gate)
   spec.md                     #   what was decided + Decisions table (Design gate)
@@ -275,11 +274,11 @@ family runs them. `config/` carries the pins — which harness executes
 which persona, and which vendor family backs each tier on that
 harness. v1 targets **two harnesses** (currently Claude Code and
 Antigravity — swappable by editing pins, not personas), and both are
-compiled today; launch is not yet harness-agnostic, so `scripts/ops/work.sh`
-starts a Claude Code session itself and prints the launch instruction
-for an Antigravity one (an open item on the tracker). Dual-model review only requires that the
-two reviewers' pins resolve to different model families. IDE targets
-compiled-only.
+compiled today; launch is not yet harness-agnostic, so
+`scripts/ops/work.sh` starts a Claude Code session itself and prints
+the launch instruction for an Antigravity one (#43). Dual-model
+review only requires that the two reviewers' pins resolve to
+different model families. IDE targets compiled-only.
 
 ### Repository layout (target)
 
@@ -369,7 +368,7 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
 
 ## Open questions
 
-1. ~~**New bot identities**~~ — RESOLVED (`identity.bots`): all six personas are
+1. ~~**New bot identities**~~ — RESOLVED (#7): all six personas are
    GitHub Apps with short-lived installation tokens (no PAT-backed
    bot users), one App per persona so each keeps a distinct identity;
    the existing three carry-overs (Odyssey, Argus, Atlas) migrate off
@@ -377,8 +376,7 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
    uses an `-app` suffix (not `-bot`) since the pre-existing PAT
    accounts held the bare `-bot`/plain names at registration time and
    App slugs share the username namespace. Names, per-persona
-   permissions, and webhook events are recorded in `docs/SPEC.md`'s
-   `identity.bots` entry; the
+   permissions, and webhook events are recorded on issue #7; the
    `personas/*.yaml` authority blocks and `scripts/auth/mint_app_token.py`
    carry the mechanism.
 2. **Hosting**: which org/repo for the shared demo; is the take-home
@@ -392,27 +390,26 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
    `cloud-run-instance` and `agent-engine` reserved as documented
    names that fail validation until their adapter directory exists.
    Cassandra gets no entry: her cadence remains the maintainer-watchers
-   item's to decide (`maintain.watchers`, on the tracker).
+   item's to decide (#11).
    Implementation is pending under `execution.placement` — the spec and plan are
    merged, no adapter is built yet. The original framing: harness
    (which agent framework interprets a persona — Claude Code vs Antigravity, pinned
    in `config/deployments.yaml`) and deployment/execution environment
    (where that framework's process runs and what triggers it — local
    interactive, GitHub Actions, a VM, Cloud Run, an agent platform) are
-   orthogonal axes. The compiler (`personas.compiler`) stays scoped to producing the
+   orthogonal axes. The compiler (#5) stays scoped to producing the
    harness-native persona definition only and carries no deployment
-   knowledge; each automation item on the tracker (`review.automation`
-   for Argus and Atlas, `intake.automation` for Athena intake,
-   `maintain.watchers` for Cassandra) decides its own execution
+   knowledge; each automation issue (#8 Argus, #9 Atlas, #10 Athena
+   intake, #11 Cassandra watchers) decides its own execution
    environment at build time rather than one upfront global pin, since
    event-triggered review/intake and continuous watching are genuinely
    different trigger shapes. Antigravity does support headless
    invocation (confirmed), so atlas being antigravity-pinned does not
-   block the Atlas sidecar. What was left open there — the concrete target per
-   persona/issue — is what the execution-model spec now fixes above; Cassandra's
-   watcher cadence and seeded-incident mechanism stay with
-   `maintain.watchers`.
-4. ~~**Label taxonomy**~~ — RESOLVED (`lifecycle.labels`): a merged taxonomy, not a
+   block #9. What was left open there — the concrete target per
+   persona/issue — is what the execution-model spec now fixes above;
+   Cassandra's watcher cadence and seeded-incident mechanism stay
+   with #11.
+4. ~~**Label taxonomy**~~ — RESOLVED (#4): a merged taxonomy, not a
    verbatim adoption of either candidate. Five labels are
    human-facing (`intent:new`, `in-progress`, `hold`, `blocked`,
    `bootstrap`) plus a single `status:*` stage ladder
@@ -424,9 +421,8 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
    `scripts/setup/bootstrap_tracker.sh`;
    `.github/workflows/lifecycle.yml` mirrors intent/spec/plan merges
    into the ladder deterministically, no model call. Full taxonomy
-   and mechanism recorded in `intent/4-labels/`; `docs/SPEC.md`'s
-   `lifecycle.labels` entry and `AGENTS.md`'s tracker-workflow section
-   carry it.
+   and mechanism recorded on #4; `docs/SPEC.md`'s `lifecycle.labels`
+   entry and `AGENTS.md`'s tracker-workflow section carry it.
 5. **Dispatched implementer transport**: predecessor's
    watcher-daemon Odyssey (mention-summoned, headless CLI dispatch)
    vs the lab's Agent-Runtime dispatch at pinned SHA — or show both
@@ -446,8 +442,8 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
 ---
 Disposition (2026-09-01): rewritten after research pass
 (runs/2026-09-01_research/); supersedes the first draft (intent.md,
-deleted same day). Later same day: the repo went live with the
-bootstrap backlog filed as
+deleted same day). Later same day: repo went live at
+github.com/evekhm/agentic-sdlc with the bootstrap backlog filed as
 issues (scripts/setup/bootstrap_tracker.sh) — the pinned Bootstrap
 tracker issue is now the tracker of record, per AGENTS.md "Working
 the tracker".

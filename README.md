@@ -250,8 +250,8 @@ When merged work turns out to be wrong, file the defect as its own
 issue. If its `docs/SPEC.md` entry is unchanged, the repair skips the
 intent/spec/plan triple: issue, fix pull request with a regression
 check, review, human merge. A repair that changes a spec entry is a
-change, and re-enters at plan. The rule is stated normatively in
-[INTENT.md, "Defect repair"](INTENT.md).
+change, and re-enters at plan. Ratified on #32; the rule is stated
+normatively in [INTENT.md, "Defect repair"](INTENT.md).
 
 ## Where the rules actually live
 
