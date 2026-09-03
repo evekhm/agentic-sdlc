@@ -126,7 +126,13 @@ fixture_tree() {
     'fi' \
     'echo "stub-token-for-$1"' \
     > "$t/scripts/auth/mint_app_token.py"
-  chmod +x "$t/scripts/auth/mint_app_token.py"
+  # Deliberately NOT chmod +x. `cp -r` above preserved the real file's
+  # mode and `>` does not change it, so the stub is executable exactly
+  # when the tracked file is. A chmod here would make the fixture
+  # structurally blind to the defect that stopped both first smoke
+  # launches — mint_app_token.py committed 100644 — and every scenario
+  # below would keep passing while no real launch could mint at all.
+  # The direct assertion on the real files is a few lines down.
   printf '%s\n' "$t"
 }
 
@@ -194,6 +200,32 @@ hasnt() {
 banner() { printf '\n--- %s\n' "$*"; }
 
 # ---------------------------------------------------------------------------
+banner "#43 D11/D13 the executables the launcher runs directly are executable"
+# Two files are invoked as programs rather than handed to an
+# interpreter: work.sh runs mint_app_token.py, and git runs
+# git-credential-persona. Their mode bit is part of the contract, and
+# the first real smoke run died at `Permission denied` because
+# mint_app_token.py had been committed 100644 — every caller until then
+# had run it as `python3 <path>`. No scenario below can catch that:
+# fixture_tree writes its own stub over the copy. Assert the real files,
+# in the working tree AND in the index, so a re-add or a patch that
+# drops the mode fails here, loudly, instead of at push time with the
+# work already done.
+for prog in scripts/auth/mint_app_token.py scripts/auth/git-credential-persona; do
+  [ -x "$REPO/$prog" ] || fail "$prog is not executable; the launcher cannot run it"
+  pass "$prog is executable in the working tree"
+done
+if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+  for prog in scripts/auth/mint_app_token.py scripts/auth/git-credential-persona; do
+    mode="$(git -C "$REPO" ls-files -s -- "$prog" | awk '{print $1}')"
+    [ "$mode" = "100755" ] \
+      || fail "$prog is $mode in the index, not 100755; a fresh clone cannot launch"
+    pass "$prog is recorded 100755 in the index"
+  done
+else
+  pass "not a git checkout — index modes not checked"
+fi
+
 banner "D5(a) hold is absolute — checked before anything else"
 issue 101 open "hold,status:implementing,blocked" "Held issue"
 run 2 "D5(a): hold exits 2" -- 101
