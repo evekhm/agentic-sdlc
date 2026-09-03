@@ -359,8 +359,17 @@ asks whether the number was worked, not which layer declined. Exit 1
 is unusable input or an unobservable outcome; exit 0 is launched-and-ok
 or printed. The `/work` door is a hand-authored
 `.claude/commands/work.md` whose body is exactly
-`scripts/ops/work.sh $ARGUMENTS`; `.claude/commands/` is outside the
-compiler's target directories, so this is not a drift-gate bypass.
+`scripts/ops/work.sh $ARGUMENTS`, carried in the `` !`…` `` form that
+runs it rather than describing it, with
+`allowed-tools: Bash(scripts/ops/work.sh:*)` so it runs without a
+prompt: a command body is otherwise injected as a prompt and whether
+the script runs at all is the model's discretion.
+`.claude/commands/` is outside the compiler's target directories, so
+this is not a drift-gate bypass. The injected form runs the script
+before the turn and puts its stdout in context, so `/work` is the door
+for a printed dispatch and for `HEADLESS=1`; an interactive launch,
+which hands the terminal to the child through `exec`, is a plain shell
+invocation of `scripts/ops/work.sh`.
 Tests: `scripts/ops/tests/work_test.sh` against stubs, and
 `scripts/ops/smoke_launch.sh <scratch-issue>` for one real launch per
 harness — three named observables each, with the claim half of the
