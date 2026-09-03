@@ -106,7 +106,10 @@ secret — an Actions secret or a local
 one owner: `_github_app.py:get_repo_info()` derives `(owner, repo)`
 from the checkout's `origin` remote, so forking the repo and
 re-running `create_all_apps.py` registers independently-named Apps
-with no script edits.
+with no script edits. A dispatched session never carries the
+operator's credentials: `scripts/ops/work.sh` mints the launched
+persona's token in the one step between the last refusal and the
+launch and hands it to the child alone (`ops.identity`).
 
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
@@ -123,8 +126,15 @@ never to a persona source.
 ### personas.compiler
 `scripts/sync_agents.py` compiles `personas/` + `config/` into every
 harness target (#5, `intent/5-compiler/`): `.claude/agents/<name>.md`
-for Claude Code and `.agents/agents/<name>/{agent.json,config.yaml,
-instructions.md}` for Antigravity, all committed. The build is pure
+for Claude Code and `.agents/agents/<name>/{agent.md,agent.json}` for
+Antigravity, all committed. Antigravity reads only `agent.md`: YAML
+frontmatter carrying `name`, `description` and `tools` (mapped to that
+harness's own tool names) above the assembled body, with the
+generated-file marker as a frontmatter comment. A `model:` key there
+voids the agent — the harness silently falls back to its stock agent —
+so the resolved model and the sub-agent flag ride in the sidecar
+`agent.json`, which the harness ignores and `scripts/ops/work.sh` reads
+(#43, `ops.dispatch`). The build is pure
 and deterministic — no timestamps, no machine state — so the drift
 gate is a plain rebuild-and-diff. Five stages: validate every source
 against `personas/schema.json`; resolve tier→model, persona→harness
@@ -310,14 +320,72 @@ read — refuses too: the label is the mutex, and one naming nobody is
 still held. A claim by an owner of the current stage is that actor
 resuming and proceeds; when `--as` names one owner, the mutex binds
 against that actor alone, so one reviewer's claim stops the other.
-Exit 1 is unusable input, exit 0 is launched or printed. The script
-never writes to GitHub: the claim belongs to the session it
+The script never writes to GitHub: the claim belongs to the session it
 launches, not to the launcher. A stage with several owners (review)
-prints both instructions and launches neither unless `--as` names
-one, and a
-harness this script cannot start prints and exits 0. `DRY_RUN=1`
-prints the resolved launch command instead of executing it; the reads
-and every guard still run. Tests: `scripts/ops/tests/work_test.sh`.
+prints both instructions and launches neither unless `--as` names one.
+
+Both harnesses launch (#43, `intent/43-harness-agnostic-launch/`).
+Claude Code is started `claude --agent <persona>`; Antigravity is
+started `agy -p … --agent <persona> --add-dir <repo root> --model
+<the sidecar's model> --output-format json --print-timeout <n>m`, and
+`--add-dir` is not optional because print mode ignores the working
+directory. Both are given one prompt literal, and both are wrapped in
+`timeout` at the persona's own `limits.timeout_mins` plus a minute, so
+the harness reports its own timeout before the wrapper kills it. A
+persona whose compiled target is missing is exit 1 before anything is
+minted — a launch against a target that is not there is a session
+running as the harness's stock agent under a persona's name.
+
+Every MODE is an environment variable, for the same reason argv is
+closed: `DRY_RUN=1` prints the resolved launch command instead of
+executing it (the reads and every guard still run, and nothing is
+minted), and `HEADLESS=1` captures the session's JSON instead of
+handing over the terminal. Antigravity is always headless. An
+interactive launch is `exec`'d and keeps the harness's own exit code.
+A headless one is read for a final `WORK-RESULT: <ok|refused|blocked>
+#<n> <reason>` line, taken from the decoded response text (the raw
+JSON escapes the newline) with the last such line winning: `ok` exits
+0, `refused` and `blocked` exit 2, and a session that crashed, timed
+out or exited cleanly without the line exits 1 — an outcome nobody
+observed is not a success. Exit 2 therefore now covers both a launcher
+refusal and a launched persona's refusal: one code, because a caller
+asks whether the number was worked, not which layer declined. Exit 1
+is unusable input or an unobservable outcome; exit 0 is launched-and-ok
+or printed. The `/work` door is a hand-authored
+`.claude/commands/work.md` whose body is exactly
+`scripts/ops/work.sh $ARGUMENTS`; `.claude/commands/` is outside the
+compiler's target directories, so this is not a drift-gate bypass.
+Tests: `scripts/ops/tests/work_test.sh` against stubs, and
+`scripts/ops/smoke_launch.sh <scratch-issue>` for one real launch per
+harness — three named observables each, with the claim half of the
+Antigravity run reported as `BLOCKED ON #47` until that App's
+`issues: write` permission is granted, rather than asserted to fail.
+
+### ops.identity
+A dispatched session runs as its own persona, never as the operator
+(#43). `scripts/ops/work.sh` mints the launched persona's App token in
+the one step between the last refusal and the launch, for that persona
+only, and a run that launches nothing — a dry run, a multi-owner
+stage, a harness with no row — mints nothing. A mint that fails is
+fatal: the launcher refuses rather than falling back to whatever
+credentials the shell carries. The token reaches the child as a
+variable-assignment prefix, never an argument, a file or a log line,
+and it overwrites `GH_TOKEN`/`GITHUB_TOKEN` rather than inheriting
+them. `git` cannot read those variables at all, so it is pointed at
+`scripts/auth/git-credential-persona <persona>`, a credential helper
+that mints afresh on every `get` — a snapshot taken at launch expires
+before a ninety-minute cap, at the one moment the work is finished and
+about to be lost. The helper is installed through
+`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` in the
+child's environment only, so a crashed session leaves no credential
+configuration behind and the operator's own config is untouched. Two
+of those entries are empty resets: git appends helpers and tries them
+in order, and `credential.helper` and
+`credential.https://github.com.helper` are different keys with
+different lists, so resetting only one leaves an operator's global
+helper answering first. A fourth entry rewrites `git@github.com:` to
+`https://github.com/`, because an SSH remote never consults a
+credential helper at all.
 
 ## Agreed, not yet built
 

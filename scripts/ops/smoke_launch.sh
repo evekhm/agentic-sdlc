@@ -73,10 +73,9 @@ If you are **odyssey**:
 
 If you are **daedalus**:
 
-1. Create \`runs/smoke-$ISSUE/daedalus.md\` containing one line naming
-   your persona, your harness and the UTC time.
-2. Push a commit carrying that line, WITHOUT changing the branch this
-   worktree is on — use a temporary worktree:
+1. Push a commit carrying one line naming your persona, your harness and
+   the UTC time, WITHOUT changing the branch this worktree is on — use a
+   temporary worktree:
    \`\`\`
    git worktree add -b $SMOKE_BRANCH /tmp/smoke-$ISSUE-daedalus HEAD
    # write /tmp/smoke-$ISSUE-daedalus/SMOKE-$ISSUE.md with the same line
@@ -89,7 +88,7 @@ If you are **daedalus**:
    \`\`\`
    Your git is already configured with a credential helper that mints
    your App token, so the push needs no token from you.
-3. Print \`WORK-RESULT: ok #$ISSUE smoke launch completed\`.
+2. Print \`WORK-RESULT: ok #$ISSUE smoke launch completed\`.
 
 Claiming this issue is not part of the errand.
 BODY
@@ -128,6 +127,16 @@ check_claim() { # <persona>
     fi
 }
 
+# `gh api` prints the error body on stdout, so every read below is
+# shape-checked rather than trusted: a 404's JSON is not a count.
+count_comments() {
+    local n
+    n="$(ghp odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
+             --jq 'length' 2>/dev/null || true)"
+    case "$n" in ''|*[!0-9]*) n=-1 ;; esac
+    printf '%s\n' "$n"
+}
+
 relabel() { # <status-label>
     local want="$1" have
     for have in status:planning status:spec status:build status:implementing \
@@ -149,11 +158,13 @@ launch() { # <persona>; -> exit code of work.sh on stdout's last line
     return "$rc"
 }
 
-check_artifact() { # <persona>
-    # The stage's own artifact is a whole stage's worth of work; this run
-    # is deliberately one launch, not a stage, so the observable is the
-    # errand's artifact. It is under runs/, which is gitignored, so a
-    # smoke run leaves the tree clean.
+# The stage's own artifact is a whole stage's worth of work; this run is
+# deliberately one launch, not a stage, so the observable is the errand's
+# artifact, and it is a different file per harness because the errand is:
+# odyssey writes locally under runs/ (gitignored, so a smoke run leaves
+# the tree clean), daedalus writes into the commit it pushes — asking it
+# for a second local copy would prove nothing the pushed file does not.
+check_local_artifact() { # <persona>
     local persona="$1"
     if [ -s "$SMOKE_DIR/$persona.md" ]; then
         ok "$persona wrote runs/smoke-$ISSUE/$persona.md: $(head -1 "$SMOKE_DIR/$persona.md")"
@@ -161,22 +172,31 @@ check_artifact() { # <persona>
         bad "$persona left no artifact at runs/smoke-$ISSUE/$persona.md"
     fi
 }
+check_pushed_artifact() { # <persona> <ref>
+    local persona="$1" ref="$2" size
+    size="$(ghp odyssey api \
+                "/repos/$GITHUB_REPO/contents/SMOKE-$ISSUE.md?ref=$ref" \
+                --jq '.size' 2>/dev/null || true)"
+    case "$size" in
+        ''|*[!0-9]*) bad "$persona pushed no SMOKE-$ISSUE.md on $ref" ;;
+        0)           bad "$persona pushed an empty SMOKE-$ISSUE.md on $ref" ;;
+        *)           ok "$persona's commit carries SMOKE-$ISSUE.md ($size bytes)" ;;
+    esac
+}
 
 # --- run 1: claude-code / odyssey ---------------------------------------------
 banner "run 1 · claude-code · odyssey · #$ISSUE"
 rm -rf "$SMOKE_DIR"
 check_token odyssey
 relabel status:implementing
-before="$(ghp odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
-              --jq 'length' 2>/dev/null || echo 0)"
+before="$(count_comments)"
 rc=0; launch odyssey || rc=$?
 [ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
                 || bad "work.sh exited $rc, not 0"
-check_artifact odyssey
+check_local_artifact odyssey
 after_author="$(ghp odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
                     --jq '.[-1].user.login' 2>/dev/null || echo '')"
-after_count="$(ghp odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
-                   --jq 'length' 2>/dev/null || echo 0)"
+after_count="$(count_comments)"
 if [ "$after_count" -gt "$before" ] && [ "$after_author" = "evekhm-odyssey-app[bot]" ]; then
     ok "the newest comment on #$ISSUE is authored by evekhm-odyssey-app[bot]"
 else
@@ -196,20 +216,28 @@ ghp odyssey api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$SMOKE_BRANCH" \
 rc=0; launch daedalus || rc=$?
 [ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
                 || bad "work.sh exited $rc, not 0"
-check_artifact daedalus
 # The push is the token-handoff proof: agy's stock fallback agent has no
 # instruction to push anything, so a scratch branch on origin means the
 # persona loaded AND its minted token authenticated.
+# Shape-checked, not just non-empty: `gh api` prints the error body on
+# stdout for a 404, so `|| true` alone would hand a JSON blob to the
+# assertion and call a missing branch a pass.
 pushed="$(ghp odyssey api "/repos/$GITHUB_REPO/git/ref/heads/$SMOKE_BRANCH" \
               --jq '.object.sha' 2>/dev/null || true)"
+case "$pushed" in
+    [0-9a-f][0-9a-f]*) [ "${#pushed}" = "40" ] || pushed="" ;;
+    *) pushed="" ;;
+esac
 if [ -n "$pushed" ]; then
     ok "$SMOKE_BRANCH exists on origin ($pushed)"
-    author="$(ghp odyssey api "/repos/$GITHUB_REPO/commits/$SMOKE_BRANCH" \
+    author="$(ghp odyssey api "/repos/$GITHUB_REPO/commits/$pushed" \
                   --jq '.commit.author.name' 2>/dev/null || echo '')"
     [ "$author" = "evekhm-daedalus-app[bot]" ] \
         && ok "its head commit is authored by evekhm-daedalus-app[bot]" \
         || bad "its head commit is authored by '${author:-unknown}'"
+    check_pushed_artifact daedalus "$SMOKE_BRANCH"
 else
+    bad "daedalus left no artifact — there is no branch to read one from"
     bad "daedalus pushed no $SMOKE_BRANCH — the persona did not load, or the token did not authenticate"
 fi
 check_claim daedalus

@@ -684,6 +684,14 @@ tok="$("$REPO_ROOT/scripts/auth/mint_app_token.py" "$launch_persona")" \
 # credential helper at all.
 CRED_HELPER="$REPO_ROOT/scripts/auth/git-credential-persona"
 
+# The child starts in the checkout work.sh itself came from. agy is
+# pinned with `--add-dir`; claude-code has no such flag and takes the
+# working directory as the project, so a launcher invoked by absolute
+# path from somewhere else would hand the session a DIFFERENT checkout
+# than the one whose personas, labels and targets it just resolved.
+# Measured: the first smoke run wrote its artifact into a sibling clone.
+cd "$REPO_ROOT"
+
 set +e
 if [ "$(headless_for "$launch_harness")" != "1" ]; then
     set -e

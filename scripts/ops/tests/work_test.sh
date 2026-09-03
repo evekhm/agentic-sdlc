@@ -75,6 +75,7 @@ cat > "$WORK/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 echo "claude $*" >> "$LAUNCHES"
 echo "claude-saw-GH_TOKEN=${GH_TOKEN:-none}" >> "$LAUNCHES"
+echo "claude-saw-pwd=$PWD" >> "$LAUNCHES"
 echo "claude-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
 echo "claude-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
 echo "claude-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
@@ -90,6 +91,7 @@ cat > "$WORK/bin/agy" <<'STUB'
 #!/usr/bin/env bash
 echo "agy $*" >> "$LAUNCHES"
 echo "agy-saw-GH_TOKEN=${GH_TOKEN:-none}" >> "$LAUNCHES"
+echo "agy-saw-pwd=$PWD" >> "$LAUNCHES"
 echo "agy-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
 echo "agy-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
 echo "agy-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
@@ -562,6 +564,18 @@ pass "D13: the parent shell's git config is byte-identical before and after"
 [ -z "${GIT_CONFIG_COUNT:-}" ] \
   || fail "D13: the launcher exported GIT_CONFIG_* into the parent shell"
 pass "D13: the install reached the child's environment and nothing else"
+
+banner "#43 the child starts in the checkout work.sh came from"
+: > "$LAUNCHES"; : > "$MINTS"
+# Run the fixture's work.sh from a directory that is NOT the fixture:
+# claude-code has no --add-dir, it takes $PWD as the project, so a
+# launcher invoked by absolute path from elsewhere would otherwise hand
+# the session a different checkout than the one it just resolved.
+( cd /tmp && TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" \
+    run 0 "the launch happens with the resolved root as \$PWD" -- 113 )
+grep -qxF "agy-saw-pwd=$T" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "the child inherited the caller's directory, not the repo root"; }
+pass "the child's \$PWD is the checkout work.sh resolved, not the caller's"
 
 banner "#43 D14 the four headless outcomes map to three exit codes"
 printf '%s\n' '{"status":"SUCCESS","response":"REFUSED\nWORK-RESULT: refused #113 hold label present"}' \

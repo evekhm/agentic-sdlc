@@ -7,7 +7,7 @@ tools:
   - grep_search
   - find_by_name
   - run_command
-  - subagent_dispatch
+  - manage_subagents
 ---
 # daedalus
 

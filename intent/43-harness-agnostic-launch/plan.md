@@ -416,6 +416,23 @@ each observable a named line so a failure says which one.
 `BLOCKED ON #47` line present. Run it once during implementation
 against a scratch issue and cite the output in the PR.
 
+**Amended during implementation.** Two changes, both forced by the run
+itself:
+
+- *The artifact observable is the errand's artifact, not the stage's.*
+  The implement stage declares no artifact at all ("the output is code
+  or a review") and the build stage's is a whole plan, while this run is
+  explicitly one measured launch rather than a stage. odyssey's artifact
+  is `runs/smoke-<n>/odyssey.md` (gitignored, so the tree stays clean);
+  daedalus's is the `SMOKE-<n>.md` inside the commit it pushes, read
+  back through the contents API — a second local copy would prove
+  nothing the pushed file does not.
+- *The errand lives in the scratch issue's body, which the script
+  writes.* `work.sh` has exactly one prompt literal for both harnesses
+  (D6); a smoke test needing a second one would be testing something
+  `work.sh` does not do. Writing the body makes a re-run identical to
+  the first run.
+
 ## T12 · `docs/SPEC.md` — the living spec — Acceptance 13, and the #25 contract
 
 Three in-place amendments keeping their IDs, plus one new entry:
