@@ -329,7 +329,13 @@ Claude Code is started `claude --agent <persona>`; Antigravity is
 started `agy -p … --agent <persona> --add-dir <repo root> --model
 <the sidecar's model> --output-format json --print-timeout <n>m`, and
 `--add-dir` is not optional because print mode ignores the working
-directory. Both are given one prompt literal, and both are wrapped in
+directory. Claude Code has no such flag and takes its working
+directory as the project, so the launcher `cd`s to the repository root
+it resolved before starting either child: without that, `work.sh`
+invoked by absolute path from another clone reads one checkout's
+labels and personas and hands the session a different one — measured,
+and the session reports success having edited the wrong tree.
+Both are given one prompt literal, and both are wrapped in
 `timeout` at the persona's own `limits.timeout_mins` plus a minute, so
 the harness reports its own timeout before the wrapper kills it. A
 persona whose compiled target is missing is exit 1 before anything is
@@ -383,9 +389,9 @@ of those entries are empty resets: git appends helpers and tries them
 in order, and `credential.helper` and
 `credential.https://github.com.helper` are different keys with
 different lists, so resetting only one leaves an operator's global
-helper answering first. A fourth entry rewrites `git@github.com:` to
-`https://github.com/`, because an SSH remote never consults a
-credential helper at all.
+helper answering first. A fourth entry rewrites
+`git@github.com:` to `https://github.com/`, because an SSH remote
+never consults a credential helper at all.
 
 ## Agreed, not yet built
 
