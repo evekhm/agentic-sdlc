@@ -107,7 +107,7 @@ one owner: `_github_app.py:get_repo_info()` derives `(owner, repo)`
 from the checkout's `origin` remote, so forking the repo and
 re-running `create_all_apps.py` registers independently-named Apps
 with no script edits. Every App's manifest grants `issues: write`
-(PR #48, #47): the dispatch protocol (`ops.dispatch`, `personas.resume`)
+(PR #58, #47): the dispatch protocol (`ops.dispatch`, `personas.resume`)
 has each persona add `in-progress`, post the `Claim:` line, and post its
 handoff on the issue it works, and an App with `issues: read` gets 403
 on all three. `contents` and `pull_requests` still vary per persona —
