@@ -282,7 +282,7 @@ generated is never hand-edited; everything experimental lands in
 ```text
 AGENTS.md  CLAUDE.md  GEMINI.md   # harness entry points (root-required);
                                   #   AGENTS.md canonical, others thin adapters
-README.md  REVIEW.md  INTENT.md   # flagship docs (README/REVIEW.md to come)
+README.md  REVIEW.md  INTENT.md   # flagship docs
 intent/<issue>-<slug>/            # per-change record: intent.md, spec.md, plan.md
 docs/                             # SPEC.md (living spec), BLOG.md, CONTEXT.md,
                                   #   setup guides
