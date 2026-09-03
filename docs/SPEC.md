@@ -29,8 +29,19 @@ reading order, run-folder bookkeeping, living-spec rule, context and
 cost discipline, five-tier ladder, session handoff, tracker
 workflow). CLAUDE.md and GEMINI.md are thin harness adapters that add
 only harness-specific mechanics. INTENT.md is the founding
-system-level intent (change #0). Reference docs live in `docs/`
-(BLOG.md, CONTEXT.md, this file), uppercase names throughout.
+system-level intent (change #0). `README.md` is the operator-facing
+entry point (#35, `intent/35-readme/`): it addresses one reader, the
+operator at the keyboard, and never an agent — no compiled prompt
+points an agent at it. It explains and never duplicates, so every
+rule it mentions that is normative elsewhere is at most one sentence
+plus a link to its owner, it is normative for nothing itself, and
+wherever it and a document it links disagree the other one wins. It
+is bounded by construction: exactly nine `##` sections in a fixed
+order, at most 150 lines, at most one diagram, and exactly one
+command shown as an instruction (`scripts/ops/work.sh <n>`) — a tenth
+topic is a link from its last section, never a tenth section.
+Reference docs live in `docs/` (BLOG.md, CONTEXT.md, this file),
+uppercase names throughout.
 
 ### tracker.workflow
 Work is tracked as GitHub issues on `evekhm/agentic-sdlc`. Sessions
