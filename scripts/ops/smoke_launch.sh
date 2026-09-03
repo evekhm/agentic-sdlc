@@ -53,6 +53,53 @@ tolerate(){ echo "  BLOCKED ON #47   $*"; blocked=$((blocked + 1)); }
 note()    { echo "  note     $*"; }
 banner()  { echo; echo "=== $*"; }
 
+# --- identity, in-band ----------------------------------------------------------
+# This script used to shell out to `ghp`, a wrapper that exists only in
+# its author's ~/.local/bin and is named nowhere in this repository. The
+# one artifact in #43 whose entire purpose is reproducibility was the one
+# nobody else could run: it would have died on the first observable with
+# `ghp: command not found`, having already relabelled the scratch issue.
+# It now mints exactly the way work.sh does, from this checkout's own
+# copy of mint_app_token.py, and calls plain `gh`.
+#
+# The token never reaches argv, a file or a log: it is a shell variable
+# and an assignment prefix on the single `gh` call that needs it. Minted
+# once per persona and reused, because a smoke run makes a dozen reads
+# and an installation token is good for an hour.
+MINT="$REPO_ROOT/scripts/auth/mint_app_token.py"
+declare -A SMOKE_TOKENS=()
+gh_as() { # <persona> <gh args...> — one gh call as that persona's App
+    local persona="$1"; shift
+    if [ -z "${SMOKE_TOKENS[$persona]:-}" ]; then
+        SMOKE_TOKENS[$persona]="$("$MINT" "$persona")" || {
+            echo "smoke_launch: cannot mint an App token for $persona" >&2
+            return 1
+        }
+    fi
+    GH_TOKEN="${SMOKE_TOKENS[$persona]}" GITHUB_TOKEN="${SMOKE_TOKENS[$persona]}" \
+        gh "$@"
+}
+
+# --- preflight --------------------------------------------------------------------
+# Name every missing prerequisite up front, all of them in one pass.
+# Discovering one at the third observable — with the scratch issue
+# already relabelled and a live persona launch already spent — is how a
+# smoke test becomes worse than no smoke test.
+prereq_missing=0
+for cmd in gh jq claude agy; do
+    command -v "$cmd" >/dev/null || {
+        echo "smoke_launch: $cmd is not on PATH; smoking both harnesses needs both installed" >&2
+        prereq_missing=1
+    }
+done
+for prog in "$MINT" "$REPO_ROOT/scripts/ops/work.sh"; do
+    [ -x "$prog" ] || {
+        echo "smoke_launch: $prog is missing or not executable" >&2
+        prereq_missing=1
+    }
+done
+[ "$prereq_missing" -eq 0 ] || exit 1
+
 # --- the instruction the two sessions will read -------------------------------
 # Written into the issue body rather than into the prompt: work.sh has
 # exactly one prompt literal for both harnesses (D6), and a smoke test
@@ -68,7 +115,8 @@ If you are **odyssey**:
 1. Create \`runs/smoke-$ISSUE/odyssey.md\` containing one line naming
    your persona, your harness and the UTC time.
 2. Post that same line as a comment on this issue, using
-   \`ghp odyssey issue comment $ISSUE --repo $GITHUB_REPO --body-file <a file>\`.
+   \`gh issue comment $ISSUE --repo $GITHUB_REPO --body-file <a file>\`.
+   Your \`GH_TOKEN\` is already your own App's; plain \`gh\` posts as you.
 3. Print \`WORK-RESULT: ok #$ISSUE smoke launch completed\`.
 
 If you are **daedalus**:
@@ -95,7 +143,7 @@ BODY
 )"
 
 printf '%s\n' "$body" > "/tmp/smoke-$ISSUE-body.md"
-ghp odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+gh_as odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
     --body-file "/tmp/smoke-$ISSUE-body.md" >/dev/null \
     || { echo "smoke_launch: cannot write the scratch issue body" >&2; exit 1; }
 
@@ -106,7 +154,7 @@ ghp odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
 # installation token IS for.
 check_token() { # <persona>
     local persona="$1" n
-    if n="$(ghp "$persona" api /installation/repositories --jq '.total_count' 2>/dev/null)"; then
+    if n="$(gh_as "$persona" api /installation/repositories --jq '.total_count' 2>/dev/null)"; then
         ok "$persona's App token authenticates ($n repository/ies in the installation)"
     else
         bad "$persona's App token could not read /installation/repositories"
@@ -117,10 +165,10 @@ check_token() { # <persona>
 # as an assertion about the current permission set.
 check_claim() { # <persona>
     local persona="$1"
-    if ghp "$persona" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+    if gh_as "$persona" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
            --add-label in-progress >/dev/null 2>&1; then
         ok "$persona can claim (issues: write is granted)"
-        ghp "$persona" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+        gh_as "$persona" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
             --remove-label in-progress >/dev/null 2>&1 || true
     else
         tolerate "$persona cannot add a label — its App is registered issues: read"
@@ -131,7 +179,7 @@ check_claim() { # <persona>
 # shape-checked rather than trusted: a 404's JSON is not a count.
 count_comments() {
     local n
-    n="$(ghp odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
+    n="$(gh_as odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
              --jq 'length' 2>/dev/null || true)"
     case "$n" in ''|*[!0-9]*) n=-1 ;; esac
     printf '%s\n' "$n"
@@ -142,10 +190,10 @@ relabel() { # <status-label>
     for have in status:planning status:spec status:build status:implementing \
                 status:in-review status:done; do
         [ "$have" = "$want" ] && continue
-        ghp odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+        gh_as odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
             --remove-label "$have" >/dev/null 2>&1 || true
     done
-    ghp odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+    gh_as odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
         --add-label "$want" >/dev/null \
         || { echo "smoke_launch: cannot put $want on #$ISSUE" >&2; exit 1; }
 }
@@ -174,7 +222,7 @@ check_local_artifact() { # <persona>
 }
 check_pushed_artifact() { # <persona> <ref>
     local persona="$1" ref="$2" size
-    size="$(ghp odyssey api \
+    size="$(gh_as odyssey api \
                 "/repos/$GITHUB_REPO/contents/SMOKE-$ISSUE.md?ref=$ref" \
                 --jq '.size' 2>/dev/null || true)"
     case "$size" in
@@ -194,7 +242,7 @@ rc=0; launch odyssey || rc=$?
 [ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
                 || bad "work.sh exited $rc, not 0"
 check_local_artifact odyssey
-after_author="$(ghp odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
+after_author="$(gh_as odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
                     --jq '.[-1].user.login' 2>/dev/null || echo '')"
 after_count="$(count_comments)"
 if [ "$after_count" -gt "$before" ] && [ "$after_author" = "evekhm-odyssey-app[bot]" ]; then
@@ -211,7 +259,7 @@ relabel status:build
 # Cleared through the API, not through the launcher's own git: this
 # script must never push with whatever credentials the operator's shell
 # happens to carry — that is the identity confusion #43 exists to end.
-ghp odyssey api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$SMOKE_BRANCH" \
+gh_as odyssey api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$SMOKE_BRANCH" \
     >/dev/null 2>&1 || true
 rc=0; launch daedalus || rc=$?
 [ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
@@ -222,7 +270,7 @@ rc=0; launch daedalus || rc=$?
 # Shape-checked, not just non-empty: `gh api` prints the error body on
 # stdout for a 404, so `|| true` alone would hand a JSON blob to the
 # assertion and call a missing branch a pass.
-pushed="$(ghp odyssey api "/repos/$GITHUB_REPO/git/ref/heads/$SMOKE_BRANCH" \
+pushed="$(gh_as odyssey api "/repos/$GITHUB_REPO/git/ref/heads/$SMOKE_BRANCH" \
               --jq '.object.sha' 2>/dev/null || true)"
 case "$pushed" in
     [0-9a-f][0-9a-f]*) [ "${#pushed}" = "40" ] || pushed="" ;;
@@ -230,7 +278,7 @@ case "$pushed" in
 esac
 if [ -n "$pushed" ]; then
     ok "$SMOKE_BRANCH exists on origin ($pushed)"
-    author="$(ghp odyssey api "/repos/$GITHUB_REPO/commits/$pushed" \
+    author="$(gh_as odyssey api "/repos/$GITHUB_REPO/commits/$pushed" \
                   --jq '.commit.author.name' 2>/dev/null || echo '')"
     [ "$author" = "evekhm-daedalus-app[bot]" ] \
         && ok "its head commit is authored by evekhm-daedalus-app[bot]" \
