@@ -34,7 +34,9 @@
 # of round trips — correctness comes from `--paginate`, not from it.
 gh_json() { # <api-path> [--paginate]
     if [ "${2:-}" = "--paginate" ]; then
-        gh api --paginate "$1?per_page=100" | jq -s 'add // []'
+        local sep="?"
+        if [[ "$1" == *"?"* ]]; then sep="&"; fi
+        gh api --paginate "$1${sep}per_page=100" | jq -s 'add // []'
     else
         gh api "$1"
     fi

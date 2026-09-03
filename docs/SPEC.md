@@ -866,6 +866,31 @@ ignore the signal. Tests: `scripts/ops/tests/execution_test.sh`,
 `placement_test.sh` and `post_test.sh`, all three run by the
 `execution` gate (`ci.gates`).
 
+### ops.board
+`scripts/ops/board.sh [--watch [sec]] [--all] [<n>...]` prints the
+live join that "there is no STATUS.md" (`docs.structure`) otherwise
+leaves nobody able to read: who holds which issue, at which stage,
+with what artifact open, from which checkout (#68). The read-only
+complement of `ops.dispatch`: same inputs (`gh` + `jq` + `git`,
+`personas/lifecycle.json`, the `personas/*.yaml` identity table), no
+model call, and it never writes to GitHub. One screen: harness
+processes on the host whose working directory is a checkout of the
+repository; every open issue carrying `status:*` or `in-progress`,
+with its flags (`hold`, `blocked`, `review:N`, and two `status:*`
+labels reported as corrupt), the claim holder resolved exactly as
+`ops.dispatch` resolves it (author of the last comment opening with
+`Claim`, through the identity table; an operator-bot comment "on
+behalf of" a persona is attributed to that persona and marked), the
+last comment, what the stage owes and who owns the next rung, open
+pull requests with base, stack parent, checks, reviewers and
+conflicts, remote branches per actor, and local worktrees with
+whether a harness process is live in one; a `mismatch` line when the
+claimant does not own the labelled stage; `intent:new` issues with no
+stage yet; and worktrees with no remote branch behind them. Ages are
+relative; `BOARD_STALE_HOURS` (default 6) marks a claimed issue with
+no comment for that long. Exit 0 printed, 1 unusable input or an
+unreadable repository. Tests: `scripts/ops/tests/board_test.sh`.
+
 ## Agreed, not yet built
 
 Each entry is on the record as a tracker issue; it moves into the

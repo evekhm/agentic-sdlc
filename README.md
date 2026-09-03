@@ -277,3 +277,23 @@ and wherever it and one of those documents disagree, the other is
 right. A new topic is a link from this section, or a deliberate
 addition to the section list in this document's own spec under
 `intent/`, never a drop-in section that list does not name.
+
+## See who is doing what
+
+```bash
+scripts/ops/board.sh            # once
+scripts/ops/board.sh --watch    # redraw every 60 seconds
+```
+
+There is no status file to read, by design: the state is the labels,
+the claim comments, the pull requests and the branches. The board
+joins them and prints one screen: the harness sessions on this
+machine and the checkout each sits in; every issue in flight with its
+stage, who holds the claim, the last word on its thread, what the
+stage owes and who owns the next rung, its open pull requests (what
+they are stacked on, checks, reviewers, conflicts), and which local
+worktrees belong to it and whether one is live. A `mismatch` line
+means the claimant does not own the labelled stage: the label is
+behind a merge, or a rung is being worked out of order. Intake
+waiting for its first rung and leftover worktrees come last. It reads
+only; the labels stay the state machine.
