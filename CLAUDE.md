@@ -37,64 +37,25 @@ agents without a subagent tool are exempt per that section:
 # Parallel sessions
 
 Several Claude Code sessions run against this repo on one machine at
-the same time. AGENTS.md makes the issue the unit of parallelism (the
-`in-progress` claim is the mutex); the filesystem must match it, or
-sessions that honor the claim still collide in one working tree. The
-rule is **one session, one worktree, one issue**, and the process is:
+the same time, alongside Gemini sessions. The rule and the process —
+one session, one worktree, one issue; primary checkout read-only;
+work, PR and cleanup from your own worktree; the
+`scripts/ops/worktrees.sh` cadence — are in AGENTS.md ("Working the
+tracker"). This harness adds the tooling:
 
-1. **Look before claiming.** Run ListAgents (busy peers are named
-   `agentic-sdlc-*`), `git worktree list` (a locked or dirty worktree is
-   someone's live work), and read the issue's last claim comment. If a
-   peer already holds the issue, SendMessage that session and stand
-   down; report to the user instead of duplicating.
-2. **Claim with your name.** Add `in-progress` and post the one-line
-   claim per AGENTS.md, including your session name from ListAgents and
-   the worktree path you are about to create, so peers can find and
-   message you.
-3. **Enter your own worktree before the first edit.** The primary
-   checkout (the directory the repo was cloned into, wherever that is
-   on this machine) is read-only reference and stays on a clean `main`:
-   never edit, stash, checkout, commit or stage there. If you find it
-   dirty, report it and leave the changes alone — they are a peer's.
-   Create the worktree from `origin/main` on a `<actor>/<issue>-<slug>`
-   branch, either by launching the session with `claude -w <name>`,
-   by calling EnterWorktree, or by hand:
-   `git fetch origin && git worktree add -b <actor>/<n>-<slug>
-   .claude/worktrees/<actor>-<n>-<slug> origin/main`.
-   Subagents dispatched with `isolation: "worktree"` get their own
-   worktree automatically; do not point them at yours.
-4. **Work only there.** All reads for editing, all commits, and the
-   push, PR and merge for the issue happen from your worktree and
-   touch only files your issue owns. Commit by path, never `git add .`
-   or `commit -a`, so a stray file can't ride along. Fetching is always
-   allowed anywhere.
-5. **Finish the circle.** After the PR merges: post the handoff comment
-   (AGENTS.md format), `git worktree remove <path>` for your own
-   worktree, delete the local branch, and confirm with
-   `git worktree list` that it is gone. Never remove a worktree you did
-   not create; a dirty one is a peer's live work and only the human
-   prunes stale ones.
-
-**Worktree hygiene cadence.** `scripts/ops/worktrees.sh` is the one
-tool for this: it lists every worktree with lock (and whether the
-lock's pid is alive), dirty count, unpushed commits, merged state and a
-verdict (`safe`, `dirty`, `unpushed`, `locked`); `--prune` removes only
-`safe` worktrees and local branches merged into `origin/main`;
-`--prune-remote` also deletes merged remote branches; `DRY_RUN=1`
-previews. The cadence:
-
-- **Every session, at start:** run the report (read-only). If it shows
-  `safe` entries, or a `locked:pid-dead` one, tell the user in the
-  first message; do not prune on your own.
-- **The human, or a session the human explicitly asks:** run
-  `--prune-remote` at the end of each working day and right after a PR
-  stack lands (deleting merged head branches is also what retargets
-  stacked children, see the stacked-PR procedure). Preview with
-  `DRY_RUN=1` first when peers are busy.
-- **`dirty`, `unpushed`, `locked` are never pruned by the script.**
-  Each is resolved by its owner: resume it, land it, or discard it by
-  hand. A `locked:pid-dead` entry is a crashed subagent; its owner
-  unlocks it (`git worktree unlock <path>`) after checking the diff.
+- **Peer check:** ListAgents (busy peers are named `agentic-sdlc-*`),
+  on top of `git worktree list` and the issue's claim comment. If a
+  peer already holds the issue, SendMessage that session and stand
+  down; report to the user instead of duplicating.
+- **Claim with your name:** include your session name from ListAgents
+  in the claim comment, so peers can find and message you.
+- **Worktree:** launch the session with `claude -w <name>`, call
+  EnterWorktree, or run the by-hand command from AGENTS.md. Subagents
+  dispatched with `isolation: "worktree"` get their own worktree
+  automatically; do not point them at yours. A subagent's worktree
+  shows as `locked:pid-live` in the report while it runs and
+  `locked:pid-dead` if it crashed; the dispatching session unlocks and
+  cleans up its own.
 
 # Context ceiling
 
