@@ -678,17 +678,22 @@ tok="$("$REPO_ROOT/scripts/auth/mint_app_token.py" "$launch_persona")" \
 # .git/config, so a crashed session leaves no credential configuration
 # behind.
 #
-# The two EMPTY helper values are load-bearing, and there are two of
-# them for a measured reason. git APPENDS helpers and tries them in
-# order, and an empty value is what resets the list — but
-# `credential.helper` and `credential.https://github.com.helper` are
-# different keys with different lists. Resetting only the generic one
-# leaves an operator's URL-specific global helper (a `gh auth
-# git-credential` entry under `credential.https://github.com.helper` is
-# the common one, and is present on the machine this was measured on)
-# sitting AHEAD of ours, so gh answers first and the session pushes as
-# the operator — the exact bug D12 exists to stop. Measured, both ways,
-# before this line was written.
+# The two EMPTY helper values are load-bearing. git collects every
+# matching `credential.helper` and `credential.<url>.helper` into ONE
+# ordered list and tries them in turn; an empty value clears whatever
+# has accumulated so far, and a later entry appends to it. Without a
+# reset an operator's global helper (a `gh auth git-credential` entry
+# is the common one) is in that list ahead of ours and answers the
+# push, so the session pushes as the operator — the exact bug D12
+# exists to stop.
+#
+# Both keys are reset rather than one, and the honest reason is belt
+# and braces rather than measurement: GIT_CONFIG_* entries carry
+# command-line precedence, so ours would very likely win with a single
+# reset. Two resets are idempotent and make ours the only helper in the
+# list however the operator configured theirs, on either key. The
+# failure this guards against is silent, which is what makes the extra
+# pair of variables worth it.
 #
 # The insteadOf rewrite is load-bearing for a different reason: this
 # repository's origin is SSH, and an SSH remote never consults a

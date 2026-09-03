@@ -385,11 +385,14 @@ about to be lost. The helper is installed through
 `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` in the
 child's environment only, so a crashed session leaves no credential
 configuration behind and the operator's own config is untouched. Two
-of those entries are empty resets: git appends helpers and tries them
-in order, and `credential.helper` and
-`credential.https://github.com.helper` are different keys with
-different lists, so resetting only one leaves an operator's global
-helper answering first. A fourth entry rewrites
+of those entries are empty resets. Git collects every matching
+`credential.helper` and `credential.<url>.helper` into one ordered
+list and tries them in turn; an empty value clears whatever has
+accumulated, and a later entry appends to it, so without a reset an
+operator's global helper answers the push first. Both keys are reset
+rather than one as belt and braces — the resets are idempotent, and
+they make the persona's helper the only one in the list however the
+operator configured theirs. A fourth entry rewrites
 `git@github.com:` to `https://github.com/`, because an SSH remote
 never consults a credential helper at all.
 

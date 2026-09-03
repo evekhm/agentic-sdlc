@@ -287,20 +287,29 @@ KEY_2 credential.https://github.com.helper     VALUE_2 "<abs path> <persona>"
 KEY_3 url.https://github.com/.insteadOf        VALUE_3 git@github.com:
 ```
 
-**Amended during implementation (was 3 entries; grounds below).** The
-empty values are load-bearing: git *appends* helpers, so without a
-reset an operator's global helper answers first and the session pushes
-as the operator — the exact bug D12 exists to stop. There are *two*
-resets because `credential.helper` and
-`credential.https://github.com.helper` are different keys carrying
-different lists. The plan's original 3-entry form reset only the
-generic key; measured on the dispatch machine (whose global config
-carries `credential.https://github.com.helper = !gh auth
-git-credential`), `git config --get-all` under that install still
-listed gh's helper *ahead* of ours, so gh would have answered the push.
-The 4-entry form makes ours the helper that answers (`git credential
-fill` returns the stub token, and the helper's argv log shows it was
-called). The `insteadOf` rewrite is load-bearing for a separate reason:
+**Amended during implementation (was 3 entries; grounds below).**
+**Grounds corrected 2026-09-03 (PR #60, review finding F7): the
+install is unchanged, the reasoning first written here was not.** The
+empty values are load-bearing: git collects every matching
+`credential.helper` and `credential.<url>.helper` into **one** ordered
+list, an empty value clears whatever has accumulated so far, and a
+later entry appends to it. Without a reset an operator's global helper
+is in that list ahead of ours and answers the push, so the session
+pushes as the operator — the exact bug D12 exists to stop.
+
+There are *two* resets, and the honest description of why is **belt and
+braces**, not a measured necessity. The evidence originally quoted here
+— `git config --get-all 'credential.https://github.com.helper'` showing
+gh's helper first under the 3-entry install — is the wrong instrument:
+that command reports raw configuration, it does not model credential
+resolution, and `GIT_CONFIG_*` entries carry command-line precedence,
+i.e. they are applied after system, global and local. On those
+semantics the 3-entry form would very likely have won too. What the
+two resets buy is that ours ends up the only helper in the list
+*however* the operator configured theirs, on either key; the resets are
+idempotent, and the failure they guard against is silent. That is worth
+one extra pair of environment variables. The `insteadOf` rewrite is
+load-bearing for a separate reason:
 this repository's `origin` is SSH, and an SSH remote never consults a
 credential helper.
 
