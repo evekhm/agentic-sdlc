@@ -75,6 +75,27 @@ rule is **one session, one worktree, one issue**, and the process is:
    not create; a dirty one is a peer's live work and only the human
    prunes stale ones.
 
+**Worktree hygiene cadence.** `scripts/ops/worktrees.sh` is the one
+tool for this: it lists every worktree with lock (and whether the
+lock's pid is alive), dirty count, unpushed commits, merged state and a
+verdict (`safe`, `dirty`, `unpushed`, `locked`); `--prune` removes only
+`safe` worktrees and local branches merged into `origin/main`;
+`--prune-remote` also deletes merged remote branches; `DRY_RUN=1`
+previews. The cadence:
+
+- **Every session, at start:** run the report (read-only). If it shows
+  `safe` entries, or a `locked:pid-dead` one, tell the user in the
+  first message; do not prune on your own.
+- **The human, or a session the human explicitly asks:** run
+  `--prune-remote` at the end of each working day and right after a PR
+  stack lands (deleting merged head branches is also what retargets
+  stacked children, see the stacked-PR procedure). Preview with
+  `DRY_RUN=1` first when peers are busy.
+- **`dirty`, `unpushed`, `locked` are never pruned by the script.**
+  Each is resolved by its owner: resume it, land it, or discard it by
+  hand. A `locked:pid-dead` entry is a crashed subagent; its owner
+  unlocks it (`git worktree unlock <path>`) after checking the diff.
+
 # Context ceiling
 
 Per AGENTS.md, 200K tokens is the working ceiling for any single
