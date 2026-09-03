@@ -258,13 +258,33 @@ at launch; not printed)`, with the login read from
 `personas/<p>.yaml`'s `authority.identity` — the field
 `persona_for_login()` (249–260) already parses.
 
-**Proves it (Acceptance 2, 5):** `DRY_RUN=1` output contains the
+**Amended 2026-09-03 (PR #60, round-1 review finding AT-2; D11 as
+amended).** Two changes to the hand-off above. (1) The prefix form is
+now an `export` inside a subshell that then `exec`s, because the four
+`GIT_CONFIG_*` pairs of T7 are appended at the caller's own offset and
+their names are therefore computed; the properties the prefix had are
+the ones a builtin `export` keeps — never argv, never a file, never an
+`echo`. An `env VAR=… ` prefix would have been the obvious alternative
+and is rejected: it puts the token in a world-readable argv. (2) Xtrace
+is suppressed for the window between the mint and the launch and the
+caller's setting restored the moment the child returns. Bash's `set -x`
+expands both `tok="$(…)"` and every assignment of the value, so
+`bash -x scripts/ops/work.sh <n>` wrote the live token to stderr — and
+a Claude Code session captures tool stderr verbatim into an on-disk
+transcript. The suppression is a no-op when xtrace is off.
+
+**Proves it (Acceptance 2, 5, 16):** `DRY_RUN=1` output contains the
 identity line, `$MINTS` is empty, and the output matches no
 `[A-Za-z0-9_]{36,}`; the two-owner stage leaves `$MINTS` empty (D20);
 in a `fixture_tree` whose stub mint exits 1, `work.sh` exits 1 naming
 the persona with `$WRITES` empty; with the stub minting and
 `GH_TOKEN=ambient-not-this-one` exported, the stub `agy` records the
-`GH_TOKEN` it saw and the test asserts it is the minted value.
+`GH_TOKEN` it saw and the test asserts it is the minted value. Added
+for the amendment: one scenario per row runs the fixture launch under
+`bash -x`, captures stdout and stderr together, and fails if
+`stub-token-for-` appears — with the trace asserted present, so the
+check cannot pass vacuously, and the child asserted to have received
+the token, so it proves suppression rather than withholding.
 
 ## T7 · `scripts/auth/git-credential-persona` (NEW) — D13
 
@@ -286,6 +306,17 @@ KEY_1 credential.https://github.com.helper     VALUE_1 ""        # reset the URL
 KEY_2 credential.https://github.com.helper     VALUE_2 "<abs path> <persona>"
 KEY_3 url.https://github.com/.insteadOf        VALUE_3 git@github.com:
 ```
+
+**Amended 2026-09-03 (PR #60, round-1 review finding AT-7).** The four
+pairs are unchanged; the indices are not. They are appended at
+`${GIT_CONFIG_COUNT:-0}` rather than written at 0, and the count is
+extended rather than set, so a caller that already installs
+`http.proxy` or `safe.directory` through `GIT_CONFIG_*` keeps its own
+entries instead of having them silently replaced. With nothing
+inherited the offset is 0 and the child's environment is what it was.
+The two installs — interactive and headless — were byte-identical
+copies and are now one `launch_child()` function, which is also what
+makes a computed index affordable.
 
 **Amended during implementation (was 3 entries; grounds below).**
 **Grounds corrected 2026-09-03 (PR #60, review finding F7): the
@@ -340,8 +371,7 @@ disagree on key names, keep one `response_text()` and one
 `process_status()` helper with a per-harness `jq` expression each —
 two expressions, one mapping.
 
-Headless only (D15: interactive keeps `exec` and the harness's own
-exit code, and has no stdout to parse):
+Headless (D14):
 
 | observed | exit |
 |---|---|
@@ -358,11 +388,27 @@ a session said is swallowed. Exit 2 is deliberately the same code as
 `refuse()` (72): a caller asks whether the number was worked, not
 which layer declined (D23).
 
-**Proves it (Acceptance 7):** four `fixture_tree` scenarios driving
+**Amended 2026-09-03 (PR #60, round-1 review finding AT-5; D15 and D23
+as amended).** The interactive row maps too, and is no longer `exec`ed.
+`exec timeout … ` returns the *wrapper's* status, so the row could hand
+a caller 124 when the cap fires and 125/126/127 for `timeout`'s own
+errors — outside #36 D8's 0/1/2 vocabulary — and a harness exiting 2
+for a reason of its own read as a designed refusal. The child now runs
+in the foreground, inheriting stdin, stdout, stderr and the terminal
+(which is all "the operator's terminal *is* the session" required;
+`timeout` was already an un-`exec`ed process between the two), and
+`work.sh` waits and maps: child 0 → 0, anything non-zero → 1 with the
+raw status named on stderr and, for 124, the cap named. Exit 2 is
+produced by the launcher's own refusals and by D14's parsed
+`refused`/`blocked`, never forwarded from a child.
+
+**Proves it (Acceptance 7, 15):** four `fixture_tree` scenarios driving
 the stub `agy` through `$AGY_JSON` — one canned document per row of
-the table — asserting the four exits; plus one asserting that
-interactive `claude-code` is `exec`ed and its own status is returned
-unmapped.
+the table — asserting the four exits; plus four on the interactive row,
+through a pty (`script -qec`, which the no-tty guard of T9 now
+requires), asserting stub 0 → 0 and stubs 3, 2 and 124 → 1 with the raw
+status in the message and the cap named for 124. The mapping of 3 to 1
+is itself the proof that `exec` is gone.
 
 ## T9 · `.claude/commands/work.md` (NEW) — D16
 
@@ -372,10 +418,31 @@ description. It is outside `TARGET_DIRS` (sync_agents.py:639), so the
 drift gate ignores it and this is not a compiler bypass. No
 `.agents/workflows/` twin.
 
-**Proves it (Acceptance 10):** `/work 43` in an interactive session
+**Amended 2026-09-03 (PR #60, round-1 review findings AT-1, N2 and
+Argus's open item (a); D16 as amended).** The body is not
+`scripts/ops/work.sh $ARGUMENTS`. Its `` !`…` `` form runs in the
+harness's own non-TTY bash *before* the turn, so for the four
+`claude-code`-pinned personas it reached D5's interactive row and
+`exec`ed a session that cannot start for want of a terminal — after
+minting a one-hour credential, which is what D11's grounds forbid; and
+a legitimate exit 2 surfaced as a failed tool call. The body is now
+`` !`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
+$?]"` ``, with `allowed-tools` widened to match the mode-prefixed line,
+and the cwd-relative property stated in the `description` rather than
+left to be rediscovered. The complementary half is in `work.sh`, beside
+the harness-binary preflight and **before** the mint: an interactive
+row with no tty on stdin or stdout exits 1 naming `HEADLESS=1`, having
+minted nothing and started no child — the guard that also holds for
+cron, a CI step and a subagent's bash.
+
+**Proves it (Acceptance 10, 14):** `/work 43` in an interactive session
 runs the script with `43` (shown once during implementation);
-statically, the file contains exactly one `scripts/ops/work.sh` line
-and `git status` shows nothing added under `.agents/workflows/`.
+statically, the file contains exactly one command line and it is the
+`HEADLESS=1 … ; echo "[work.sh exit $?]"` form, and `git status` shows
+nothing added under `.agents/workflows/`. In `work_test.sh`: the
+interactive row invoked with stdout captured (i.e. no tty) exits 1, the
+message names `HEADLESS=1`, and `$MINTS` and `$LAUNCHES` are both
+empty; the same stage under `HEADLESS=1` launches and exits 0.
 
 ## T10 · `AGENTS.md` — dispatch has one door — D17
 
@@ -491,19 +558,23 @@ touches behaviour-bearing paths, so the diff must carry `docs/SPEC.md`
 | 4 | T5 | 11 | T10 |
 | 5 | T6 | 12 | T12 |
 | 6 | T7 | 13 | T12 |
-| 7 | T8 | | |
+| 7 | T8 | 14 | T9 |
+| | | 15 | T8 |
+| | | 16 | T6 |
 
 ## Readings taken
 
 Two places where the spec admits more than one implementation and this
 plan chose; both are cheap to overrule by editing the row.
 
-1. **D6's wrapper applies to the interactive row too** — `exec timeout
+1. **D6's wrapper applies to the interactive row too** — `timeout
    $((T*60+60)) claude --agent …`. D6 says "the whole child is wrapped"
-   without qualifying the mode, and D15 preserves only `exec` and the
-   exit code, which `timeout` propagates. The consequence is that an
-   interactive session is killed at the persona's cap; if that is
-   wrong, D6 should say "headless".
+   without qualifying the mode. The consequence is that an interactive
+   session is killed at the persona's cap; if that is wrong, D6 should
+   say "headless". *(Amended 2026-09-03, PR #60, AT-5: the reading
+   stands, the `exec` in front of it does not. The wrapper's 124 was
+   exactly the code that escaped #36 D8's vocabulary, so the row now
+   runs the child in the foreground and maps its status — see T8.)*
 2. **The `WORK-RESULT` line is read from the decoded response text**,
    not from `.response` by name, so one code path serves both
    harnesses. D14 names `.response`, which is agy's key; Claude Code's

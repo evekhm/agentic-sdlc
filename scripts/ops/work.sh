@@ -502,7 +502,10 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
             # labels, the folder layout and the deployment pins were all
             # read from that tree, and reading state from one checkout
             # while editing another is the split #36 exists to avoid
-            # (D24). There is deliberately no `cd` anywhere in this file.
+            # (D24). This file `cd`s exactly once, immediately before
+            # the launch, and only ever to $REPO_ROOT — the same value
+            # --add-dir receives (D1 as amended). A `cd` to anywhere
+            # else is what remains forbidden.
             model="$(model_of "$persona")" || exit 1
             LAUNCH_ARGV+=( agy -p "$PROMPT" --agent "$persona"
                            --add-dir "$REPO_ROOT" --model "$model"
@@ -654,9 +657,34 @@ fi
 # D11's grounds for minting last forbid. The generic preflight near the
 # top cannot do it: which binary is needed is not known until the
 # persona, its harness and its --as narrowing have all resolved.
-# LAUNCH is ( timeout <seconds> <binary> … ), so the binary is index 2.
-command -v "${LAUNCH[2]}" >/dev/null \
-    || die "${LAUNCH[2]} is not installed, so $launch_persona's $launch_harness session cannot start; nothing was minted"
+# LAUNCH is ( timeout <seconds> <binary> … ), so index 0 is the wrapper
+# and index 2 the harness binary. Both are checked: the generic
+# preflight near the top makes exactly this assumption explicit for `gh`
+# and `jq`, and an absent `timeout` would fail the same way, 127 with a
+# credential already spent (N1).
+for _bin in "${LAUNCH[0]}" "${LAUNCH[2]}"; do
+    command -v "$_bin" >/dev/null \
+        || die "$_bin is not installed, so $launch_persona's $launch_harness session cannot start; nothing was minted"
+done
+
+# D16 as amended, clause (c). The interactive row IS the operator's
+# terminal; with no tty on stdin or stdout the child cannot start, and
+# minting first would abandon a live one-hour credential for a session
+# that never ran — precisely what D11's mint-last ordering exists to
+# prevent. Exit 1, not 2: like a missing harness binary this is an
+# environment that cannot start the row rather than a decision about
+# the number, so 2 keeps meaning "not worked, by design" (D23). The
+# same guard holds for every other non-TTY caller — the `/work` door,
+# cron, a CI step, a subagent's bash.
+if [ "$(headless_for "$launch_harness")" != "1" ] \
+   && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
+    die "$launch_persona's $launch_harness row is interactive and there is no terminal on stdin/stdout; re-run with HEADLESS=1, or from a terminal. Nothing was minted and nothing was launched"
+fi
+
+# The persona's own cap in minutes, for the 124 message below (D15 as
+# amended). Read before the mint so a bad persona file cannot strand a
+# live credential.
+launch_mins="$(timeout_mins_of "$launch_persona")"
 
 # --- Identity (#43, D11, D12, D13) ---------------------------------------------
 # The last step before the launch, so that every run which prints and
@@ -665,6 +693,18 @@ command -v "${LAUNCH[2]}" >/dev/null \
 # operator happens to be carrying — produces exactly the bug this exists
 # to fix, a session that posts as the operator while everyone believes a
 # persona ran. A launch that cannot be attributed is not a launch.
+#
+# XTRACE IS SUPPRESSED from here to the launch, and the caller's setting
+# restored the moment the child returns (D11 as amended, PR #60, AT-2).
+# Bash's xtrace expands both `tok="$(mint …)"` and every `GH_TOKEN="$tok"`
+# assignment, so `bash -x scripts/ops/work.sh <n>` would write the live
+# installation token to stderr — and a Claude Code session captures tool
+# stderr verbatim into an on-disk transcript, a file and a log, the two
+# places D11 says the token never reaches. The suppression is a no-op
+# when xtrace is off, and `set -x` stays in force everywhere else.
+_xtrace_was_on=0
+case "$-" in *x*) _xtrace_was_on=1; set +x ;; esac
+
 tok=""
 tok="$("$REPO_ROOT/scripts/auth/mint_app_token.py" "$launch_persona")" \
     || die "cannot mint an App token for $launch_persona; refusing to launch as somebody else"
@@ -700,6 +740,39 @@ tok="$("$REPO_ROOT/scripts/auth/mint_app_token.py" "$launch_persona")" \
 # credential helper at all.
 CRED_HELPER="$REPO_ROOT/scripts/auth/git-credential-persona"
 
+# ONE install, used by both rows — the four pairs were written twice and
+# had to stay byte-identical to be correct. Two properties beyond the
+# comment above:
+#
+#   * the pairs are APPENDED at the caller's own GIT_CONFIG_COUNT rather
+#     than written at index 0. An outer launch, or a runner that installs
+#     `http.proxy` or `safe.directory` that way, would otherwise have its
+#     entries silently replaced and see a push fail for an unrelated
+#     reason (PR #60, AT-7). With no inherited set the offset is 0 and
+#     the child sees exactly what it saw before.
+#   * `export` inside a subshell, never an `env` prefix: `env
+#     GH_TOKEN=… ` would put the token in a process's argv, which is
+#     world-readable, and D11 forbids exactly that. The assignment
+#     prefix this replaces had the same property; a builtin `export`
+#     keeps it.
+launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
+    local base="${GIT_CONFIG_COUNT:-0}"
+    case "$base" in ''|*[!0-9]*) base=0 ;; esac
+    (
+        export GH_TOKEN="$tok" GITHUB_TOKEN="$tok"
+        export "GIT_CONFIG_KEY_$base=credential.helper"
+        export "GIT_CONFIG_VALUE_$base="
+        export "GIT_CONFIG_KEY_$((base + 1))=credential.https://github.com.helper"
+        export "GIT_CONFIG_VALUE_$((base + 1))="
+        export "GIT_CONFIG_KEY_$((base + 2))=credential.https://github.com.helper"
+        export "GIT_CONFIG_VALUE_$((base + 2))=$CRED_HELPER $launch_persona"
+        export "GIT_CONFIG_KEY_$((base + 3))=url.https://github.com/.insteadOf"
+        export "GIT_CONFIG_VALUE_$((base + 3))=git@github.com:"
+        export GIT_CONFIG_COUNT=$((base + 4))
+        exec "${LAUNCH[@]}"
+    )
+}
+
 # The child starts in the checkout work.sh itself came from. agy is
 # pinned with `--add-dir`; claude-code has no such flag and takes the
 # working directory as the project, so a launcher invoked by absolute
@@ -708,43 +781,52 @@ CRED_HELPER="$REPO_ROOT/scripts/auth/git-credential-persona"
 # Measured: the first smoke run wrote its artifact into a sibling clone.
 cd "$REPO_ROOT"
 
-set +e
 if [ "$(headless_for "$launch_harness")" != "1" ]; then
-    set -e
-    # Interactive keeps `exec` — that is what makes the operator's
-    # terminal BE the session — and keeps the harness's own exit code
-    # (D15). There is no stdout to parse, so D14's mapping does not
-    # apply. The token reaches the child as an assignment prefix: never
-    # an argument (argv is world-readable), never a file, never echoed.
+    # D15 and D23, both as amended (PR #60, AT-5): the interactive row
+    # is NOT `exec`'d. The child runs in the FOREGROUND and inherits
+    # stdin, stdout, stderr and the terminal — which is all "the
+    # operator's terminal IS the session" ever required; `timeout` was
+    # already an un-`exec`'d process between the two, so this costs one
+    # process and changes nothing the operator can see. work.sh then
+    # waits, maps and exits, so EVERY exit of this script is 0, 1 or 2.
+    #
+    # The map is two-valued: child 0 → 0; anything non-zero → 1, with
+    # the raw status named, and for 124 the cap named too. A timeout is
+    # not a new outcome kind — WORK-RESULT is a line the persona prints
+    # (D2, D21) and a timed-out session prints nothing — so 124 is the
+    # launcher's own observation, the same fact D14 maps to 1 when it
+    # arrives headless as status ERROR. A child's status of 2 is never
+    # forwarded: exit 2 is PRODUCED by the launcher's own refusals and
+    # by D14's parsed refused/blocked, and by nothing else, or the
+    # vocabulary #25's adapter branches on could be minted by an
+    # unrelated harness's numbering (D23 as amended).
     echo "==> launching: $(printf '%q ' "${LAUNCH[@]}")"
-    GH_TOKEN="$tok" GITHUB_TOKEN="$tok" \
-    GIT_CONFIG_COUNT=4 \
-    GIT_CONFIG_KEY_0="credential.helper" \
-    GIT_CONFIG_VALUE_0="" \
-    GIT_CONFIG_KEY_1="credential.https://github.com.helper" \
-    GIT_CONFIG_VALUE_1="" \
-    GIT_CONFIG_KEY_2="credential.https://github.com.helper" \
-    GIT_CONFIG_VALUE_2="$CRED_HELPER $launch_persona" \
-    GIT_CONFIG_KEY_3="url.https://github.com/.insteadOf" \
-    GIT_CONFIG_VALUE_3="git@github.com:" \
-    exec "${LAUNCH[@]}"
+    set +e
+    launch_child
+    rc=$?
+    set -e
+    tok=""
+    [ "$_xtrace_was_on" = "0" ] || set -x
+    if [ "$rc" -eq 0 ]; then
+        # Interactive 0 means the session RAN TO COMPLETION, not that
+        # the work was done: an in-session refusal is visible to the
+        # operator and to the tracker, not to this script.
+        exit 0
+    elif [ "$rc" -eq 124 ]; then
+        echo "==> $launch_persona's session hit the $launch_mins-minute cap (exit 124)." >&2
+    else
+        echo "==> $launch_persona's session did not complete (exit $rc)." >&2
+    fi
+    exit 1
 fi
 
 echo "==> launching headless: $(printf '%q ' "${LAUNCH[@]}")"
-raw="$(GH_TOKEN="$tok" GITHUB_TOKEN="$tok" \
-    GIT_CONFIG_COUNT=4 \
-    GIT_CONFIG_KEY_0="credential.helper" \
-    GIT_CONFIG_VALUE_0="" \
-    GIT_CONFIG_KEY_1="credential.https://github.com.helper" \
-    GIT_CONFIG_VALUE_1="" \
-    GIT_CONFIG_KEY_2="credential.https://github.com.helper" \
-    GIT_CONFIG_VALUE_2="$CRED_HELPER $launch_persona" \
-    GIT_CONFIG_KEY_3="url.https://github.com/.insteadOf" \
-    GIT_CONFIG_VALUE_3="git@github.com:" \
-    "${LAUNCH[@]}")"
+set +e
+raw="$(launch_child)"
 rc=$?
 set -e
 tok=""
+[ "$_xtrace_was_on" = "0" ] || set -x
 
 # Echoed first, always: nothing a session said is swallowed by the
 # mapping that follows.

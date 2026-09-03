@@ -95,6 +95,9 @@ echo "agy-saw-pwd=$PWD" >> "$LAUNCHES"
 echo "agy-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
 echo "agy-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
 echo "agy-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
+# Every GIT_CONFIG_* the child actually inherited, so an offset install
+# (AT-7) can be asserted by index rather than by the fixed names above.
+env | grep '^GIT_CONFIG_' | sed 's/^/agy-saw-env-/' >> "$LAUNCHES" || true
 if [ "${LAUNCH_OK:-0}" != "1" ]; then
   echo "agy $*" >> "$WRITES"
   echo "stub agy: a session was launched by a test that forbids it" >&2
@@ -104,6 +107,12 @@ fi
 exit "${AGY_RC:-0}"
 STUB
 chmod +x "$WORK/bin/gh" "$WORK/bin/claude" "$WORK/bin/agy"
+
+# util-linux's `script` is the pty for run_tty below. Checked here so a
+# machine without it fails with a sentence rather than at the first
+# interactive scenario.
+command -v script >/dev/null \
+  || fail "util-linux's 'script' is required: the interactive-row scenarios need a pty"
 
 # fixture_tree -> a temp REPO_ROOT owning its own copy of work.sh.
 # personas/ and config/ are COPIED rather than symlinked so a scenario
@@ -179,6 +188,31 @@ run() {
     "${TREE:-$REPO}/scripts/ops/work.sh" "$@" 2>&1)"
   rc=$?
   set -e
+  if [ "$rc" -ne "$want" ]; then
+    printf '%s\n' "$OUT" >&2
+    fail "$name (expected exit $want, got $rc)"
+  fi
+  pass "$name (exit $rc)"
+}
+# run_tty <expected-exit> <name> -- <args...>; the same as run(), through
+# a pty. The interactive row REFUSES when stdin or stdout is not a
+# terminal (#43 D16 as amended, clause (c); Acceptance 14), so every
+# interactive scenario needs one. `script -qec` allocates the pty, runs
+# the command, merges the child's stderr into the captured stream and
+# returns the command's own exit status; the pty's \r is stripped so the
+# assertions stay line-oriented. Variables the caller set as an
+# assignment prefix on run_tty (LAUNCH_OK, CLAUDE_RC, CLAUDE_JSON …) are
+# already in this process's environment and reach the child unaided.
+run_tty() {
+  local want="$1" name="$2" rc=0 cmd a
+  shift 3  # drop want, name and the literal --
+  cmd="DRY_RUN=${DRY:-1} HEADLESS=${HL:-0} $(printf '%q' "${TREE:-$REPO}/scripts/ops/work.sh")"
+  for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
+  set +e
+  OUT="$(script -qec "$cmd" /dev/null 2>&1)"
+  rc=$?
+  set -e
+  OUT="$(printf '%s' "$OUT" | tr -d '\r')"
   if [ "$rc" -ne "$want" ]; then
     printf '%s\n' "$OUT" >&2
     fail "$name (expected exit $want, got $rc)"
@@ -672,17 +706,56 @@ TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_last.json" \
   run 0 "D14: the last result line decides" -- 113
 has "daedalus reported: ok" "D14: the later verdict wins"
 
-banner "#43 D15 interactive claude-code is exec'd and its exit code is NOT mapped"
+banner "#43 D16(c)/Acceptance 14 the interactive row refuses when there is no terminal"
+# run() captures stdout through a command substitution, so it is exactly
+# the non-TTY caller this guard is about — the /work door, cron, a CI
+# step, a subagent's bash. The refusal is BEFORE the mint: a session that
+# cannot start must not leave a live one-hour credential behind (D11).
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+TREE="$T" DRY=0 LAUNCH_OK=1 \
+  run 1 "D16(c): the interactive row with no tty exits 1" -- 130
+has "HEADLESS=1" "D16(c): the refusal names the mode that would work"
+has "no terminal" "D16(c): it says what is missing"
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "D16(c): a token was minted for a row that cannot start"; }
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "D16(c): a session was launched with no terminal"; }
+pass "D16(c): zero mints and zero launches behind the no-tty refusal"
+# Exit 1, not 2: this is an environment that cannot start the row, not a
+# decision about the number, so 2 keeps meaning "not worked, by design".
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"WORK-RESULT: ok #130 implemented"}' \
+  > "$WORK/cc_ok.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 CLAUDE_JSON="$WORK/cc_ok.json" \
+  run 0 "D16(c): the same stage under HEADLESS=1 launches" -- 130
+
+banner "#43 D15/D23 amended: the interactive row is not exec'd, and it MAPS"
+# Four scenarios through a pty. The mapping is the proof that `exec` is
+# gone: an exec'd child's status would arrive unmapped, so a stub exiting
+# 3 could not come back as 1.
 : > "$LAUNCHES"
-TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=7 \
-  run 7 "D15: the harness's own exit code survives unmapped" -- 130
+TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=0 \
+  run_tty 0 "D15: an interactive child that exits 0 maps to 0" -- 130
 grep -qF "claude --agent odyssey" "$LAUNCHES" \
   || { cat "$LAUNCHES" >&2; fail "D15: the interactive form was not the one launched"; }
-pass "D15: the interactive row ran and its own code came back"
-# 7 is neither 0, 1 nor 2 — proof the headless mapping did not touch it.
-TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 CLAUDE_RC=7 CLAUDE_JSON=/dev/null \
-  run 1 "D15: the same code under HEADLESS=1 IS mapped" -- 130
-pass "D15: the mapping applies to headless launches only"
+pass "D15: the interactive row ran (no -p, no --output-format)"
+TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=3 \
+  run_tty 1 "D15: an interactive child that exits 3 maps to 1" -- 130
+has "exit 3" "D15: the raw status is named"
+has "did not complete" "D15: it says the session did not finish"
+# The row that #36 D8 and D23 could not both survive: a harness exiting 2
+# for a reason of its own must NOT be read as a designed refusal.
+TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=2 \
+  run_tty 1 "D23: an interactive child that exits 2 maps to 1, not 2" -- 130
+has "exit 2" "D23: the raw status is named rather than forwarded"
+# 124 is what `timeout` returns when the cap fires. The stub returns it
+# directly: a child that genuinely outlived the wrapper would take
+# odyssey's 90 minutes plus a minute, and the code path under test is the
+# mapping of the status, not coreutils' clock.
+TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=124 \
+  run_tty 1 "D15: a fired cap (124) maps to 1" -- 130
+has "exit 124" "D15: the raw status is named"
+has "90-minute cap" "D15: 124 also names the cap"
+# Every exit of this script is now 0, 1 or 2 — nothing above returned 3,
+# 124 or any other harness code.
+pass "D15: the interactive row's whole vocabulary is 0 and 1"
 
 banner "#43 D14/P4 the claude-code JSON shape is parsed by its own key names"
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"WORK-RESULT: ok #130 implemented"}' \
@@ -723,6 +796,81 @@ pass "D13: only the get minted — one call, one token"
 [ "$(grep -c '^mint ' "$MINTS")" = "2" ] \
   || { cat "$MINTS" >&2; fail "D13: a second get did not re-mint"; }
 pass "D13: a second get mints a second time"
+
+banner "#43 D11 amended / Acceptance 16 the minted token never reaches bash -x"
+# D11's third clause used to be a claim about the code that nothing ran,
+# and it was false: bash's xtrace expands both `tok="$(mint …)"` and every
+# `GH_TOKEN="$tok"` assignment, so a debugging `bash -x scripts/ops/work.sh
+# <n>` wrote the live installation token to stderr — and a Claude Code
+# session captures tool stderr verbatim into an on-disk transcript, a file
+# and a log, the two places D11 says the token never reaches. Both rows are
+# covered: the interactive one now returns rather than being exec'd away,
+# so it needs the guard too.
+: > "$LAUNCHES"; : > "$MINTS"
+set +e
+xt_out="$(DRY_RUN=0 HEADLESS=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" \
+  bash -x "$T/scripts/ops/work.sh" 113 2>&1)"
+xt_rc=$?
+set -e
+[ "$xt_rc" -eq 0 ] \
+  || { printf '%s\n' "$xt_out" >&2; fail "D11: the traced headless launch did not exit 0"; }
+printf '%s\n' "$xt_out" | grep -q '^+' \
+  || { printf '%s\n' "$xt_out" >&2; fail "D11: nothing was traced, so the assertion below is vacuous"; }
+pass "D11: the headless launch really ran under xtrace"
+if printf '%s\n' "$xt_out" | grep -qF 'stub-token-for-'; then
+  fail "D11: the minted token appears in the headless row's bash -x output"
+fi
+pass "D11: the headless row's stdout+stderr under bash -x carries no token"
+grep -qF "agy-saw-GH_TOKEN=stub-token-for-daedalus" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "D11: the child never got the token, so nothing was proved"; }
+pass "D11: the token was suppressed in the trace, not withheld from the child"
+# A window, not a switch: `set -x` is back in force the moment the child
+# returns, so everything after the launch is traced as the caller asked.
+printf '%s\n' "$xt_out" | grep -qE '^\+.*reported' \
+  || { printf '%s\n' "$xt_out" >&2; fail "D11: xtrace was not restored after the launch"; }
+pass "D11: xtrace is restored once the child returns"
+# The interactive row, through the same pty run_tty uses.
+: > "$LAUNCHES"; : > "$MINTS"
+xt_cmd="DRY_RUN=0 HEADLESS=0 bash -x $(printf '%q' "$T/scripts/ops/work.sh") 130"
+set +e
+xt_out="$(LAUNCH_OK=1 CLAUDE_RC=0 script -qec "$xt_cmd" /dev/null 2>&1)"
+xt_rc=$?
+set -e
+xt_out="$(printf '%s' "$xt_out" | tr -d '\r')"
+[ "$xt_rc" -eq 0 ] \
+  || { printf '%s\n' "$xt_out" >&2; fail "D11: the traced interactive launch did not exit 0"; }
+printf '%s\n' "$xt_out" | grep -q '^+' \
+  || { printf '%s\n' "$xt_out" >&2; fail "D11: nothing was traced on the interactive row"; }
+pass "D11: the interactive launch really ran under xtrace"
+if printf '%s\n' "$xt_out" | grep -qF 'stub-token-for-'; then
+  fail "D11: the minted token appears in the interactive row's bash -x output"
+fi
+pass "D11: the interactive row's stdout+stderr under bash -x carries no token"
+grep -qF "claude-saw-GH_TOKEN=stub-token-for-odyssey" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "D11: the interactive child never got the token"; }
+pass "D11: the interactive child got the token too, and the trace did not"
+
+banner "#43 AT-7 an inherited GIT_CONFIG_* set is extended, not overwritten"
+# A caller that already installs `http.proxy` or `safe.directory` through
+# GIT_CONFIG_* had its entries silently replaced by a fixed COUNT=4, and
+# the symptom was a push failing for an unrelated reason.
+: > "$LAUNCHES"; : > "$MINTS"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.proxy" \
+  GIT_CONFIG_VALUE_0="http://proxy.invalid" \
+  run 0 "AT-7: a launch under an inherited GIT_CONFIG set exits 0" -- 113
+grep -qxF "agy-saw-env-GIT_CONFIG_KEY_0=http.proxy" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "AT-7: the caller's own entry was overwritten"; }
+pass "AT-7: the caller's entry survives at its own index"
+grep -qxF "agy-saw-env-GIT_CONFIG_COUNT=5" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "AT-7: the count was replaced rather than extended"; }
+pass "AT-7: the count is the caller's plus this launcher's four"
+grep -qxF "agy-saw-env-GIT_CONFIG_VALUE_3=$T/scripts/auth/git-credential-persona daedalus" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "AT-7: the helper was not installed at the caller's offset"; }
+pass "AT-7: the re-minting helper lands at the caller's offset and still wins"
+[ -z "${GIT_CONFIG_COUNT:-}" ] \
+  || fail "AT-7: GIT_CONFIG_COUNT leaked out of the scenario"
+pass "AT-7: nothing leaked back into the parent"
 
 banner "#43 D4 work.sh reads no log file and names no home directory"
 # The home-path fragments are ASSEMBLED from pieces, the same trick

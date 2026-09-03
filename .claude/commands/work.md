@@ -1,7 +1,7 @@
 ---
-description: Work a tracker issue — print the dispatch, or launch the owning persona (#43 D16)
+description: Work a tracker issue — a headless dispatch of the owning persona. Relative by design, so it runs the copy of work.sh in this session's working directory, not another checkout's (#43 D16)
 argument-hint: <issue-number> [--as <persona>]
-allowed-tools: Bash(scripts/ops/work.sh:*)
+allowed-tools: Bash(HEADLESS=1 scripts/ops/work.sh:*), Bash(scripts/ops/work.sh:*), Bash(echo:*)
 ---
 
-!`scripts/ops/work.sh $ARGUMENTS`
+!`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit $?]"`

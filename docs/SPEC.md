@@ -370,40 +370,62 @@ invoked by absolute path from another clone reads one checkout's
 labels and personas and hands the session a different one — measured,
 and the session reports success having edited the wrong tree.
 Both are given one prompt literal, and both are wrapped in
-`timeout` at the persona's own `limits.timeout_mins` plus a minute, so
-the harness reports its own timeout before the wrapper kills it. A
-persona whose compiled target is missing is exit 1 before anything is
-minted — a launch against a target that is not there is a session
-running as the harness's stock agent under a persona's name.
+`timeout` at the persona's own `limits.timeout_mins` plus a minute. The
+extra minute is for `agy`, which is also given `--print-timeout <n>m`
+and so reports its own timeout before the wrapper kills it; Claude Code
+takes no such flag, and for it the wrapper is the only cap. A persona
+whose compiled target is missing is exit 1 before anything is minted —
+a launch against a target that is not there is a session running as the
+harness's stock agent under a persona's name — and so is a harness
+binary, or `timeout` itself, that is not on `PATH`.
 
 Every MODE is an environment variable, for the same reason argv is
 closed: `DRY_RUN=1` prints the resolved launch command instead of
 executing it (the reads and every guard still run, and nothing is
 minted), and `HEADLESS=1` captures the session's JSON instead of
-handing over the terminal. Antigravity is always headless. An
-interactive launch is `exec`'d and keeps the harness's own exit code.
-A headless one is read for a final `WORK-RESULT: <ok|refused|blocked>
+handing over the terminal. Antigravity is always headless. The
+interactive row is not `exec`'d: the child runs in the foreground and
+inherits stdin, stdout, stderr and the terminal, and the launcher waits
+and maps, so *every* exit of `work.sh` is 0, 1 or 2. That map is
+two-valued — child 0 → 0, anything non-zero → 1 with the raw status
+named on stderr, and 124 also naming the cap — because `exec timeout …`
+would otherwise hand a caller 124, 125, 126 or 127, codes outside the
+contract, and would let a harness that exits 2 for a reason of its own
+read as a designed refusal. Interactive 0 means the session ran to
+completion, not that the work was done. The interactive row also
+requires a terminal: with no tty on stdin or stdout the launcher exits
+1 naming `HEADLESS=1`, before minting anything and without starting a
+child — the same class as a missing binary, an environment that cannot
+start the row rather than a decision about the number.
+A headless launch is read for a final `WORK-RESULT: <ok|refused|blocked>
 #<n> <reason>` line, taken from the decoded response text (the raw
 JSON escapes the newline) with the last such line winning: `ok` exits
 0, `refused` and `blocked` exit 2, and a session that crashed, timed
 out or exited cleanly without the line exits 1 — an outcome nobody
 observed is not a success. Exit 2 therefore now covers both a launcher
 refusal and a launched persona's refusal: one code, because a caller
-asks whether the number was worked, not which layer declined. Exit 1
-is unusable input or an unobservable outcome; exit 0 is launched-and-ok
-or printed. The `/work` door is a hand-authored
+asks whether the number was worked, not which layer declined. Exit 2 is
+produced, never forwarded — a child's own status of 2 maps to 1 like
+any other non-zero. Exit 1 is unusable input, an environment that
+cannot start the row, or an unobservable outcome; exit 0 is
+launched-and-ok or printed. The `/work` door is a hand-authored
 `.claude/commands/work.md` whose body is exactly
-`scripts/ops/work.sh $ARGUMENTS`, carried in the `` !`…` `` form that
-runs it rather than describing it, with
-`allowed-tools: Bash(scripts/ops/work.sh:*)` so it runs without a
-prompt: a command body is otherwise injected as a prompt and whether
-the script runs at all is the model's discretion.
-`.claude/commands/` is outside the compiler's target directories, so
-this is not a drift-gate bypass. The injected form runs the script
-before the turn and puts its stdout in context, so `/work` is the door
-for a printed dispatch and for `HEADLESS=1`; an interactive launch,
-which hands the terminal to the child through `exec`, is a plain shell
-invocation of `scripts/ops/work.sh`.
+`` !`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
+$?]"` ``, in the `` !`…` `` form that runs it rather than describing
+it, with `allowed-tools` widened to match the mode-prefixed line so it
+runs without a prompt: a command body is otherwise injected as a prompt
+and whether the script runs at all is the model's discretion. The door
+names the mode because its body runs in the harness's own non-TTY bash
+before the turn, where the interactive row cannot start; the trailing
+`echo` makes the body exit 0 whatever the script returned, so a
+designed exit 2 prints its own refusal text and its code instead of
+surfacing as a failed tool call. `.claude/commands/` is outside the
+compiler's target directories, so this is not a drift-gate bypass. The
+door invokes a relative path by design, so `/work` resolves against the
+session's working directory and a session sitting in a worktree gets
+that worktree's copy; an operator who wants their terminal to *be* the
+session runs `scripts/ops/work.sh <n>` from a terminal, which is not a
+thing a slash command can be.
 Tests: `scripts/ops/tests/work_test.sh` against stubs, and
 `scripts/ops/smoke_launch.sh <scratch-issue>` for one real launch per
 harness — three named observables each, with the claim half of the
@@ -417,18 +439,33 @@ the one step between the last refusal and the launch, for that persona
 only, and a run that launches nothing — a dry run, a multi-owner
 stage, a harness with no row — mints nothing. A mint that fails is
 fatal: the launcher refuses rather than falling back to whatever
-credentials the shell carries. The token reaches the child as a
-variable-assignment prefix, never an argument, a file or a log line,
-and it overwrites `GH_TOKEN`/`GITHUB_TOKEN` rather than inheriting
-them. `git` cannot read those variables at all, so it is pointed at
+credentials the shell carries. The token reaches the child through the
+environment of a subshell that `export`s it and then `exec`s — never an
+argument (`env VAR=… ` would put it in a world-readable argv), never a
+file, never a log line — and it overwrites `GH_TOKEN`/`GITHUB_TOKEN`
+rather than inheriting them. Bash's own xtrace is the one log that
+would otherwise catch it: `set -x` expands both the mint's command
+substitution and every assignment of the value, so `bash -x
+scripts/ops/work.sh <n>` used to write the live installation token to
+stderr, and a Claude Code session captures tool stderr verbatim into an
+on-disk transcript. The launcher therefore suppresses xtrace for the
+window between the mint and the launch and restores the caller's
+setting the moment the child returns; the suppression is a no-op when
+xtrace is off, and a hermetic scenario runs the fixture launch under
+`bash -x` on both rows and fails if the stub token appears.
+`git` cannot read those variables at all, so it is pointed at
 `scripts/auth/git-credential-persona <persona>`, a credential helper
 that mints afresh on every `get` — a snapshot taken at launch expires
 before a ninety-minute cap, at the one moment the work is finished and
 about to be lost. The helper is installed through
 `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` in the
 child's environment only, so a crashed session leaves no credential
-configuration behind and the operator's own config is untouched. Two
-of those entries are empty resets. Git collects every matching
+configuration behind and the operator's own config is untouched. The
+four entries are appended at whatever `GIT_CONFIG_COUNT` the caller
+already carries rather than written at index 0, so a caller that
+installs `http.proxy` or `safe.directory` that way keeps its own
+entries; with none inherited the offset is 0. Two of those entries are
+empty resets. Git collects every matching
 `credential.helper` and `credential.<url>.helper` into one ordered
 list and tries them in turn; an empty value clears whatever has
 accumulated, and a later entry appends to it, so without a reset an
