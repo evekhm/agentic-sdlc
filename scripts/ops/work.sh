@@ -2,16 +2,19 @@
 # One-argument dispatch (#36, intent/36-dispatch/spec.md).
 #
 #   scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]
-#   DRY_RUN=1 scripts/ops/work.sh <issue-or-pr-number>
+#   DRY_RUN=1  scripts/ops/work.sh <issue-or-pr-number>
+#   HEADLESS=1 scripts/ops/work.sh <issue-or-pr-number>
 #
 # A NUMBER IS THE WHOLE INSTRUCTION (D7). There is deliberately no flag
 # naming a stage, a folder, an artifact or a branch: such a flag would
 # let a session work a stage the labels say is not current, which is
 # exactly the drift the labels-are-the-state-machine rule exists to
 # stop. `--as <persona>` picks one of several owners of the same stage
-# and is the only other input.
+# and is the only other input. Every MODE is an environment variable for
+# the same reason argv is closed: `DRY_RUN`, and now `HEADLESS` (#43,
+# D5) — a mode is how a run is executed, never what is worked.
 #
-# Deterministic bash + gh + jq. No model call, no prompt, no API key:
+# Deterministic bash + gh + jq up to the launch. No model call, no prompt,
 # the issue's labels, the merged folder layout and three committed data
 # files are the whole input, which is why the same number always
 # resolves the same way. Failure mode first — the order is
@@ -37,19 +40,34 @@
 #                             list contains it (D2)
 #   config/deployments.yaml   which harness a persona runs on (D10)
 #
-# Exit codes (D8):
-#   0  launched, or printed (a dry run, an unlaunchable harness, or a
-#      multi-owner stage that deliberately launches nothing)
-#   2  refused — one of the six stated conditions in D5. Expected
-#      behaviour, not a bug: the issue is not in a state to be worked.
+# THIS SCRIPT NEVER PRINTS A TOKEN. It mints the launched persona's App
+# token in the one step between the last refusal and the launch (#43,
+# D11), hands it to the child as a variable-assignment prefix, and never
+# writes it to a file, an argument or the log. A run that launches
+# nothing — a dry run, a two-owner stage, a harness with no row —
+# exchanges nothing and leaves no live credential behind.
+#
+# Exit codes (D8, extended by #43 D14/D23):
+#   0  launched and the session reported `WORK-RESULT: ok`, or printed
+#      (a dry run, an unlaunchable harness, or a multi-owner stage that
+#      deliberately launches nothing)
+#   2  the number was NOT WORKED, BY DESIGN — either this script refused
+#      (one of the six D5 conditions) or the launched persona itself
+#      reported `WORK-RESULT: refused|blocked`. One code, because a
+#      caller asks whether the number was worked, not which layer
+#      declined (#43, D23).
 #   1  unusable input: an unreadable number, a PR that resolves to no
-#      issue, a stage no label names, a persona with no harness pin, or
-#      an unparsable source file.
+#      issue, a stage no label names, a persona with no harness pin, an
+#      unparsable source file, a missing compiled target, a token that
+#      could not be minted — or a headless session whose outcome could
+#      not be observed (a crash, a timeout, or a clean exit with no
+#      WORK-RESULT line; returning 0 for an outcome nobody saw is a lie).
 
 set -euo pipefail
 
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
+HEADLESS="${HEADLESS:-0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
@@ -59,12 +77,19 @@ PERSONA_DIR="$REPO_ROOT/personas"
 usage() {
     cat <<'USAGE'
 usage: scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]
-       DRY_RUN=1 scripts/ops/work.sh <issue-or-pr-number>
+       DRY_RUN=1  scripts/ops/work.sh <issue-or-pr-number>
+       HEADLESS=1 scripts/ops/work.sh <issue-or-pr-number>
 
 The number is the whole instruction. Nothing else about the work is an
 argument: the stage comes from the issue's single status:* label, the
 owner from the persona sources, the folder from the repository, and the
 harness from config/deployments.yaml.
+
+Modes are environment variables, never flags:
+  DRY_RUN=1   resolve and print, launch nothing, mint nothing.
+  HEADLESS=1  run the session non-interactively and map its
+              WORK-RESULT line to an exit code. Antigravity personas
+              are always headless; there is no interactive row.
 USAGE
 }
 
@@ -377,15 +402,140 @@ harness_of() { # <persona> -> harness, or empty
 target_of() { # <persona> <harness> -> the compiled target a launch runs
     case "$2" in
         claude-code) printf '.claude/agents/%s.md' "$1" ;;
-        antigravity) printf '.agents/agents/%s/instructions.md' "$1" ;;
-        *)           printf '(no compiled target known for harness %s)' "$2" ;;
+        antigravity) printf '.agents/agents/%s/agent.md' "$1" ;;
+        *)           printf '' ;;
     esac
 }
 
-launch_command() { # <persona> <harness> -> the command line, or empty
-    case "$2" in
-        claude-code) printf 'claude --agent %s "#%s"' "$1" "$ISSUE" ;;
-        *)           printf '' ;;
+# The persona's own cap, read from the SOURCE. Limits live in
+# personas/<p>.yaml and nowhere else: the compiler no longer copies them
+# into a target, so there is one home for the fact (#43, D6, D9).
+timeout_mins_of() { # <persona> -> limits.timeout_mins
+    local persona="$1" file value
+    file="$PERSONA_DIR/$persona.yaml"
+    [ -f "$file" ] || die "personas/$persona.yaml does not exist"
+    value="$(sed -n '/^limits:/,$p' "$file" \
+        | sed -n 's/^[[:space:]][[:space:]]*timeout_mins:[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+        | head -1)"
+    [ -n "$value" ] \
+        || die "personas/$persona.yaml declares no numeric limits.timeout_mins"
+    printf '%s\n' "$value"
+}
+
+# The RESOLVED model, read from the compiled sidecar. Re-resolving the
+# persona's tier against config/model_tiers.yaml in awk here would be a
+# second implementation of the compiler's one job, and two of them drift
+# silently (#43, D9).
+model_of() { # <persona> -> the model agy is launched with
+    local persona="$1" sidecar value
+    sidecar=".agents/agents/$persona/agent.json"
+    [ -f "$REPO_ROOT/$sidecar" ] \
+        || die "$sidecar is missing; run scripts/sync_agents.py and commit the result"
+    value="$(jq -r '.model // empty' "$REPO_ROOT/$sidecar")" \
+        || die "$sidecar is not readable JSON"
+    [ -n "$value" ] || die "$sidecar names no model for $persona"
+    printf '%s\n' "$value"
+}
+
+# THE PROMPT (#43, D2, D21, D22). One literal, both harnesses, both
+# modes. It names a number and nothing else — no stage, no folder, no
+# artifact, no branch — so a launch cannot tell a session to work a rung
+# the labels say is not current, which is the same rule that closes argv
+# (D7). A bare `#<n>` is NOT sent: `#` is not a sigil to either harness,
+# and a bare number handed to a persona that failed to load was measured
+# burning 160k tokens before timing out. The WORK-RESULT sentence lives
+# here rather than in personas/**: only a launcher reads it, and putting
+# it in the sources would make every hand-opened interactive session emit
+# a machine-readable result line for nobody (D21).
+PROMPT="Work issue #$ISSUE in this repository. Follow your persona instructions and the repository's AGENTS.md; when you finish or refuse, print one final line WORK-RESULT: <ok|refused|blocked> #$ISSUE <one-line reason>."
+
+# The launch table (#43, D1, D5, D6). An ARRAY, not a string: a printed
+# command and an executed one must not be two spellings of the same
+# thing, so the report prints this array through printf '%q ' and the
+# launch execs it.
+#
+#   harness       HEADLESS=0                     HEADLESS=1
+#   claude-code   claude --agent P "$PROMPT"     claude -p … --output-format json
+#   antigravity   (same as headless — D5)        agy -p … --add-dir … --print-timeout
+#
+# Every row is wrapped in `timeout $((T*60+60))` so a harness that
+# ignores its own print timeout still ends; the spare minute is for the
+# harness's own teardown.
+LAUNCH_ARGV=()
+#
+# `antigravity` is ALWAYS headless, whatever HEADLESS says: only print
+# mode was ever measured, an interactive agy session is untested, and it
+# is not what a dispatcher needs — the presenter drives interactive
+# antigravity work in the IDE, not through this script (D5).
+headless_for() { # <harness> -> 1 | 0
+    case "$1" in
+        antigravity) printf '1\n' ;;
+        *)           printf '%s\n' "$([ "$HEADLESS" = "1" ] && echo 1 || echo 0)" ;;
+    esac
+}
+
+launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
+    local persona="$1" harness="$2" mins wrap model
+    LAUNCH_ARGV=()
+    case "$harness" in
+        claude-code|antigravity) ;;
+        *) return 0 ;;
+    esac
+    mins="$(timeout_mins_of "$persona")" || exit 1
+    wrap=$(( mins * 60 + 60 ))
+    LAUNCH_ARGV=( timeout "$wrap" )
+    case "$harness" in
+        claude-code)
+            if [ "$(headless_for "$harness")" = "1" ]; then
+                LAUNCH_ARGV+=( claude -p "$PROMPT" --agent "$persona"
+                               --output-format json )
+            else
+                LAUNCH_ARGV+=( claude --agent "$persona" "$PROMPT" )
+            fi
+            ;;
+        antigravity)
+            # --add-dir is MANDATORY and is $REPO_ROOT: print mode
+            # ignores the working directory entirely, and without this
+            # flag not one repository file is opened. $REPO_ROOT is the
+            # checkout that owns this script (derived from BASH_SOURCE
+            # above), never `git rev-parse` from the caller's cwd — the
+            # labels, the folder layout and the deployment pins were all
+            # read from that tree, and reading state from one checkout
+            # while editing another is the split #36 exists to avoid
+            # (D24). There is deliberately no `cd` anywhere in this file.
+            model="$(model_of "$persona")" || exit 1
+            LAUNCH_ARGV+=( agy -p "$PROMPT" --agent "$persona"
+                           --add-dir "$REPO_ROOT" --model "$model"
+                           --output-format json --print-timeout "${mins}m" )
+            ;;
+    esac
+}
+
+# Neither harness signals a model-level refusal at the process boundary:
+# a forced `REFUSED: …` exits 0 with a SUCCESS status on both. So the
+# outcome is read IN BAND, from the decoded response text — never
+# grepped out of the raw JSON, where the newline is escaped and
+# `^WORK-RESULT:` would silently never match. The two harnesses disagree
+# on key names (measured, #43 probe P4: agy answers `.status`/`.response`,
+# Claude Code `.is_error`/`.result`), so this is one mapping with one
+# jq expression each rather than two mappings.
+response_text() { # <harness>; raw JSON on stdin
+    case "$1" in
+        antigravity) jq -r '.response // ""' ;;
+        claude-code) jq -r '.result // ""' ;;
+        *)           cat ;;
+    esac
+}
+process_status() { # <harness>; raw JSON on stdin -> SUCCESS | ERROR
+    case "$1" in
+        antigravity) jq -r 'if (.status // "ERROR") == "SUCCESS"
+                            then "SUCCESS" else "ERROR" end' ;;
+        # `.is_error == false`, not `.is_error // true`: jq's `//` treats
+        # `false` as absent, so the alternative form turns every SUCCESS
+        # into an ERROR. Written the explicit way, a missing key is an
+        # ERROR too, which is the conservative reading we want.
+        claude-code) jq -r 'if (.is_error == false) then "SUCCESS" else "ERROR" end' ;;
+        *)           printf 'ERROR\n' ;;
     esac
 }
 
@@ -395,38 +545,71 @@ owner_count="$(grep -c . <<<"$owners")"
 
 echo "==> #$ISSUE · $title"
 [ -z "$RESOLVED_VIA" ] || echo "    resolved from #$NUMBER via $RESOLVED_VIA"
+# Which checkout a session will actually edit (D24). Printed because the
+# operator standing in a worktree and invoking another tree's copy of
+# this script is a real and silent mistake.
+echo "    root:     $REPO_ROOT"
 echo "    stage:    $stage"
 echo "    label:    $label"
 echo "    artifact: $artifact"
 echo "    owner:    ${owner_list% }"
 echo "    folder:   $folder ($folder_origin)"
+# Printed once, unquoted, because the per-owner `command:` line below is
+# shell-escaped and a human cannot read the prompt out of it.
+echo "    prompt:   $PROMPT"
 if has_label "in-progress"; then
     # Reaching here with `in-progress` means (e) established a holder.
     echo "    claim:    in-progress, held by $claim_holder"
 fi
 
 launch_persona=""
-launch_line=""
+launch_harness=""
+launch_target=""
+launch_missing=0
+LAUNCH=()
 while read -r persona; do
     [ -n "$persona" ] || continue
     harness="$(harness_of "$persona")"
     [ -n "$harness" ] \
         || die "config/deployments.yaml has no harness pin for persona '$persona'"
-    command_line="$(launch_command "$persona" "$harness")"
+    target="$(target_of "$persona" "$harness")"
+    # PREFLIGHT (D3). agy's failure mode for a missing agent file is
+    # SILENT — it runs its stock agent, prints nothing anywhere a script
+    # can see, and exits 0 — so before the process starts is the only
+    # cheap place to notice. For an owner that is merely being printed
+    # this is a marker and nothing more: a broken atlas target must not
+    # stop `--as argus` (D20). It becomes fatal below, for the one
+    # persona actually about to be launched.
+    missing=0
+    if [ -n "$target" ] && [ ! -f "$REPO_ROOT/$target" ]; then
+        missing=1
+    fi
+    LAUNCH_ARGV=()
+    [ "$missing" -eq 1 ] || launch_argv "$persona" "$harness"
     echo "--> $persona"
     echo "    harness:  $harness"
-    echo "    target:   $(target_of "$persona" "$harness")"
+    if [ -z "$target" ]; then
+        echo "    target:   (no compiled target known for harness $harness)"
+    elif [ "$missing" -eq 1 ]; then
+        echo "    target:   $target (missing)"
+    else
+        echo "    target:   $target"
+    fi
     echo "    branch:   $persona/$ISSUE-$slug"
     echo "    brief:    $brief"
-    if [ -n "$command_line" ]; then
-        echo "    command:  $command_line"
+    if [ "${#LAUNCH_ARGV[@]}" -gt 0 ]; then
+        # printf '%q ' so what is shown is exactly what runs.
+        echo "    command:  $(printf '%q ' "${LAUNCH_ARGV[@]}")"
     else
         echo "    command:  none — this harness is started by hand; open the target"
-        echo "              above and give it the one-line prompt: #$ISSUE"
+        echo "              above and give it the prompt printed above."
     fi
     if [ -z "$launch_persona" ]; then
         launch_persona="$persona"
-        launch_line="$command_line"
+        launch_harness="$harness"
+        launch_target="$target"
+        launch_missing="$missing"
+        LAUNCH=( ${LAUNCH_ARGV[@]+"${LAUNCH_ARGV[@]}"} )
     fi
 done <<<"$owners"
 
@@ -434,18 +617,138 @@ done <<<"$owners"
 if [ "$owner_count" -gt 1 ]; then
     # Auto-picking would silently halve a policy whose whole content is
     # that two independent reviewers both look (#2, D4). Name one with
-    # --as if that is really what you meant.
+    # --as if that is really what you meant. Nothing was minted and no
+    # target was required to exist: a run that launches nothing
+    # exchanges nothing (D20).
     echo "==> stage $stage has $owner_count owners; printing both and launching neither."
     echo "    Re-run with --as <persona> to launch exactly one."
     exit 0
 fi
+if [ "$launch_missing" -eq 1 ]; then
+    die "$launch_persona is pinned to $launch_harness but $launch_target does not exist in $REPO_ROOT; run scripts/sync_agents.py and commit the result. Launching without it would silently run the harness's stock agent and exit 0"
+fi
+
+# The identity the launched session will act as. The token itself is
+# minted below and never printed; this line is the whole of what the
+# operator gets to see about it (D11).
+identity_of() { # <persona> -> the App login it posts as, or empty
+    local file="$PERSONA_DIR/$1.yaml"
+    [ -f "$file" ] || return 0
+    sed -n 's/^[[:space:]]*identity:[[:space:]]*"\(.*\)".*/\1/p' "$file" | head -1
+}
+echo "    identity: $(identity_of "$launch_persona") (token minted at launch; not printed)"
+
 if [ "$DRY_RUN" = "1" ]; then
-    echo "==> DRY_RUN=1 — nothing was launched and nothing was written."
+    echo "==> DRY_RUN=1 — nothing was launched, nothing was written, and no token was minted."
     exit 0
 fi
-if [ -z "$launch_line" ]; then
+if [ "${#LAUNCH[@]}" -eq 0 ]; then
     echo "==> $launch_persona's harness is not one this script starts — printed above."
     exit 0
 fi
-echo "==> launching: $launch_line"
-exec claude --agent "$launch_persona" "#$ISSUE"
+
+# --- Identity (#43, D11, D12, D13) ---------------------------------------------
+# The last step before the launch, so that every run which prints and
+# launches nothing performs no token exchange. A failed mint is FATAL:
+# the alternative — warn and fall back to whatever credential the
+# operator happens to be carrying — produces exactly the bug this exists
+# to fix, a session that posts as the operator while everyone believes a
+# persona ran. A launch that cannot be attributed is not a launch.
+tok=""
+tok="$("$REPO_ROOT/scripts/auth/mint_app_token.py" "$launch_persona")" \
+    || die "cannot mint an App token for $launch_persona; refusing to launch as somebody else"
+[ -n "$tok" ] \
+    || die "the App token minted for $launch_persona is empty; refusing to launch as somebody else"
+
+# git does not read GH_TOKEN, and an installation token lives about an
+# hour while odyssey's cap is ninety minutes — so `gh` gets the snapshot
+# and `git` gets a helper that re-mints on every call. Both are
+# installed through the CHILD's environment only: nothing is written to
+# .git/config, so a crashed session leaves no credential configuration
+# behind.
+#
+# The two EMPTY helper values are load-bearing, and there are two of
+# them for a measured reason. git APPENDS helpers and tries them in
+# order, and an empty value is what resets the list — but
+# `credential.helper` and `credential.https://github.com.helper` are
+# different keys with different lists. Resetting only the generic one
+# leaves an operator's URL-specific global helper (a `gh auth
+# git-credential` entry under `credential.https://github.com.helper` is
+# the common one, and is present on the machine this was measured on)
+# sitting AHEAD of ours, so gh answers first and the session pushes as
+# the operator — the exact bug D12 exists to stop. Measured, both ways,
+# before this line was written.
+#
+# The insteadOf rewrite is load-bearing for a different reason: this
+# repository's origin is SSH, and an SSH remote never consults a
+# credential helper at all.
+CRED_HELPER="$REPO_ROOT/scripts/auth/git-credential-persona"
+
+set +e
+if [ "$(headless_for "$launch_harness")" != "1" ]; then
+    set -e
+    # Interactive keeps `exec` — that is what makes the operator's
+    # terminal BE the session — and keeps the harness's own exit code
+    # (D15). There is no stdout to parse, so D14's mapping does not
+    # apply. The token reaches the child as an assignment prefix: never
+    # an argument (argv is world-readable), never a file, never echoed.
+    echo "==> launching: $(printf '%q ' "${LAUNCH[@]}")"
+    GH_TOKEN="$tok" GITHUB_TOKEN="$tok" \
+    GIT_CONFIG_COUNT=4 \
+    GIT_CONFIG_KEY_0="credential.helper" \
+    GIT_CONFIG_VALUE_0="" \
+    GIT_CONFIG_KEY_1="credential.https://github.com.helper" \
+    GIT_CONFIG_VALUE_1="" \
+    GIT_CONFIG_KEY_2="credential.https://github.com.helper" \
+    GIT_CONFIG_VALUE_2="$CRED_HELPER $launch_persona" \
+    GIT_CONFIG_KEY_3="url.https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_3="git@github.com:" \
+    exec "${LAUNCH[@]}"
+fi
+
+echo "==> launching headless: $(printf '%q ' "${LAUNCH[@]}")"
+raw="$(GH_TOKEN="$tok" GITHUB_TOKEN="$tok" \
+    GIT_CONFIG_COUNT=4 \
+    GIT_CONFIG_KEY_0="credential.helper" \
+    GIT_CONFIG_VALUE_0="" \
+    GIT_CONFIG_KEY_1="credential.https://github.com.helper" \
+    GIT_CONFIG_VALUE_1="" \
+    GIT_CONFIG_KEY_2="credential.https://github.com.helper" \
+    GIT_CONFIG_VALUE_2="$CRED_HELPER $launch_persona" \
+    GIT_CONFIG_KEY_3="url.https://github.com/.insteadOf" \
+    GIT_CONFIG_VALUE_3="git@github.com:" \
+    "${LAUNCH[@]}")"
+rc=$?
+set -e
+tok=""
+
+# Echoed first, always: nothing a session said is swallowed by the
+# mapping that follows.
+printf '%s\n' "$raw"
+
+status="$(printf '%s' "$raw" | process_status "$launch_harness" 2>/dev/null)" || status=""
+[ -n "$status" ] || status="ERROR"
+if [ "$rc" -ne 0 ] || [ "$status" != "SUCCESS" ]; then
+    echo "==> $launch_persona's session did not complete (exit $rc, status $status)." >&2
+    exit 1
+fi
+
+text="$(printf '%s' "$raw" | response_text "$launch_harness" 2>/dev/null)" || text=""
+result_line="$(printf '%s\n' "$text" \
+    | grep -E '^[[:space:]]*WORK-RESULT:' | tail -1)" || result_line=""
+if [ -z "$result_line" ]; then
+    # A launcher that returns 0 for an outcome it could not observe is
+    # lying, and a session that ran out of turns leaves exactly this
+    # trace (D14).
+    echo "==> $launch_persona's session exited cleanly but printed no WORK-RESULT line; the outcome was not observed." >&2
+    exit 1
+fi
+verdict="$(printf '%s\n' "$result_line" | awk '{print $2}')"
+echo "==> $launch_persona reported: $verdict"
+case "$verdict" in
+    ok)              exit 0 ;;
+    refused|blocked) exit 2 ;;
+    *)
+        echo "==> '$verdict' is not one of ok|refused|blocked; the outcome was not observed." >&2
+        exit 1 ;;
+esac

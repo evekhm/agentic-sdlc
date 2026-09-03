@@ -4,14 +4,31 @@
 #   bash scripts/ops/tests/work_test.sh
 #
 # Hermetic: a stub `gh` first on PATH answers every read from a canned
-# JSON fixture, and a stub `claude` fails loudly if anything is ever
-# launched. No network, no token, and nothing is written to GitHub —
-# the stubs log any attempt and the run fails on it.
+# JSON fixture, and stub `claude` / `agy` fail loudly if anything is
+# launched by a scenario that did not ask for it. No network, no token,
+# and nothing is written to GitHub — the stubs log any attempt and the
+# run fails on it.
 #
 # Each scenario names the spec row it pins. The refusals are the point:
 # a dispatcher that guesses at a corrupted or claimed issue is worse
 # than one that does nothing, so every D5 condition has a case here.
 # Exit 0 with a PASS line per assertion, non-zero on the first failure.
+#
+# #43 adds three things the #36 suite could not express:
+#
+#   $LAUNCHES   every stub launch, with the GH_TOKEN the child saw.
+#               Separate from $WRITES so a DELIBERATE launch does not
+#               look like a forbidden one; $WRITES keeps its old
+#               meaning, "something was attempted that must never be".
+#   $MINTS      every call to the stub mint script, so a test can assert
+#               ZERO token exchanges as cheaply as it asserts zero
+#               writes (D11, D20).
+#   fixture_tree  a temp REPO_ROOT owning its own copy of work.sh.
+#               work.sh resolves the mint script by absolute path from
+#               BASH_SOURCE (D24), so PATH cannot stub it; a whole tree
+#               can. It is also the only way to test a persona pinned to
+#               a harness with no launch row, now that every pinned
+#               harness has one.
 
 set -euo pipefail
 
@@ -22,11 +39,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 FIXTURES="$WORK/fixtures"
 WRITES="$WORK/writes.log"
+LAUNCHES="$WORK/launches.log"
+MINTS="$WORK/mints.log"
 mkdir -p "$FIXTURES" "$WORK/bin"
-: > "$WRITES"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
 
 export GITHUB_REPO="test/repo"
-export FIXTURES WRITES
+export FIXTURES WRITES LAUNCHES MINTS
 export PATH="$WORK/bin:$PATH"
 
 pass() { echo "PASS: $*"; }
@@ -46,13 +65,68 @@ file="$FIXTURES/${2//\//_}.json"
 [ -f "$file" ] || { echo "stub gh: no fixture for $2" >&2; exit 1; }
 cat "$file"
 STUB
+# The two harness stubs. Unless a scenario sets LAUNCH_OK=1 they behave
+# exactly as the #36 suite's stub claude did: record the attempt in
+# $WRITES and fail loudly. With LAUNCH_OK=1 the scenario is deliberately
+# launching, so they record what they saw — including the GH_TOKEN the
+# child inherited, which is how D12 is proved — print whatever
+# $CLAUDE_JSON / $AGY_JSON names, and exit $CLAUDE_RC / $AGY_RC.
 cat > "$WORK/bin/claude" <<'STUB'
 #!/usr/bin/env bash
-echo "claude $*" >> "$WRITES"
-echo "stub claude: a session was launched by a test that forbids it" >&2
-exit 1
+echo "claude $*" >> "$LAUNCHES"
+echo "claude-saw-GH_TOKEN=${GH_TOKEN:-none}" >> "$LAUNCHES"
+echo "claude-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
+echo "claude-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
+echo "claude-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
+if [ "${LAUNCH_OK:-0}" != "1" ]; then
+  echo "claude $*" >> "$WRITES"
+  echo "stub claude: a session was launched by a test that forbids it" >&2
+  exit 1
+fi
+[ -z "${CLAUDE_JSON:-}" ] || cat "${CLAUDE_JSON}"
+exit "${CLAUDE_RC:-0}"
 STUB
-chmod +x "$WORK/bin/gh" "$WORK/bin/claude"
+cat > "$WORK/bin/agy" <<'STUB'
+#!/usr/bin/env bash
+echo "agy $*" >> "$LAUNCHES"
+echo "agy-saw-GH_TOKEN=${GH_TOKEN:-none}" >> "$LAUNCHES"
+echo "agy-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
+echo "agy-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
+echo "agy-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
+if [ "${LAUNCH_OK:-0}" != "1" ]; then
+  echo "agy $*" >> "$WRITES"
+  echo "stub agy: a session was launched by a test that forbids it" >&2
+  exit 1
+fi
+[ -z "${AGY_JSON:-}" ] || cat "${AGY_JSON}"
+exit "${AGY_RC:-0}"
+STUB
+chmod +x "$WORK/bin/gh" "$WORK/bin/claude" "$WORK/bin/agy"
+
+# fixture_tree -> a temp REPO_ROOT owning its own copy of work.sh.
+# personas/ and config/ are COPIED rather than symlinked so a scenario
+# can repin a persona with sed, exactly as compiler_roundtrip.sh does;
+# the compiled targets come along because the D3 preflight reads them;
+# intent/ is symlinked so the folder-reuse rule answers the same way.
+fixture_tree() {
+  local t
+  t="$(mktemp -d "$WORK/tree.XXXX")"
+  cp -r "$REPO/personas" "$REPO/config" "$REPO/scripts" "$REPO/.agents" "$t/"
+  mkdir -p "$t/.claude"
+  cp -r "$REPO/.claude/agents" "$t/.claude/"
+  ln -s "$REPO/intent" "$t/intent"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'echo "mint $*" >> "$MINTS"' \
+    'if [ "${MINT_FAIL:-0}" = "1" ]; then' \
+    '  echo "stub mint: no private key for $1" >&2' \
+    '  exit 1' \
+    'fi' \
+    'echo "stub-token-for-$1"' \
+    > "$t/scripts/auth/mint_app_token.py"
+  chmod +x "$t/scripts/auth/mint_app_token.py"
+  printf '%s\n' "$t"
+}
 
 # --- fixtures -----------------------------------------------------------------
 # issue <n> <state> <labels-csv> <title>
@@ -84,13 +158,17 @@ claim() {
   printf '%s\n' "$thread" > "$FIXTURES/repos_test_repo_issues_${n}_comments.json"
 }
 
-# run <expected-exit> <name> -- <args...>; stdout+stderr land in $OUT
+# run <expected-exit> <name> -- <args...>; stdout+stderr land in $OUT.
+# $DRY and $HL set the two modes; $TREE picks a fixture_tree's own copy
+# of work.sh over the repository's.
 OUT=""
+TREE=""
 run() {
   local want="$1" name="$2" rc=0
   shift 3  # drop want, name and the literal --
   set +e
-  OUT="$(DRY_RUN="${DRY:-1}" "$WORK_SH" "$@" 2>&1)"
+  OUT="$(DRY_RUN="${DRY:-1}" HEADLESS="${HL:-0}" \
+    "${TREE:-$REPO}/scripts/ops/work.sh" "$@" 2>&1)"
   rc=$?
   set -e
   if [ "$rc" -ne "$want" ]; then
@@ -218,8 +296,11 @@ has "owner:    odyssey" "D8: the owner is printed"
 has "folder:   intent/108-deterministic-" "D8: the folder is printed"
 has "branch:   odyssey/108-deterministic-" "D8: the branch is printed"
 has "harness:  claude-code" "D8: the harness is printed"
-has 'command:  claude --agent odyssey "#108"' "D8: the exact command line is printed"
-has "nothing was launched and nothing was written" "D8: the dry run says so"
+has ".claude/agents/odyssey.md" "D8: the compiled target is printed"
+has "command:  timeout 5460 claude --agent odyssey" \
+  "D8: the exact command line is printed, wrapped at the persona's cap"
+has "nothing was launched, nothing was written, and no token was minted" \
+  "D8: the dry run says so"
 
 banner "D9 a PR resolves to its issue, by Closes and by branch name"
 pr 109 "Implements the thing.
@@ -276,14 +357,62 @@ hasnt "--> atlas" "D9: --as argus dispatches nobody else"
 run 2 "D5(f): --as naming a non-owner exits 2" -- 112 --as odyssey
 has "odyssey does not own stage review" "D5(f): the refusal names the stage"
 
-banner "D10 an unlaunchable harness is a supported outcome, not an error"
+banner "#43 D1/D5/D6/D9 the antigravity row is real, and always headless"
+# The #36 suite used this stage as its "unlaunchable harness" case.
+# There IS a row now, so the scenario splits: this half asserts the row,
+# and the fixture_tree half further down keeps the *) arm reachable.
 issue 113 open "status:build" "Plan the thing"
-DRY=0 run 0 "D10: a harness this script cannot start exits 0" -- 113
-has "harness:  antigravity" "D10: the pinned harness is printed"
-has ".agents/agents/daedalus/instructions.md" "D10: the compiled target is printed"
-has "#113" "D10: the one-line prompt is printed"
-[ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "D10: something was launched"; }
-pass "D10: nothing was launched for an unlaunchable harness"
+run 0 "D1: a status:build issue resolves the antigravity row" -- 113
+has "harness:  antigravity" "D1: the pinned harness is printed"
+has ".agents/agents/daedalus/agent.md" "D3: the compiled target is the file agy reads"
+has "command:  timeout 2760 agy -p " "D6: the child is wrapped at 45m + a minute"
+has " --agent daedalus " "D1: the persona reaches agy as --agent"
+has " --add-dir $REPO " "D1/D24: --add-dir is the checkout that owns this script"
+has " --model gemini-3.1-pro-high " "D9: the model comes from the compiled sidecar"
+has " --output-format json " "D14: the outcome has to be machine-readable"
+has " --print-timeout 45m" "D6: the timeout comes from personas/daedalus.yaml"
+has "prompt:   Work issue #113 in this repository." "D2: the prompt names the number"
+has "WORK-RESULT: <ok|refused|blocked> #113" "D2: the prompt asks for the result line"
+hasnt 'agy -p \#113 ' "D2: a bare #<n> is never the prompt"
+HL=1 run 0 "D5: antigravity under HEADLESS=1 resolves the same row" -- 113
+has "command:  timeout 2760 agy -p " "D5: antigravity has one row, not two"
+
+banner "#43 D5 claude-code is interactive by default and headless on demand"
+issue 130 open "status:implementing" "Implement the thing"
+run 0 "D5: no HEADLESS resolves the interactive row" -- 130
+has "command:  timeout 5460 claude --agent odyssey " "D5: the interactive form"
+hasnt " -p " "D5: the interactive row does not use print mode"
+HL=1 run 0 "D5: HEADLESS=1 resolves the print row" -- 130
+has "command:  timeout 5460 claude -p " "D5: the headless form"
+has " --output-format json" "D14: headless output has to be parseable"
+hasnt "--print-timeout" "D6: claude-code does not take agy's print timeout"
+
+banner "#43 D2 one prompt literal, both harnesses, both modes"
+# The launcher must not be able to tell a session WHICH RUNG to work:
+# that is the same rule that closes argv (#36 D7), applied at the prompt
+# boundary. Asserted against the script's source, not its output, so a
+# second literal added later cannot hide in a mode this suite skips.
+prompt_lines="$(grep -c 'Work issue #\$ISSUE' "$WORK_SH")"
+[ "$prompt_lines" = "1" ] \
+  || fail "D2: expected exactly one prompt literal in work.sh, found $prompt_lines"
+pass "D2: work.sh holds exactly one prompt literal"
+if grep 'Work issue #\$ISSUE' "$WORK_SH" | grep -qE 'stage|plan|spec|branch'; then
+  fail "D2: the prompt names a stage, plan, spec or branch"
+fi
+pass "D2: the prompt names a number and nothing else"
+
+banner "#43 D11 a dry run prints the identity and mints nothing"
+: > "$MINTS"
+run 0 "D11: a dry run of a single-owner stage exits 0" -- 113
+has "identity: evekhm-daedalus-app[bot] (token minted at launch; not printed)" \
+  "D11: the identity is named and the token is not"
+has "root:     $REPO" "D24: the checkout a session will edit is printed"
+if printf '%s\n' "$OUT" | grep -qE '[A-Za-z0-9_]{36,}'; then
+  fail "D11: the output contains a token-shaped string"
+fi
+pass "D11: nothing token-shaped was printed"
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "D11: a dry run minted a token"; }
+pass "D11: a dry run exchanged no token"
 
 banner "D6 the slug rule is deterministic, cut at the first : or ;, and <= 24 chars"
 issue 114 open "status:implementing" \
@@ -322,9 +451,217 @@ has "unknown flag" "D7: a flag naming a stage is refused outright"
 run 1 "D7: a non-numeric argument exits 1" -- not-a-number
 has "is not an issue or pull-request number" "D7: it says why"
 
-banner "the whole run wrote nothing"
+banner "nothing above this line launched or wrote"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "a write or launch was attempted"; }
-pass "no GitHub write and no launch was attempted in any scenario"
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "a session was launched"; }
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "a token was minted"; }
+pass "no GitHub write, no launch and no token exchange in any resolve-only scenario"
+
+# =============================================================================
+# #43 — the launching half. Everything below runs against a fixture_tree:
+# work.sh resolves the mint script by absolute path from BASH_SOURCE, so
+# a tree is the only way to stub it, and a tree is also the only way to
+# take a compiled target away or pin a persona to a harness with no row.
+# =============================================================================
+T="$(fixture_tree)"
+
+banner "#43 T4/D10 a harness with no launch row still prints and exits 0"
+# Every pinned harness has a row now, so the *) arm of launch_argv would
+# be dead code without this. It stays reachable and stays tested.
+sed -i 's/^  daedalus:  { harness: antigravity }/  daedalus:  { harness: nonesuch }/' \
+  "$T/config/deployments.yaml"
+grep -q 'harness: nonesuch' "$T/config/deployments.yaml" \
+  || fail "T4: the fixture repin did not take"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+TREE="$T" DRY=0 run 0 "D10: a harness this script cannot start exits 0" -- 113
+has "harness:  nonesuch" "D10: the pinned harness is printed"
+has "(no compiled target known for harness nonesuch)" \
+  "D10: an unknown harness has no target to preflight"
+has "is not one this script starts" "D10: it says why nothing ran"
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "D10: something was launched"; }
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "D10: a token was minted for a harness with no row"; }
+pass "D10: nothing was launched and nothing was minted for an unlaunchable harness"
+sed -i 's/^  daedalus:  { harness: nonesuch }/  daedalus:  { harness: antigravity }/' \
+  "$T/config/deployments.yaml"
+
+banner "#43 D3 a missing compiled target is exit 1, before any model call"
+# agy's failure mode for a missing agent file is SILENT: it runs its
+# stock agent and exits 0. Before the process starts is the only cheap
+# place to notice.
+mv "$T/.agents/agents/daedalus/agent.md" "$T/.agents/agents/daedalus/agent.md.away"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+TREE="$T" DRY=0 run 1 "D3: a missing agent.md exits 1" -- 113
+has ".agents/agents/daedalus/agent.md" "D3: the refusal names the missing path"
+has "sync_agents.py" "D3: it says how to fix it"
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "D3: a session was launched anyway"; }
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "D3: a token was minted for a launch that never happened"; }
+pass "D3: no model call and no token exchange behind a missing target"
+# D20: for an owner that is only being PRINTED the same condition is a
+# marker, not an exit — a broken atlas target must never stop --as argus.
+mv "$T/.agents/agents/atlas/agent.md" "$T/.agents/agents/atlas/agent.md.away"
+TREE="$T" DRY=0 run 0 "D20: a two-owner stage with a broken target still exits 0" -- 112
+has "(missing)" "D20: the broken target is marked, not fatal"
+has "--> argus" "D20: the other reviewer is still printed"
+TREE="$T" run 0 "D20: --as argus is unaffected by atlas's broken target" -- 112 --as argus
+hasnt "(missing)" "D20: argus's own target is intact"
+mv "$T/.agents/agents/atlas/agent.md.away" "$T/.agents/agents/atlas/agent.md"
+mv "$T/.agents/agents/daedalus/agent.md.away" "$T/.agents/agents/daedalus/agent.md"
+
+banner "#43 D20 a two-owner stage mints nothing at all"
+: > "$MINTS"
+TREE="$T" DRY=0 run 0 "D20: status:in-review launches neither owner" -- 112
+has "printing both and launching neither" "D20: it says it launched nothing"
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "D20: a two-owner stage exchanged a token"; }
+pass "D20: two owners printed, zero tokens minted"
+
+banner "#43 D12 a failed mint is fatal and nothing is launched"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+TREE="$T" DRY=0 MINT_FAIL=1 LAUNCH_OK=1 \
+  run 1 "D12: a mint that fails exits 1" -- 113
+has "cannot mint an App token for daedalus" "D12: the refusal names the persona"
+has "refusing to launch as somebody else" "D12: it says why it will not fall back"
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "D12: a session was launched without an identity"; }
+pass "D12: no session ran without an attributable identity"
+
+banner "#43 D12/D13 the child gets the MINTED token, never the ambient one"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+# Snapshotted, not asserted absent: this machine's ~/.gitconfig already
+# carries a credential helper, which is precisely why D13's reset exists.
+# What must hold is that work.sh CHANGED nothing here.
+git_config_before="$(git config --list 2>/dev/null | sort)"
+printf '%s\n' '{"status":"SUCCESS","response":"done\nWORK-RESULT: ok #113 plan committed"}' \
+  > "$WORK/agy_ok.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" \
+  GH_TOKEN="ambient-not-this-one" GITHUB_TOKEN="ambient-not-this-one" \
+  run 0 "D14: WORK-RESULT: ok maps to exit 0" -- 113
+grep -qF "agy-saw-GH_TOKEN=stub-token-for-daedalus" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "D12: the child did not see the minted token"; }
+pass "D12: the child saw the minted token, not the operator's ambient one"
+grep -qF "agy-saw-helper=$T/scripts/auth/git-credential-persona daedalus" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "D13: the credential helper was not installed in the child"; }
+pass "D13: the child's git is pointed at the re-minting credential helper"
+# Exact line, empty value: `credential.https://github.com.helper` is a
+# DIFFERENT key from `credential.helper` with its own list, and git
+# appends helpers. Resetting only the generic key leaves an operator's
+# URL-specific global helper ahead of ours, so the child would push as
+# the operator — measured. The empty entry at index 1 is the reset.
+grep -qxF "agy-saw-helper-reset=" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "D13: the URL-specific helper list was not reset"; }
+pass "D13: the operator's own https://github.com helper is reset out of the way"
+grep -qF "agy-saw-insteadOf=git@github.com:" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "D13: the SSH insteadOf rewrite was not installed"; }
+pass "D13: an SSH origin is rewritten so the helper is consulted at all"
+[ "$(grep -c '^mint ' "$MINTS")" = "1" ] \
+  || { cat "$MINTS" >&2; fail "D11: expected exactly one mint for one launch"; }
+pass "D11: exactly one token was minted, for the one persona launched"
+# The parent shell is left exactly as it was found: the whole install is
+# environment-only, so a crashed session leaves no credential config.
+[ "$(git config --list 2>/dev/null | sort)" = "$git_config_before" ] \
+  || fail "D13: the launcher changed the parent's git config"
+pass "D13: the parent shell's git config is byte-identical before and after"
+[ -z "${GIT_CONFIG_COUNT:-}" ] \
+  || fail "D13: the launcher exported GIT_CONFIG_* into the parent shell"
+pass "D13: the install reached the child's environment and nothing else"
+
+banner "#43 D14 the four headless outcomes map to three exit codes"
+printf '%s\n' '{"status":"SUCCESS","response":"REFUSED\nWORK-RESULT: refused #113 hold label present"}' \
+  > "$WORK/agy_refused.json"
+printf '%s\n' '{"status":"SUCCESS","response":"WORK-RESULT: blocked #113 waiting on #47"}' \
+  > "$WORK/agy_blocked.json"
+printf '%s\n' '{"status":"ERROR","response":"","error":"timeout waiting for response"}' \
+  > "$WORK/agy_error.json"
+printf '%s\n' '{"status":"SUCCESS","response":"I did some things and stopped talking."}' \
+  > "$WORK/agy_silent.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_refused.json" \
+  run 2 "D14: WORK-RESULT: refused maps to exit 2" -- 113
+has "daedalus reported: refused" "D14: the verdict is reported"
+has "REFUSED" "D14: the raw session output is echoed, not swallowed"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_blocked.json" \
+  run 2 "D14/D23: WORK-RESULT: blocked maps to exit 2, the same code as a launcher refusal" -- 113
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_error.json" AGY_RC=1 \
+  run 1 "D14: status ERROR maps to exit 1" -- 113
+has "did not complete" "D14: it says the session did not finish"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_silent.json" \
+  run 1 "D14: SUCCESS with no WORK-RESULT line maps to exit 1" -- 113
+has "printed no WORK-RESULT line" "D14: it says the outcome was not observed"
+has "I did some things" "D14: what the session did say is still printed"
+
+banner "#43 D14 the result line is read from the DECODED text, not the raw JSON"
+# A JSON string escapes the newline, so grepping '^WORK-RESULT:' over
+# the raw bytes silently never matches. This fixture has the line on a
+# second line of the response and nowhere else.
+grep -q '\\n' "$WORK/agy_ok.json" || fail "D14: the fixture does not exercise an escaped newline"
+pass "D14: the ok fixture carries the result line behind an escaped newline"
+
+banner "#43 D14 the LAST WORK-RESULT line wins"
+printf '%s\n' '{"status":"SUCCESS","response":"WORK-RESULT: blocked #113 first thought\nchanged my mind\nWORK-RESULT: ok #113 done after all"}' \
+  > "$WORK/agy_last.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_last.json" \
+  run 0 "D14: the last result line decides" -- 113
+has "daedalus reported: ok" "D14: the later verdict wins"
+
+banner "#43 D15 interactive claude-code is exec'd and its exit code is NOT mapped"
+: > "$LAUNCHES"
+TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=7 \
+  run 7 "D15: the harness's own exit code survives unmapped" -- 130
+grep -qF "claude --agent odyssey" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "D15: the interactive form was not the one launched"; }
+pass "D15: the interactive row ran and its own code came back"
+# 7 is neither 0, 1 nor 2 — proof the headless mapping did not touch it.
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 CLAUDE_RC=7 CLAUDE_JSON=/dev/null \
+  run 1 "D15: the same code under HEADLESS=1 IS mapped" -- 130
+pass "D15: the mapping applies to headless launches only"
+
+banner "#43 D14/P4 the claude-code JSON shape is parsed by its own key names"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"WORK-RESULT: ok #130 implemented"}' \
+  > "$WORK/cc_ok.json"
+printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"result":""}' \
+  > "$WORK/cc_err.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 CLAUDE_JSON="$WORK/cc_ok.json" \
+  run 0 "P4: .result carries the response text for claude-code" -- 130
+has "odyssey reported: ok" "P4: the verdict is read out of .result"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 CLAUDE_JSON="$WORK/cc_err.json" \
+  run 1 "P4: is_error true is the claude-code spelling of status ERROR" -- 130
+
+banner "#43 D13 the credential helper mints on get and no-ops on store/erase"
+HELPER="$T/scripts/auth/git-credential-persona"
+[ -x "$HELPER" ] || fail "D13: $HELPER is not executable"
+: > "$MINTS"
+helper_out="$(printf 'protocol=https\nhost=github.com\n\n' \
+  | "$HELPER" daedalus get 2>"$WORK/helper.err")"
+grep -qx "username=x-access-token" <<<"$helper_out" \
+  || { printf '%s\n' "$helper_out" >&2; fail "D13: no username line"; }
+grep -qx "password=stub-token-for-daedalus" <<<"$helper_out" \
+  || { printf '%s\n' "$helper_out" >&2; fail "D13: the password is not the minted token"; }
+pass "D13: get prints the two credential lines"
+[ ! -s "$WORK/helper.err" ] \
+  || { cat "$WORK/helper.err" >&2; fail "D13: the helper wrote to stderr"; }
+pass "D13: nothing reached stderr, so no token can leak into a log"
+"$HELPER" daedalus store </dev/null >/dev/null 2>&1 \
+  || fail "D13: store must be a no-op that exits 0, or the push fails"
+"$HELPER" daedalus erase </dev/null >/dev/null 2>&1 \
+  || fail "D13: erase must be a no-op that exits 0, or the push fails"
+pass "D13: store and erase are no-ops that exit 0"
+[ "$(grep -c '^mint ' "$MINTS")" = "1" ] \
+  || { cat "$MINTS" >&2; fail "D13: store/erase minted a token"; }
+pass "D13: only the get minted — one call, one token"
+# Two gets mint twice: that is the whole reason for a helper rather than
+# a snapshot, since an installation token dies before a 90-minute cap.
+"$HELPER" daedalus get </dev/null >/dev/null 2>&1
+[ "$(grep -c '^mint ' "$MINTS")" = "2" ] \
+  || { cat "$MINTS" >&2; fail "D13: a second get did not re-mint"; }
+pass "D13: a second get mints a second time"
+
+banner "#43 D4 work.sh reads no log file and names no home directory"
+# The home-path fragments are ASSEMBLED from pieces, the same trick
+# scripts/ci/sanitize_check.sh uses on itself: the home-variable
+# reference written out literally here would make this test file its own
+# sanitize finding.
+_h='hom'; _u='Users'
+if grep -nE "\.gemini|antigravity-cli|/(${_h}e|${_u})/|[\$]${_h^^}E|~/" "$WORK_SH"; then
+  fail "D4: work.sh reaches for a machine-local path"
+fi
+pass "D4: work.sh opens no CLI log and names no home directory"
 
 echo
 echo "work_test.sh: all scenarios passed"

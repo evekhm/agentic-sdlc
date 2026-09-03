@@ -280,22 +280,36 @@ to `mint_app_token.py` in the same directory — resolved from
 `work.sh` installs it through the child's environment only:
 
 ```
-GIT_CONFIG_COUNT=3
-KEY_0 credential.helper                        VALUE_0 ""        # reset the list
-KEY_1 credential.https://github.com.helper     VALUE_1 "<abs path> <persona>"
-KEY_2 url.https://github.com/.insteadOf        VALUE_2 git@github.com:
+GIT_CONFIG_COUNT=4
+KEY_0 credential.helper                        VALUE_0 ""        # reset the generic list
+KEY_1 credential.https://github.com.helper     VALUE_1 ""        # reset the URL-specific list
+KEY_2 credential.https://github.com.helper     VALUE_2 "<abs path> <persona>"
+KEY_3 url.https://github.com/.insteadOf        VALUE_3 git@github.com:
 ```
 
-The empty first value is load-bearing: git *appends* helpers, so
-without the reset an operator's global helper answers first and the
-session pushes as the operator — the exact bug D12 exists to stop.
-The `insteadOf` rewrite is equally load-bearing: this repository's
-`origin` is SSH, and an SSH remote never consults a credential helper.
+**Amended during implementation (was 3 entries; grounds below).** The
+empty values are load-bearing: git *appends* helpers, so without a
+reset an operator's global helper answers first and the session pushes
+as the operator — the exact bug D12 exists to stop. There are *two*
+resets because `credential.helper` and
+`credential.https://github.com.helper` are different keys carrying
+different lists. The plan's original 3-entry form reset only the
+generic key; measured on the dispatch machine (whose global config
+carries `credential.https://github.com.helper = !gh auth
+git-credential`), `git config --get-all` under that install still
+listed gh's helper *ahead* of ours, so gh would have answered the push.
+The 4-entry form makes ours the helper that answers (`git credential
+fill` returns the stub token, and the helper's argv log shows it was
+called). The `insteadOf` rewrite is load-bearing for a separate reason:
+this repository's `origin` is SSH, and an SSH remote never consults a
+credential helper.
 
 **First check:** confirm how git invokes a helper configured with an
 argument (`GIT_TRACE=1 git credential fill`), and use the `!f() { … };
 f` shell-snippet form instead if the absolute-path-plus-argument form
-does not reach the script.
+does not reach the script. *(Done — the absolute-path-plus-argument
+form reaches the script; this check is what turned up the ordering bug
+above.)*
 
 **Proves it (Acceptance 6):** a test in
 `scripts/ops/tests/work_test.sh` that runs the helper directly against
