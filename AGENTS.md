@@ -147,6 +147,26 @@ ladder (intent.md merged → `status:spec`, an *Approved* spec.md →
 and with no model call, because the merge is still the transition and
 the label is only its shadow.
 
+### Dispatch has one door
+
+`scripts/ops/work.sh <issue>` is how a stage starts. It reads the
+issue, derives the stage and its owner from the labels above, and
+either prints the dispatch or launches that persona's session with its
+own identity — so the choice of who works an issue is made by the
+table, once, in front of the operator, and not by whoever happens to be
+at a keyboard.
+
+No session acts as a persona it is not. A sub-agent spawned inside a
+session is the acting persona's own helper, drawn from its
+`delegates_to` list, and it works under that persona's name and
+credentials; it never becomes a second persona at a stage.
+
+A bootstrap dispatch — a persona launched by hand because the door is
+what is being built or repaired — is allowed only when the claim
+comment of step 2 declares it on its first line, naming the persona and
+the reason. An undeclared bootstrap is indistinguishable from a session
+working out of turn.
+
 **There is no STATUS.md.** Status in a committed file goes stale the
 moment two sessions run in parallel, and every update costs a
 commit/PR that can conflict. The pinned tracker issue plus per-issue
