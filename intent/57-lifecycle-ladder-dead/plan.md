@@ -271,6 +271,19 @@ scenario, the keyword-fallback scenario, the disagreement scenario
 (one commit, no merge commit) and the no-pull-request range (exit 0 via
 the T5 early exit).
 
+*Amended in implementation (odyssey):* two mechanical readings, neither
+touching a Decision. (a) The default-branch read is
+`gh api "repos/$GITHUB_REPO"` piped into `jq -r '.default_branch //
+empty'` rather than `gh api --jq`, so the answer the T10 stub is
+specified to give — the object `{"default_branch":"main"}` — is the
+shape the script actually parses, and the file keeps one convention:
+fetch raw, filter with `jq`. (b) The per-pull-request filter is a
+separate `jq -c --arg b "$default_branch"` step over the raw response
+for the same reason (`gh api --jq` takes no `--arg`), and the keyword
+regex is work.sh's anchored `grep -Eo '[0-9]+$'` (`:137`) rather than
+the plan's unanchored transcription of it — "verbatim from work.sh" was
+the instruction and the anchored form is what work.sh carries.
+
 ## T7 · `scripts/ci/lifecycle_advance.sh` — the merge candidate in the contest — D5, D6, D9
 
 All inside the per-issue loop.
@@ -350,6 +363,24 @@ All inside the per-issue loop.
 
 **Proves it (Acceptance 2, 5, 6, 7), asserted by T10.**
 
+*Amended in implementation (odyssey):* `trigger_desc` cannot be
+introduced "immediately after the kind is resolved" as step 6 says,
+because the corrupted-state comment (step 2's block, which the plan
+leaves in place ahead of the contest) needs it. It is therefore set
+**twice**: provisionally before the corrupted-state block, keyed on
+whether the range added files for the issue, and definitively from
+`kind` once the contest is decided. The two agree in every case except
+an issue that has both candidates, where only the definitive one is
+reached. Consequently deviation 3 below is narrowed: the *corrupted*
+body is no longer byte-identical to the pin for an artifact candidate
+either — its one varying clause now reads ``for `intent/<n>-<slug>/
+plan.md` added in <sha12>`` where the pin read ``for the push that
+added `intent.md plan.md` ``. Acceptance 6's actual requirement, one
+body shared by both paths differing only in that clause, holds and is
+asserted by S9; the pin's exact wording could not be kept without
+either a second body or a `Trigger:` line that no longer says
+`added in`, which S1/S16 assert.
+
 ## T8 · `scripts/ci/lifecycle_advance.sh` — clear `intent:new` — D7
 
 In the label block (lines 324-334), build the removal list before
@@ -416,6 +447,13 @@ candidate's contains `added in`. The pre-existing assertion that the
 advancer carries no `status:spec` literal (test lines 167-171) still
 passes — `status:in-review` and `status:*` do not match it.
 
+*Amended in implementation (odyssey):* step 2's reworded header block
+must not name `status:planning` either, or T8's proving check
+(`grep -c 'status:planning' … = 0`) fails on the very sentence that
+replaces the dead-end one. It reads "the `status:*` ladder end to end,
+up to and including `status:in-review`" — D11's own phrasing for
+`COMMENT_HEADER` — and S16 now asserts both greps.
+
 ## T10 · `scripts/ci/tests/lifecycle_advance_test.sh` — the proof — D13
 
 Hermetic throughout: throwaway git repository, `DRY_RUN=1`, stub `gh`
@@ -474,6 +512,19 @@ move.
 
 **Proves it:** `bash scripts/ci/tests/lifecycle_advance_test.sh` exits
 0 with an empty write log.
+
+*Amended in implementation (odyssey):* the fixtures the table calls for
+need three commits the #4 fixture does not have, so the sandbox gains
+`C4` (a plain commit on the trunk — the squash shape), `CM` (a real
+`--no-ff` merge commit) and `C5` (a commit adding
+`intent/997-both/plan.md`, for S10's contested issue). Four helpers
+carry them: `run_fail` (S3 and S6 must end red, and `run` asserts exit
+0), `issue_fixture` / `pulls_fixture` (write the two fixture shapes
+with `jq -n`, never a heredoc literal) and `count` / `exactly` (S10 and
+S12 assert *how many* writes, not just which). S13's "artifact
+candidate whose row targets `status:in-review`" is produced with the
+same `jq` fixture patch the pre-existing last scenario uses, so no
+literal label is introduced.
 
 ## T11 · `docs/SPEC.md` — the living-spec upsert — D12
 

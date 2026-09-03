@@ -119,7 +119,11 @@ resumable cold.
    artifact the current lifecycle stage owes (see INTENT.md's
    lifecycle: intent.md → spec.md → plan.md → code+tests). Everything
    reaches `main` by PR; the PR body carries `Closes #<n>` only when
-   it completes the issue's final stage.
+   it completes the issue's final stage — in the five-rung flow the
+   final rung produces a review and not a pull request, so no PR in
+   that flow carries `Closes #<n>` and the human closes the item; the
+   defect-repair path (#32) is unchanged, because there the fix PR
+   *is* the final stage.
 5. **Hand off.** End with the Done/Decided/Next/Blocked comment on
    the issue (format above). If pausing rather than finishing, remove
    `in-progress` so another session can claim. Tick the tracker

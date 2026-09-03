@@ -10,8 +10,10 @@
     "personas edits exactly one YAML file and nothing else (D2).",
     "Keys: stage (a value from schema.json's stage enum), label (the single status:*",
     "label meaning this stage is current), artifact (the file this stage owes, or",
-    "null where the output is code or a review), advances_to (the label written when",
-    "that artifact merges, or null at the end of the ladder), advance_message (the",
+    "null where the output is code or a review), advances_on (what event fires this",
+    "rung: the row's artifact being added, a merged pull request, or nothing),",
+    "advances_to (the label written when that artifact merges, or null at the end of",
+    "the ladder), advance_message (the",
     "one line the advancer posts on that transition), dispatch_brief (the one line a",
     "session owning this stage is handed).",
     "intake, deploy and maintain are stage-enum values with no rung and are absent",
@@ -22,6 +24,7 @@
       "stage": "plan",
       "label": "status:planning",
       "artifact": "intent.md",
+      "advances_on": "artifact",
       "advances_to": "status:spec",
       "advance_message": "Intent accepted (merge = PLAN gate). Next: draft spec.md into the same folder; Approved requires empty Open questions.",
       "dispatch_brief": "Write the intent: the problem, the proposed outcome, the affected systems, the constraints, and the open questions."
@@ -30,6 +33,7 @@
       "stage": "design",
       "label": "status:spec",
       "artifact": "spec.md",
+      "advances_on": "artifact",
       "advances_to": "status:build",
       "advance_message": "Spec approved (DESIGN gate). Next: plan.md + failing contract tests citing Decision IDs.",
       "dispatch_brief": "Turn the accepted intent into a spec: numbered decisions with rationale plus an Acceptance list; Approved requires no open questions."
@@ -38,6 +42,7 @@
       "stage": "build",
       "label": "status:build",
       "artifact": "plan.md",
+      "advances_on": "artifact",
       "advances_to": "status:implementing",
       "advance_message": "Plan committed (BUILD gate). Next: implementation at a pinned SHA; PR carries diff + plan sync + docs/SPEC.md upsert.",
       "dispatch_brief": "Turn the Approved spec into an ordered plan: files touched, order of work, and the check that proves each task, before any code exists."
@@ -46,14 +51,16 @@
       "stage": "implement",
       "label": "status:implementing",
       "artifact": null,
+      "advances_on": "merge",
       "advances_to": "status:in-review",
-      "advance_message": null,
+      "advance_message": "Implementation merged (IMPLEMENT gate). Next: two independent reviewers read the change and post findings — dispatch each with `scripts/ops/work.sh <issue> --as argus` and `--as atlas`. This is the last rung: nothing advances past it, and closing the issue is the human's.",
       "dispatch_brief": "Implement the committed plan at a pinned SHA; the pull request carries the diff, the plan sync, and the living-spec upsert."
     },
     {
       "stage": "review",
       "label": "status:in-review",
       "artifact": null,
+      "advances_on": null,
       "advances_to": null,
       "advance_message": null,
       "dispatch_brief": "Review the open pull request against its spec and plan; post findings and a verdict, never a merge."

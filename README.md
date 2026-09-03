@@ -88,8 +88,8 @@ proving each decision landed. Merging it moves the item to implement.
 Merging that pull request moves the item to review.
 
 **Review.** Two reviewers read the change and post findings; this rung
-ends the ladder. Which label means which rung, and what each transition
-posts, is [`docs/SPEC.md`](docs/SPEC.md) `lifecycle.labels`.
+ends the ladder and the human closes the item. Which label means which rung,
+and what each posts, is [`docs/SPEC.md`](docs/SPEC.md) `lifecycle.labels`.
 
 ## What you merge
 
