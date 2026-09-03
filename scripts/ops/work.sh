@@ -42,10 +42,15 @@
 #
 # THIS SCRIPT NEVER PRINTS A TOKEN. It mints the launched persona's App
 # token in the one step between the last refusal and the launch (#43,
-# D11), hands it to the child as a variable-assignment prefix, and never
-# writes it to a file, an argument or the log. A run that launches
-# nothing — a dry run, a two-owner stage, a harness with no row —
-# exchanges nothing and leaves no live credential behind.
+# D11) and hands it to the child by `export` inside the subshell that
+# runs the harness — never in a file, an argument or the log. `export`
+# rather than an `env VAR=… ` prefix because argv is world-readable;
+# xtrace is suppressed for the whole window between the mint and the
+# child's return, because `bash -x` would otherwise expand the value
+# into stderr, which a session captures verbatim into a transcript
+# (PR #60, AT-2 and AT-7). A run that launches nothing — a dry run, a
+# two-owner stage, a harness with no row — exchanges nothing and leaves
+# no live credential behind.
 #
 # Exit codes (D8, extended by #43 D14/D23):
 #   0  launched and the session reported `WORK-RESULT: ok`, or printed
@@ -461,6 +466,25 @@ PROMPT="Work issue #$ISSUE in this repository. Follow your persona instructions 
 # Every row is wrapped in `timeout $((T*60+60))` so a harness that
 # ignores its own print timeout still ends; the spare minute is for the
 # harness's own teardown.
+#
+# The INTERACTIVE row additionally gets `timeout --foreground` (PR #60,
+# round-2 finding R2-1). GNU `timeout` calls `setpgid(0,0)` unless that
+# flag is given, which puts the harness in a process group that is NOT
+# the terminal's foreground group — and nothing calls `tcsetpgrp()` to
+# make it one. A child in a background group cannot read the terminal
+# (SIGTTIN) and cannot put it in raw mode (SIGTTOU, which is the first
+# thing an interactive TUI does): it stops, and then sits stopped with a
+# live token until the cap fires. While the row was `exec`'d this was a
+# no-op — `timeout` *was* the process the shell had made the foreground
+# leader — so dropping `exec` (AT-5) is what made the flag necessary.
+# Its documented cost is that `timeout` then signals only COMMAND rather
+# than the whole group, which for a session the operator is watching is
+# the wanted behaviour anyway.
+#
+# The HEADLESS rows do not get it and must not: nothing there reads or
+# reconfigures a terminal, stdout is captured by `$( )` rather than a
+# tty, and group-wide signalling is what should kill a runaway
+# non-interactive harness and its children at the cap.
 LAUNCH_ARGV=()
 #
 # `antigravity` is ALWAYS headless, whatever HEADLESS says: only print
@@ -475,7 +499,7 @@ headless_for() { # <harness> -> 1 | 0
 }
 
 launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
-    local persona="$1" harness="$2" mins wrap model
+    local persona="$1" harness="$2" mins wrap model headless
     LAUNCH_ARGV=()
     case "$harness" in
         claude-code|antigravity) ;;
@@ -483,10 +507,15 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
     esac
     mins="$(timeout_mins_of "$persona")" || exit 1
     wrap=$(( mins * 60 + 60 ))
-    LAUNCH_ARGV=( timeout "$wrap" )
+    headless="$(headless_for "$harness")"
+    # `--foreground` goes BEFORE the duration: `timeout` takes its
+    # options first and everything after the duration is the command.
+    LAUNCH_ARGV=( timeout )
+    [ "$headless" = "1" ] || LAUNCH_ARGV+=( --foreground )
+    LAUNCH_ARGV+=( "$wrap" )
     case "$harness" in
         claude-code)
-            if [ "$(headless_for "$harness")" = "1" ]; then
+            if [ "$headless" = "1" ]; then
                 LAUNCH_ARGV+=( claude -p "$PROMPT" --agent "$persona"
                                --output-format json )
             else
@@ -652,17 +681,25 @@ fi
 
 # The harness binary, checked BEFORE the mint below. Without this the
 # run exchanges a one-hour credential for a process that cannot start:
-# `exec timeout 5460 agy …` with agy off PATH exits 127 — outside D8's
-# 0/1/2 contract — and abandons a live token, which is exactly what
-# D11's grounds for minting last forbid. The generic preflight near the
-# top cannot do it: which binary is needed is not known until the
-# persona, its harness and its --as narrowing have all resolved.
-# LAUNCH is ( timeout <seconds> <binary> … ), so index 0 is the wrapper
-# and index 2 the harness binary. Both are checked: the generic
-# preflight near the top makes exactly this assumption explicit for `gh`
-# and `jq`, and an absent `timeout` would fail the same way, 127 with a
-# credential already spent (N1).
-for _bin in "${LAUNCH[0]}" "${LAUNCH[2]}"; do
+# `timeout 5460 agy …` with agy off PATH exits 127, `timeout` itself off
+# PATH kills the launch outright, and either way a live token has been
+# minted for a session that never ran — exactly what D11's grounds for
+# minting last forbid. (The status a caller sees is now 1 either way,
+# since AT-5 removed the `exec` and every child status is mapped; the
+# abandoned credential is the hazard, not the code.) The generic
+# preflight near the top cannot do this check: which binary is needed is
+# not known until the persona, its harness and its --as narrowing have
+# all resolved.
+#
+# LAUNCH is ( timeout [--foreground] <seconds> <binary> … ), so index 0
+# is the wrapper and the harness binary follows the duration — index 3
+# on the interactive row that carries R2-1's `--foreground`, index 2
+# otherwise. Both are checked: the generic preflight near the top makes
+# exactly this assumption explicit for `gh` and `jq`, and an absent
+# `timeout` would strand a credential the same way (N1).
+_bin_idx=2
+[ "${LAUNCH[1]}" != "--foreground" ] || _bin_idx=3
+for _bin in "${LAUNCH[0]}" "${LAUNCH[$_bin_idx]}"; do
     command -v "$_bin" >/dev/null \
         || die "$_bin is not installed, so $launch_persona's $launch_harness session cannot start; nothing was minted"
 done

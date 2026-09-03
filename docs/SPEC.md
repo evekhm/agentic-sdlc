@@ -386,7 +386,16 @@ minted), and `HEADLESS=1` captures the session's JSON instead of
 handing over the terminal. Antigravity is always headless. The
 interactive row is not `exec`'d: the child runs in the foreground and
 inherits stdin, stdout, stderr and the terminal, and the launcher waits
-and maps, so *every* exit of `work.sh` is 0, 1 or 2. That map is
+and maps, so *every* exit of `work.sh` is 0, 1 or 2. Its wrapper is
+`timeout --foreground`, which is load-bearing rather than cosmetic:
+`timeout` otherwise calls `setpgid(0,0)` and the harness lands in a
+process group that is not the terminal's, where reading the terminal
+raises SIGTTIN and setting raw mode — the first thing an interactive
+TUI does — raises SIGTTOU, stopping the session with a live token
+already minted until the cap fires. The headless rows keep the plain
+wrapper: they touch no terminal, and group-wide signalling is what
+should end a runaway non-interactive harness and its children. That map
+is
 two-valued — child 0 → 0, anything non-zero → 1 with the raw status
 named on stderr, and 124 also naming the cap — because `exec timeout …`
 would otherwise hand a caller 124, 125, 126 or 127, codes outside the

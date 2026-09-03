@@ -211,6 +211,20 @@ Five edits, all below line 357.
   `timeout "$WRAP" …` (D6, "the whole child"). The report prints the
   array through `printf '%q '` so what is shown is what runs.
 
+  *(Amended 2026-09-03, PR #60, round-2 finding R2-1; D15 and D16(a).
+  The INTERACTIVE row's wrapper is `timeout --foreground "$WRAP" …`.
+  GNU `timeout` calls `setpgid(0,0)` unless given that flag, and once
+  T8's amendment removed the `exec` the call stopped being a no-op: the
+  harness landed in a process group that is not the terminal's
+  foreground group, where its first `tcsetattr` — raw mode, which every
+  interactive TUI sets at startup — raises SIGTTOU and stops it, with a
+  live token already minted, until the cap fires. The headless rows keep
+  the plain form deliberately: nothing there reads or reconfigures a
+  terminal, and group-wide signalling is what should kill a runaway
+  non-interactive harness and its children at the cap. Knock-on: the T5
+  binary preflight indexes the harness binary at `LAUNCH[3]` when the
+  flag is present, `LAUNCH[2]` otherwise.)*
+
 - **Preflight (D3, D20).** In the per-owner loop (410–431), after
   `target_of`, mark a missing target `(missing)` in the printed line
   and record it. **After** the multi-owner early return (434–441) and
@@ -220,9 +234,18 @@ Five edits, all below line 357.
 
 - **`--add-dir` is `$REPO_ROOT` (D1, D24)** — the value already
   derived at line 54, absolute by construction, never `git rev-parse`
-  from the caller's cwd, and no `cd` anywhere. The report gains a
-  `root:` line so the operator sees which checkout a session will
-  edit.
+  from the caller's cwd, and no `cd` to anywhere other than
+  `$REPO_ROOT`. The report gains a `root:` line so the operator sees
+  which checkout a session will edit.
+
+  *(Amended 2026-09-03, PR #60, round-2 findings R2-2 / AT-R2-1; D1 as
+  amended on `main` in #70. This bullet read "and no `cd` anywhere" —
+  the fourth copy of the clause F5 struck from `spec.md`, AT-3 struck
+  from `work.sh:505` and the living spec already reflects. `work.sh`
+  does `cd "$REPO_ROOT"` exactly once, immediately before the launch,
+  because claude-code has no `--add-dir` and takes the working
+  directory as the project; what D1 as amended forbids is a `cd` to
+  anywhere else.)*
 
 **Proves it (Acceptance 1, 4, 8):** T4's suite, extended —
 `DRY_RUN=1` for a `status:build` issue prints the full agy line with
@@ -409,6 +432,23 @@ through a pty (`script -qec`, which the no-tty guard of T9 now
 requires), asserting stub 0 → 0 and stubs 3, 2 and 124 → 1 with the raw
 status in the message and the cap named for 124. The mapping of 3 to 1
 is itself the proof that `exec` is gone.
+
+*(Amended 2026-09-03, PR #60, round-2 finding R2-1.* ***"the child now
+runs in the foreground" was only half true.*** *Dropping `exec` left
+`timeout`'s `setpgid(0,0)` — previously a no-op, because `timeout` was
+the process the shell had made the terminal's foreground group leader —
+free to put the harness in a background process group with the tty
+still attached: it could neither read the terminal (SIGTTIN) nor set raw
+mode (SIGTTOU) and would stop with a live token until the cap. The
+interactive wrapper is therefore `timeout --foreground` (see T5). The
+four pty scenarios were blind to it because the stub `claude` never
+touched the terminal, so the first of them now also asserts that the
+child's process group **is** the terminal's foreground group and that a
+real `tcsetattr` against the pty succeeds — the proof that the exit map
+is not the whole of D15. The group comparison is the deterministic
+assertion and it gates the raw-mode probe: SIGTTOU is delivered to the
+whole process group, so an unguarded probe stops the suite rather than
+failing it.)*
 
 ## T9 · `.claude/commands/work.md` (NEW) — D16
 

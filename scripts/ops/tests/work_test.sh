@@ -79,6 +79,40 @@ echo "claude-saw-pwd=$PWD" >> "$LAUNCHES"
 echo "claude-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
 echo "claude-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
 echo "claude-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
+# D15's "inherits … the terminal", made measurable (PR #60, R2-1). An
+# interactive harness does two things this stub otherwise never did: it
+# asks the terminal who its foreground process group is, and it puts the
+# terminal in raw mode. The second is a `tcsetattr`, which every
+# interactive TUI performs at startup and which from a BACKGROUND
+# process group raises SIGTTOU — what `timeout` without `--foreground`
+# produces, because it calls `setpgid(0,0)`.
+#
+# The raw-mode probe is GUARDED by the group comparison, and the guard
+# is not politeness: the kernel sends SIGTTOU to the whole process
+# GROUP, so a probe that ran anyway would stop this stub, `timeout` and
+# every helper with it — an unkillable-from-inside group stop that hangs
+# until the wrapper's 91-minute cap. Measured: it does exactly that.
+# So the deterministic assertion is the group comparison, which fails in
+# milliseconds, and the tcsetattr runs only once the group is known to
+# be the foreground one — where it is a real `tcsetattr` against a real
+# pty, not a simulation. Recorded here, asserted by the scenario below.
+if [ -t 0 ] && [ -t 1 ]; then
+  _pgid="$(ps -o pgid= -p $$ | tr -d ' ')"
+  _tpgid="$(ps -o tpgid= -p $$ | tr -d ' ')"
+  echo "claude-saw-pgid=$_pgid" >> "$LAUNCHES"
+  echo "claude-saw-tpgid=$_tpgid" >> "$LAUNCHES"
+  if [ -n "$_pgid" ] && [ "$_pgid" = "$_tpgid" ]; then
+    _saved="$(stty -g </dev/tty 2>/dev/null || true)"   # tcgetattr: safe either way
+    if stty raw </dev/tty >/dev/null 2>&1; then
+      [ -z "$_saved" ] || stty "$_saved" </dev/tty >/dev/null 2>&1 || true
+      echo "claude-saw-stty=ok" >> "$LAUNCHES"
+    else
+      echo "claude-saw-stty=fail" >> "$LAUNCHES"
+    fi
+  else
+    echo "claude-saw-stty=skipped-background-process-group" >> "$LAUNCHES"
+  fi
+fi
 if [ "${LAUNCH_OK:-0}" != "1" ]; then
   echo "claude $*" >> "$WRITES"
   echo "stub claude: a session was launched by a test that forbids it" >&2
@@ -365,7 +399,7 @@ has "folder:   intent/108-deterministic-" "D8: the folder is printed"
 has "branch:   odyssey/108-deterministic-" "D8: the branch is printed"
 has "harness:  claude-code" "D8: the harness is printed"
 has ".claude/agents/odyssey.md" "D8: the compiled target is printed"
-has "command:  timeout 5460 claude --agent odyssey" \
+has "command:  timeout --foreground 5460 claude --agent odyssey" \
   "D8: the exact command line is printed, wrapped at the persona's cap"
 has "nothing was launched, nothing was written, and no token was minted" \
   "D8: the dry run says so"
@@ -448,10 +482,12 @@ has "command:  timeout 2760 agy -p " "D5: antigravity has one row, not two"
 banner "#43 D5 claude-code is interactive by default and headless on demand"
 issue 130 open "status:implementing" "Implement the thing"
 run 0 "D5: no HEADLESS resolves the interactive row" -- 130
-has "command:  timeout 5460 claude --agent odyssey " "D5: the interactive form"
+has "command:  timeout --foreground 5460 claude --agent odyssey " "D5: the interactive form"
 hasnt " -p " "D5: the interactive row does not use print mode"
 HL=1 run 0 "D5: HEADLESS=1 resolves the print row" -- 130
 has "command:  timeout 5460 claude -p " "D5: the headless form"
+hasnt "timeout --foreground" \
+  "R2-1: the headless row does NOT get --foreground — it touches no terminal"
 has " --output-format json" "D14: headless output has to be parseable"
 hasnt "--print-timeout" "D6: claude-code does not take agy's print timeout"
 
@@ -608,6 +644,50 @@ has "nothing was minted" "D3: it says no token was exchanged"
 [ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "D3: something was launched without its binary"; }
 pass "D11: zero mints and zero launches behind a missing harness binary"
 
+banner "#43 N1 the WRAPPER binary is preflighted too, not just the harness"
+# The other half of the loop above, and the branch the scenario above
+# cannot reach: it narrows PATH to a directory plus /usr/bin:/bin, and
+# /usr/bin supplies `timeout`, so ${LAUNCH[0]} is always present there
+# and its failure arm never runs (PR #60, round-2 finding R2-3 — the
+# round-2 ledger claimed this coverage and did not have it).
+#
+# $WORK/bin-notimeout is every /usr/bin and /bin entry symlinked, MINUS
+# `timeout`, plus the gh and agy stubs — a whole-of-PATH mirror rather
+# than a whitelist, so a run that fails here fails for the reason under
+# test and not because some unrelated utility went missing. The named
+# assertion below is what makes that non-vacuous.
+mkdir -p "$WORK/bin-notimeout"
+for _p in /usr/bin/* /bin/*; do
+  ln -sf "$_p" "$WORK/bin-notimeout/" 2>/dev/null || true
+done
+# Anything work.sh needs that lives outside /usr/bin and /bin (a jq in
+# /usr/local/bin is the common one) is pulled in by name.
+for _b in bash env jq sed grep head tr cat mktemp ps stty python3; do
+  _p="$(command -v "$_b" 2>/dev/null)" || continue
+  [ -e "$WORK/bin-notimeout/$_b" ] || ln -sf "$_p" "$WORK/bin-notimeout/$_b"
+done
+# `rm -f` first: these three are symlinks into /usr/bin at this point,
+# and `cp` would follow them and try to overwrite the REAL binaries.
+rm -f "$WORK/bin-notimeout/timeout" "$WORK/bin-notimeout/gh" \
+      "$WORK/bin-notimeout/agy" "$WORK/bin-notimeout/claude"
+cp "$WORK/bin/gh" "$WORK/bin/agy" "$WORK/bin/claude" "$WORK/bin-notimeout/"
+for _b in bash env jq gh agy; do
+  [ -e "$WORK/bin-notimeout/$_b" ] \
+    || fail "N1: the mirrored PATH is missing $_b — the fixture, not the code"
+done
+[ ! -e "$WORK/bin-notimeout/timeout" ] || fail "N1: the fixture still has a timeout on PATH"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+saved_path="$PATH"
+PATH="$WORK/bin-notimeout"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 \
+  run 1 "N1: the timeout wrapper missing from PATH exits 1" -- 113
+PATH="$saved_path"
+has "timeout is not installed" "N1: the refusal names the wrapper, not the harness"
+has "nothing was minted" "N1: it says no token was exchanged"
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "N1: a token was minted with no wrapper to run the child under"; }
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "N1: something was launched without its wrapper"; }
+pass "N1: zero mints and zero launches behind a missing timeout"
+
 banner "#43 D12 a failed mint is fatal and nothing is launched"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
 TREE="$T" DRY=0 MINT_FAIL=1 LAUNCH_OK=1 \
@@ -736,6 +816,26 @@ TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=0 \
 grep -qF "claude --agent odyssey" "$LAUNCHES" \
   || { cat "$LAUNCHES" >&2; fail "D15: the interactive form was not the one launched"; }
 pass "D15: the interactive row ran (no -p, no --output-format)"
+# D15's "inherits stdin, stdout, stderr and the terminal", asserted
+# rather than assumed (PR #60, round-2 finding R2-1). The scenario above
+# already proves the exit maps; these three lines prove the child could
+# have USED the terminal it inherited. Without `timeout --foreground`
+# the harness runs in a process group that is not the terminal's
+# foreground group, so its first `tcsetattr` — raw mode, which every
+# interactive TUI sets at startup — raises SIGTTOU and stops it with a
+# live token already minted. Remove `--foreground` from work.sh's
+# LAUNCH_ARGV and both assertions below go red.
+cpgid="$(sed -n 's/^claude-saw-pgid=//p' "$LAUNCHES" | tail -1)"
+ctpgid="$(sed -n 's/^claude-saw-tpgid=//p' "$LAUNCHES" | tail -1)"
+[ -n "$cpgid" ] && [ -n "$ctpgid" ] \
+  || { cat "$LAUNCHES" >&2; fail "R2-1: the child recorded no process group — it saw no tty"; }
+[ "$cpgid" = "$ctpgid" ] \
+  || { cat "$LAUNCHES" >&2
+       fail "R2-1: the child ran in a background process group (pgid $cpgid, terminal's foreground pgid $ctpgid)"; }
+pass "R2-1: the interactive child IS the terminal's foreground process group (pgid $cpgid)"
+grep -qx "claude-saw-stty=ok" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "R2-1: the child could not put the terminal in raw mode"; }
+pass "R2-1: the interactive child can reconfigure the terminal it inherited"
 TREE="$T" DRY=0 LAUNCH_OK=1 CLAUDE_RC=3 \
   run_tty 1 "D15: an interactive child that exits 3 maps to 1" -- 130
 has "exit 3" "D15: the raw status is named"
