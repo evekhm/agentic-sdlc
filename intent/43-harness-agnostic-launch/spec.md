@@ -1,0 +1,164 @@
+# Spec: harness-agnostic launch
+
+**Issue:** #43 · **Status:** Approved (approval = merge of this PR) ·
+**Author:** athena (`evekhm-athena-app[bot]`) ·
+**Open questions:** none
+
+The two questions filed on #43 were answered by measurement, not by
+argument: `runs/2026-09-03_agy-headless/findings.md` (agy 1.1.24,
+probed 2026-09-03). Every claim below that concerns agy's behaviour
+cites a row of that file; where a behaviour was **not** measured it is
+labelled *unverified* and an acceptance check is what settles it.
+**Any row in this table can be overruled by editing this file at the
+merge gate** — the merge is the acceptance, so an edited row is the
+decision, not a comment asking for one.
+
+D1–D6 are the launch itself, D7–D10 the compiled target, D11–D13
+identity, D14–D16 the doors and the rule, D17–D19 scope and
+dependencies. D20–D24 came out of the spec-adversary pass against this
+draft and are marked *(adversary)*.
+
+## What is being built
+
+```text
+scripts/sync_agents.py            AntigravityEmitter: agent.md + agent.json
+.agents/agents/*/                 REBUILT: agent.md NEW, config.yaml and
+                                  instructions.md DELETED (drift gate)
+scripts/ops/work.sh               launch table, preflight, mint, two modes
+scripts/auth/git-credential-persona  NEW: re-minting git credential helper
+scripts/ops/smoke_launch.sh       NEW: the two-harness smoke test
+.claude/commands/work.md          NEW: the thin /work door
+AGENTS.md                         NEW subsection: dispatch has one door
+docs/SPEC.md                      ops.dispatch reworded; personas.compile
+                                  reworded; ops.identity added
+```
+
+Not touched, deliberately: `personas/**` (no persona source changes,
+so no sanitize-gate surface and no new vendor string outside
+`config/`), `config/deployments.yaml` (the pins #44 owns), and
+`scripts/auth/app_manifests.yaml` (the permissions #47 owns).
+
+## The launch table
+
+One table, two harnesses, two columns. `$REPO_ROOT` is the value
+`work.sh` already derives from `BASH_SOURCE` (D24), `$N` the resolved
+issue number, `$P` the persona, `$T` the persona's
+`limits.timeout_mins` from `personas/$P.yaml`, `$M` the resolved model
+from the compiled sidecar (D9).
+
+| harness | interactive (default) | headless (`HEADLESS=1`) |
+|---|---|---|
+| `claude-code` | `claude --agent $P "$PROMPT"` (exec) | `claude -p "$PROMPT" --agent $P --output-format json` |
+| `antigravity` | *(not offered — D5)* | `agy -p "$PROMPT" --agent $P --add-dir $REPO_ROOT --model $M --output-format json --print-timeout ${T}m` |
+
+## Decisions
+
+| # | Decision |
+|---|---|
+| D1 | **The `antigravity` row runs agy in print mode with `--add-dir "$REPO_ROOT"`, and the flag is mandatory.** Print mode ignores the working directory: without `--add-dir` the workspace is a per-conversation scratch directory the CLI creates under the user's own per-user state directory and *no repository file is opened at all* (findings Q1: strace shows none touched). With it, agy scans `$REPO_ROOT/.agents/{agents,rules,skills,workflows,…}` and loads `AGENTS.md` and `GEMINI.md` automatically (findings Q9) — which is why nothing in this spec passes the shared standards into the prompt. A nonexistent `--add-dir` path is silently ignored and exits 0 (findings Q1), so the value is always an absolute path this script already knows to exist. Testable: the launch line contains `--add-dir` with an absolute path; a grep of `work.sh` finds no `cd` before the launch. |
+| D2 | **The prompt is a fixed two-sentence string, identical on both harnesses, and a bare `#<n>` is never sent.** `#` is not a sigil to either harness: it arrives literally, and a bare `#43` handed to an agent that did not load ran 173 s, consumed 160,818 input tokens, hit the print timeout and exited 1 (findings Q6). The string is: `Work issue #<n> in this repository. Follow your persona instructions and the repository's AGENTS.md; when you finish or refuse, print one final line WORK-RESULT: <ok|refused|blocked> #<n> <one-line reason>.` It names a number and nothing else — no stage, folder, artifact, branch or model — so #36 D7 holds at the prompt boundary as well as at argv. Testable: exactly one prompt string literal exists in `work.sh`; it contains `#$ISSUE` and none of the words `stage`, `plan`, `spec`, `branch`. |
+| D3 | **`work.sh` preflights that the launched persona's compiled target exists, and a missing target is exit 1.** For `antigravity` the target is `.agents/agents/$P/agent.md`, for `claude-code` `.claude/agents/$P.md`. Grounds: agy's failure mode for a missing agent is *silent* — it falls back to the stock agent, prints nothing on stdout or stderr, and exits 0 (findings Q1b, Q4), so the only cheap place to notice is before the process starts. Exit 1, not 2: a persona pinned to a harness whose target was never compiled is a broken deployment, the same class as `deployments.yaml` having no pin for it (#36, D8). Testable: with `.agents/agents/daedalus/agent.md` renamed away, `work.sh <n>` for a daedalus stage exits 1 with a message naming the missing path, and no model call is made. |
+| D4 | **`work.sh` does not read agy's log file.** The persona-not-loaded warning exists only in the CLI's own rotating log file, inside its per-user state directory (findings Q1) — a machine-local location that does not exist on a runner and that a script could only reach by naming a home directory. D3's preflight covers the one cause that log line has — a missing `agent.md` — and D10 removes the other (a `model:` key). Testable: `scripts/ops/work.sh` opens no log file, and the sanitize gate's `home` rule passes on it with no allowlist entry. |
+| D5 | **`antigravity` is launched headless always; `claude-code` is interactive by default and headless under `HEADLESS=1`.** Only print mode was measured (findings, all rows); an interactive `agy` session is untested and is not what a dispatcher needs — the presenter drives interactive antigravity work in the IDE, not through `work.sh`. `HEADLESS` is an environment variable rather than a flag because #36 D7 reserves argv for the number and `--as`, and `DRY_RUN` is the standing precedent for a mode. Testable: `HEADLESS=1 DRY_RUN=1 work.sh <n>` prints the `-p` form for a claude-code persona; unset, it prints the interactive form; for an antigravity persona both print the same `-p` form. |
+| D6 | **Timeouts come from the persona source, doubly applied.** `--print-timeout ${T}m` where `$T` is `limits.timeout_mins` from `personas/$P.yaml`, and the whole child is wrapped in `timeout $((T * 60 + 60))` so a harness that ignores its own flag still ends. Grounds: a print-mode timeout is one of only two non-zero exits agy produces (findings Q3), so it is the mechanism that must be tuned rather than worked around; the extra minute is for the harness's own teardown. Testable: `DRY_RUN=1` for daedalus (`timeout_mins: 45`, antigravity) prints `--print-timeout 45m` inside a `timeout 2760` wrapper; `HEADLESS=1 DRY_RUN=1` for odyssey (`timeout_mins: 90`, claude-code) prints a `timeout 5460` wrapper and no `--print-timeout`, which that harness does not take. |
+| D7 | **The compiled antigravity target changes to `.agents/agents/<name>/agent.md`, and #43 absorbs the change rather than filing it as a defect against #5.** agy 1.1.24 loads `agent.md` with YAML frontmatter; an A/B in a throwaway workspace showed `agent.md` with `name` + `description` loads the persona (6,482 input tokens, secret word returned) while the repository's `agent.json` + `instructions.md` layout does not (12,881 tokens, stock agent) — findings Q1b. Absorbed here, not filed, because the defect and this issue have the *same* single observable: a `work.sh` antigravity row shipped without it launches the stock agent and exits 0, which is exactly the silent success #43 exists to prevent. Splitting them would put a launch row and the thing that makes it real in two issues that must merge together anyway, and #5 is closed on a "done when" that this measurement retroactively falsifies — reopening a closed rung to re-land it is bookkeeping, not work. Testable: `scripts/sync_agents.py --check` passes on a tree containing `agent.md` and no `config.yaml`/`instructions.md`; the roundtrip gate (`scripts/ci/compiler_roundtrip.sh`) is a zero diff. |
+| D8 | **`agent.md`'s frontmatter carries `name`, `description` and `tools`, and never `model`.** All three keys were measured to work; `model: gemini-3.1-pro-high` — a valid id per `agy models` — voids the whole agent, which then silently falls back (findings Q1b). The generated-file marker rides as a YAML comment inside the frontmatter, mirroring `.claude/agents/<name>.md`; a comment is not a key. The body below the frontmatter is the same rendered persona body the other emitter uses, and a loaded persona *replaces* the default system prompt (findings Q1b). Testable: no `.agents/agents/*/agent.md` contains a line matching `^model:`; each contains the marker comment; `agy` loads each one (proved by D19's smoke test, not by inspection). |
+| D9 | **The persona's model pin reaches agy as `--model`, read from a machine-readable sidecar `.agents/agents/<name>/agent.json` that the compiler emits and agy ignores.** The sidecar carries exactly what `agent.md` cannot: `model` (the tier already resolved through `config/model_tiers.yaml`) and `subagent`. `work.sh` reads `.model` with `jq`, which it already depends on. The alternative — re-resolving `personas/<p>.yaml`'s `tier` against `model_tiers.yaml` in awk inside `work.sh` — was rejected: tier→model resolution is the compiler's one job and a second implementation of it in bash is a second source of truth that drifts silently. Limits stay in `personas/<p>.yaml` (D6) rather than in the sidecar, so each fact has one home: source facts from the source, resolved facts from the compiler. Testable: `jq -r .model .agents/agents/daedalus/agent.json` equals `config/model_tiers.yaml`'s `antigravity.FRONTIER`; changing one line of `model_tiers.yaml` and rebuilding changes the launched `--model` and nothing else (#25, D18). |
+| D10 | **`config.yaml` and `instructions.md` are deleted from the antigravity target; the drift gate reads the two new files.** Three files where agy reads one is three chances to drift. `sync_agents.py`'s verifier (its `--check` path) moves its `agent.json` assertions to the reduced sidecar and adds the `agent.md` frontmatter/body assertions. `TARGET_DIRS` is unchanged: `.agents/agents` is already covered, so the new layout inherits the gate. Testable: after a rebuild, `.agents/agents/<name>/` contains exactly `agent.md` and `agent.json`; a hand-edit to either fails `sync_agents.py --check`. |
+| D11 | **`work.sh` mints the owning persona's App token immediately before the launch, once, only for the persona actually launched, and never under `DRY_RUN`.** The command is `scripts/auth/mint_app_token.py "$P"`; the result is captured into a shell variable and reaches the child as a variable-assignment prefix (`GH_TOKEN="$tok" exec …`), never as an argument, never through a file, never echoed. Minting is the last step before the launch so that a run which prints and launches nothing — `DRY_RUN=1`, a two-owner stage (#2 D4), a harness with no row — performs no token exchange and leaves no live credential behind. `DRY_RUN=1` prints one line, `identity: evekhm-<persona>-app[bot] (token minted at launch; not printed)`. Testable: `DRY_RUN=1` makes no network call to `api.github.com/app/installations` and its output contains no 40-character token-shaped string; a two-owner stage likewise; `set -x` output of a real launch contains no token. |
+| D12 | **A failed mint is fatal — exit 1 — and the child never inherits an ambient `GH_TOKEN`.** `work.sh` overwrites `GH_TOKEN` and `GITHUB_TOKEN` in the child's environment with the minted value and with nothing else. Grounds: the alternative, warning and falling back to the operator's ambient credential, produces precisely the bug this issue exists to fix — a session that posts as the operator while everyone believes a persona ran (#43, Problem 2; observed on #25/PR #46, 2026-09-03). A launch that cannot be attributed is not a launch. Testable: with the private key removed from the environment and from the key directory, `work.sh <n>` exits 1, names the persona whose token could not be minted, and starts no child; with an ambient `GH_TOKEN` exported and a successful mint, the child's `GH_TOKEN` is the minted one. |
+| D13 | **`git push` gets a re-minting credential helper, `gh` gets the snapshot, and both are installed through the child's environment only.** `git` does not read `GH_TOKEN`, and an installation token lives ~1 hour while `odyssey`'s cap is 90 minutes — so a snapshot alone would fail a long session mid-push. `work.sh` sets `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n` in the child to (a) point `credential.https://github.com.helper` at `scripts/auth/git-credential-persona <persona>`, which on `get` prints `username=x-access-token` and a *freshly minted* password, and (b) rewrite `git@github.com:` to `https://github.com/` via `insteadOf`, because this repository's `origin` is SSH and an SSH remote would bypass the helper entirely. Nothing is written to `.git/config`, so a crashed session leaves no credential configuration behind. `gh` keeps the ~1-hour snapshot; a session that outlives it re-mints in-band with the same script. Testable: a child launched by `work.sh` can `git push` to an `athena/*` branch with no ambient credential helper on PATH; `git config --list` in the parent shell after the run shows no `credential.https://github.com.helper`; the helper script is invoked twice in a two-push session and mints twice. |
+| D14 | **A launched persona's refusal is observed in-band and mapped to exit 2; agy's `status` maps only to exit 1.** Neither harness signals a model-level refusal at the process boundary: a prompt-forced `REFUSED: …` and an `ERROR: cannot proceed` both exit 0 with `status: "SUCCESS"`, and an unknown `--agent` answers normally and exits 0 (findings Q3, Q4). So in headless mode `work.sh` parses the JSON `.response` (or `.result.status` / final `result` event for `stream-json`) for D2's `WORK-RESULT:` line and maps: `refused` or `blocked` → exit 2, matching #36 D8's existing meaning that 2 is *"not worked, by design"*; `ok` → exit 0; `status: "ERROR"` (timeout, crash) → exit 1; **`SUCCESS` with no `WORK-RESULT` line → exit 1**, because a launcher that returns 0 for an outcome it could not observe is lying, and a session that ran out of turns leaves exactly that trace. The durable record stays the tracker — the persona's claim, artifact and handoff comment — and the exit code is only its shadow. Testable: four fixtures of a stubbed harness reproduce the four exits; a real refusal on a `hold`-labelled scratch issue exits 2 and leaves no `in-progress` label. |
+| D15 | **Interactive `claude-code` keeps `exec` and keeps the harness's own exit code.** D14's mapping applies to headless launches only; there is no stdout to parse in an interactive session, and `exec` is what makes the operator's terminal *be* the session. Testable: `work.sh <n>` without `HEADLESS` replaces the shell process; `HEADLESS=1` returns a mapped code. |
+| D16 | **The `/work` door is a hand-authored `.claude/commands/work.md` containing exactly `scripts/ops/work.sh $ARGUMENTS`; no antigravity twin ships in v1.** `.claude/commands/` is outside the compiler's `TARGET_DIRS` (`.claude/agents`, `.agents/agents`), so the drift gate ignores it and a hand-authored file there is not a compiler bypass. A command rather than `.claude/skills/work/SKILL.md`: a skill's description is injected into every session's context to make it discoverable, and this one is typed by the operator, not discovered by a model — a per-session token cost for zero benefit. The `.agents/workflows/` twin is an explicit non-goal for v1: dispatch is driven from the operator's interactive session, and two hand-authored files with no gate between them is the drift the compiler exists to prevent. Revisit when the presenter dispatches from the IDE. Testable: `/work 43` in an interactive session runs the script with `43`; no file under `.agents/workflows/` is added. |
+| D17 | **AGENTS.md gains one subsection under "Working the tracker": dispatch has one door.** Its content, in three rules: (1) a lifecycle stage is started by `scripts/ops/work.sh <n>` and by nothing else, so the harness, identity and model a stage runs under are the pinned ones; (2) **no session acts as a persona it is not** — an in-session subagent is the acting persona's own helper, drawn from its `delegates_to` list, and may never be given another persona's stage, because a stage worked by a borrowed subagent produces an artifact nobody's authority backs; (3) where the harness genuinely cannot start the persona natively yet, a bootstrap dispatch is allowed **only if the claim comment says so in its first line**, naming the persona and the reason — an exception that is visible on the tracker is an exception; one that is silent is impersonation. Testable: the subsection exists, is under 20 lines, and duplicates no rule already in the file. |
+| D18 | **#47 is a stated dependency, not a fix.** Three Apps (daedalus, argus, atlas) are registered `issues: read` in `scripts/auth/app_manifests.yaml`, so a token minted for them cannot add `in-progress`, cannot post the `Claim:` line `work.sh` reads as the mutex holder, and cannot post the handoff. Only the App owner can change that, on `github.com/settings/apps/evekhm-<persona>-app/permissions`, followed by accepting the permissions on the installation. This spec therefore splits the smoke test's assertions by what each App can prove today (D19) and names the human step. Testable: the spec and PR body both name #47 as the blocker for the claim/handoff half of the antigravity smoke run. |
+| D19 | **The smoke test is `scripts/ops/smoke_launch.sh <scratch-issue>`, one run per harness, asserting three observables each, with the identity proof chosen from each App's real permissions.** `claude-code` runs as `odyssey` (App has `issues: write`): exit 0, the stage's artifact present in the working tree, and a comment on the scratch issue authored by `evekhm-odyssey-app[bot]`. `antigravity` runs as `daedalus` (App has `contents: write` but only `issues: read` until #47): exit 0, the artifact present, and a **commit** on a scratch branch authored by `evekhm-daedalus-app[bot]` — which is acceptance item 5's "commit *or* comment", and it proves persona load and token handoff in one check, since the stock fallback agent has no instruction to push anything. Identity is never verified with `gh api user`: an App token has no user and gets 403 (findings Q7); `GET /installation/repositories` is the token-side check, the artifact's author the outcome-side one. The claim-and-handoff half of the antigravity run is written into the script as a check that is expected to fail with 403 until #47's human step lands, reported as `BLOCKED ON #47`, not as a #43 defect. Testable: the script exits 0 on the two runs above with #47 outstanding, and its `BLOCKED ON #47` line disappears once the permission is granted, with no edit to the script. |
+| D20 *(adversary)* | **A two-owner stage mints nothing and preflights nothing.** Two readings of D11 were defensible — mint for each owner printed, or only for the one launched. The differing case: `work.sh 42` on a `status:in-review` issue, whose owners are argus and atlas (#2 D4 requires both). Under the first reading the script performs two token exchanges and leaves two live one-hour credentials for a run that #36 deliberately makes launch nothing; under the second it performs zero. Zero is the rule. The same applies to D3: the preflight runs for the persona about to be launched, and for owners that are only printed a missing target is reported as a `target: … (missing)` marker without changing the exit code — so a broken atlas target cannot stop `--as argus`. |
+| D21 *(adversary)* | **The `WORK-RESULT` line is requested by the launch prompt, not written into persona sources.** Two readings: the line is part of D2's prompt, or it is a rule added to `personas/**` and compiled into every persona. The differing case: the presenter opens an interactive session by hand, outside `work.sh`, and asks athena a question. Under the second reading every persona emits a machine-readable result line at the end of an ordinary conversation, and #43 has to edit six persona sources, re-run the sanitize gate, and rebuild every compiled target for a string that only a launcher reads. Under the first, the line exists exactly where something parses it. First reading. This is also why "Not touched" above can say `personas/**`. |
+| D22 *(adversary)* | **One prompt string, both modes.** Two readings: the `WORK-RESULT` sentence is appended only in headless mode, or it is always present. Differing case: `work.sh 43` interactive — the first reading gives a clean conversational prompt, the second makes athena print a result line at the end of an interactive session. The second is chosen anyway: the noise is one line, and two prompt strings is two things to keep in sync for a difference nothing depends on. A single literal is also what makes D2's grep-based test meaningful. |
+| D23 *(adversary)* | **A refusal by the *launcher* and a refusal by the *launched persona* share exit 2, and that is deliberate.** Two readings: exit 2 means "work.sh refused" (#36 D8's six conditions), or exit 2 means "this number was not worked, by design". Differing case: a caller — #25's `vm-local` adapter — runs `work.sh 42 --as atlas` on an issue that gained a `hold` label after dispatch but before the persona claimed. Under the first reading the launcher exits 0 (it launched fine) and the adapter records a successful run of a session that did nothing; under the second both the pre-launch and the in-session refusal arrive as 2 and the adapter's one branch is correct for both. Second reading: a caller cares whether the number was worked, not which layer declined. |
+| D24 *(adversary)* | **`--add-dir` is the checkout that owns the running `work.sh`, not the caller's current directory.** Two readings for `$REPO_ROOT`: the existing `BASH_SOURCE`-derived value, or `git rev-parse --show-toplevel` from the caller's cwd. Differing case: the operator, standing inside a worktree at `.claude/worktrees/x`, runs `/path/to/main/scripts/ops/work.sh 43`. The first reading points agy at the main checkout — the same tree from which the script already read `personas/lifecycle.json`, `config/deployments.yaml` and the intent folder; the second reads the labels and the folder layout from one tree and edits another. First reading: reading state from one checkout and writing to a different one is the split #36 was built to avoid. To dispatch into a worktree, invoke that worktree's own copy of the script — and `work.sh` prints the resolved root in its report so the operator can see which tree a session will edit. |
+
+## Acceptance
+
+Each item names the Decision it derives from; a contract test that
+cannot cite one is a missed ambiguity and comes back here (the
+spec-adversary skill's downstream contract).
+
+1. `DRY_RUN=1 scripts/ops/work.sh <n>` for a `daedalus`-owned stage
+   prints an `agy -p … --agent daedalus --add-dir <absolute root>
+   --model <resolved> --output-format json --print-timeout 45m` line,
+   and a `timeout 2760` wrapper (D1, D5, D6, D9).
+2. The same command prints `identity: evekhm-daedalus-app[bot] (token
+   minted at launch; not printed)`, makes no call to
+   `api.github.com/app/installations`, and emits nothing token-shaped
+   (D11).
+3. A rebuild produces `.agents/agents/<name>/{agent.md,agent.json}` and
+   no `config.yaml` or `instructions.md`; `sync_agents.py --check` and
+   `scripts/ci/compiler_roundtrip.sh` both pass; no `agent.md` has a
+   `model:` key (D7, D8, D10).
+4. Renaming `.agents/agents/daedalus/agent.md` away makes
+   `work.sh <n>` exit 1 with the missing path named, before any model
+   call (D3).
+5. With the App private key unavailable, `work.sh <n>` exits 1 and
+   starts no child; with an ambient `GH_TOKEN` set and a successful
+   mint, the child sees the minted token and not the ambient one
+   (D12).
+6. A child launched by `work.sh` pushes to `<persona>/*` over HTTPS
+   with no ambient helper on PATH, and the parent shell's
+   `git config --list` gains nothing (D13).
+7. Stubbed-harness fixtures produce the four exits of D14: `ok` → 0,
+   `refused`/`blocked` → 2, `status: ERROR` → 1, `SUCCESS` with no
+   result line → 1 (D14).
+8. `work.sh 42` on a two-owner review stage prints both owners,
+   launches neither, exits 0, and mints zero tokens (D20).
+9. `scripts/ops/smoke_launch.sh <scratch>` runs both harnesses and
+   asserts, per run, the exit code, the artifact, and the author of
+   the produced comment (`claude-code`/odyssey) or commit
+   (`antigravity`/daedalus); the antigravity claim assertions report
+   `BLOCKED ON #47` and the script still exits 0 (D18, D19).
+10. `/work 43` in an interactive Claude Code session runs
+    `scripts/ops/work.sh 43`; nothing is added under `.agents/workflows/`
+    (D16).
+11. AGENTS.md carries the "dispatch has one door" subsection, and it
+    restates no rule already in the file (D17).
+12. The interfaces #25's plan depends on are unchanged: `work.sh <n>
+    --as <persona>` is still the whole argv contract, every new mode is
+    an environment variable, and `scripts/placement/vm-local/run.sh`
+    mints nothing and exports nothing (#25 D16, D18; plan T4).
+13. `docs/SPEC.md` is upserted in the implementing PR: `ops.dispatch`
+    reworded for the two-harness table and the mint step, the compiler
+    entry reworded for the new antigravity layout, and one new entry
+    for the persona-identity handoff.
+
+## Out of scope
+
+- **Raising the three Apps to `issues: write` (#47).** A human action
+  on github.com; this spec depends on it and states it (D18).
+- **Repinning personas to antigravity (#44).** Config-only, and
+  blocked on this issue rather than part of it.
+- **The permission posture on a CI runner.** Headless writes needed no
+  flag in the measurement, but the cause is machine-local —
+  the antigravity CLI's per-user `settings.json` carries
+  `"toolPermission": "always-proceed"` and lists this repository under
+  `trustedWorkspaces` (findings Q8). `--dangerously-skip-permissions`
+  is a no-op here and is not passed. Every v1 binding for an
+  antigravity persona is `placement: vm-local` (#25 D19), so the
+  runner case is not on the critical path; the first `gh-actions`
+  binding for an antigravity persona must settle it, and that belongs
+  to whoever writes that adapter step.
+- **An `.agents/workflows/` twin of `/work`** (D16).
+
+## Inputs
+
+- `runs/2026-09-03_agy-headless/findings.md` — every agy behaviour
+  cited above, measured on agy 1.1.24, 2026-09-03.
+- `intent/36-dispatch/spec.md` D7–D10 and `scripts/ops/work.sh` — the
+  argv contract, the exit codes, the launch table this extends.
+- `intent/25-execution-model/spec.md` D16–D19 and PR #46's plan T4 —
+  the `vm-local` adapter that calls this line.
+- `intent/2-config/` D1–D4 — deployment pins and the two-reviewer
+  constraint.
+- #47 (App permissions), #44 (repins), #5 (the compiler, whose
+  antigravity emitter this corrects).
