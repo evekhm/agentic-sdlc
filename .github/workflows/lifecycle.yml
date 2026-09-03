@@ -29,6 +29,11 @@ on:
 permissions:
   issues: write
   contents: read
+  # The implement rung advances on a merged pull request found through
+  # `gh api repos/<repo>/commits/<sha>/pulls` (#57, D1/D3). This is the
+  # only new scope; there is no second trigger, no second job and no
+  # secret.
+  pull-requests: read
 
 concurrency:
   group: lifecycle-${{ github.ref }}

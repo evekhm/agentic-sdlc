@@ -96,6 +96,12 @@ lives in GitHub issue labels, never in a chat transcript.
             closing the loop.
 ```
 
+**Defect repair.** A bug in merged work whose `docs/SPEC.md` entry is
+unchanged does not owe the intent/spec/plan triple: it goes issue →
+fix PR with a regression check → REVIEW → human merge, with the issue
+citing the capability it repairs. A repair that changes a spec entry is
+a change and re-enters at PLAN. Ratified on #32.
+
 ### Where artifacts live
 
 ```text

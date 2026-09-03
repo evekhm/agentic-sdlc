@@ -106,10 +106,18 @@ secret — an Actions secret or a local
 one owner: `_github_app.py:get_repo_info()` derives `(owner, repo)`
 from the checkout's `origin` remote, so forking the repo and
 re-running `create_all_apps.py` registers independently-named Apps
-with no script edits. A dispatched session never carries the
-operator's credentials: `scripts/ops/work.sh` mints the launched
-persona's token in the one step between the last refusal and the
-launch and hands it to the child alone (`ops.identity`).
+with no script edits. Every App's manifest grants `issues: write`
+(PR #58, #47): the dispatch protocol (`ops.dispatch`, `personas.resume`)
+has each persona add `in-progress`, post the `Claim:` line, and post its
+handoff on the issue it works, and an App with `issues: read` gets 403
+on all three. `contents` and `pull_requests` still vary per persona —
+argus and atlas are comment-only and hold `contents: read`. Editing the
+manifest changes only Apps registered afterwards; an already-registered
+App's permissions are changed on github.com and re-accepted on its
+installation. A dispatched session never carries the operator's
+credentials: `scripts/ops/work.sh` mints the launched persona's token
+in the one step between the last refusal and the launch and hands it
+to the child alone (`ops.identity`).
 
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
@@ -166,12 +174,14 @@ drift gate (`ci.gates`).
 `personas/lifecycle.json` is the single source of the label↔stage
 relation (#36, `intent/36-dispatch/`): five rungs — plan, design,
 build, implement, review — each row carrying `stage`, `label`,
-`artifact`, `advances_to`, `advance_message` and `dispatch_brief`.
+`artifact`, `advances_on`, `advances_to`, `advance_message` and
+`dispatch_brief`.
 Ownership is deliberately not a column: who works a stage is DERIVED
 from the `stage` list of every `kind: persona` source, so adding an
 owner is an edit to that persona and to nothing else. It has three
 readers and no fourth copy — `scripts/ci/lifecycle_advance.sh`
-matches on `artifact` to pick a transition (`lifecycle.labels`),
+matches on `advances_on`, then on `artifact` or on the issue's
+current `label`, to pick a transition (`lifecycle.labels`),
 `scripts/ops/work.sh` matches on `label` to pick a stage
 (`ops.dispatch`), and the compiler renders the whole ladder, with
 each rung's derived owners, into a generated `## Lifecycle stages`
@@ -229,15 +239,33 @@ ladder on every push to `main` by running
 `scripts/ci/lifecycle_advance.sh <before-sha> <after-sha>`, which is
 deterministic bash + `gh` + `jq` with no model call and is runnable
 locally by the same command (`DRY_RUN=1` prints every mutation instead
-of executing it). It reads the pushed range for ADDED files matching
+of executing it). WHAT fires each rung is the `advances_on` column of
+`personas/lifecycle.json` (`personas.resume`, #36), read and never
+inferred (PR #67). Three rungs advance on an added file: the script
+reads the pushed range for ADDED files matching
 `intent/<issue>-<slug>/{intent,spec,plan}.md` and mirrors the merge
-gate into the label. WHICH label each merged artifact advances to,
-and the line posted when it does, are not written in the script:
-they are read from `personas/lifecycle.json` (`personas.resume`,
-#36), matched on the artifact column — today intent.md →
-`status:spec`, spec.md → `status:build`, plan.md →
-`status:implementing`, one comment per transition naming what the
-next stage owes. The one exception the script owns is the Draft
+gate into the label — intent.md → `status:spec`, spec.md →
+`status:build`, plan.md → `status:implementing`. The implement rung
+owes no file, because what it owes is code, so it advances on a
+merged PULL REQUEST: the range's first-parent commits are walked
+oldest first, `gh api repos/<repo>/commits/<sha>/pulls` says which
+pull requests each belongs to, those merged into the default branch
+are kept, and each resolves to at most one issue by its BRANCH NAME
+first and a closing keyword second — the reverse of `ops.dispatch`'s
+order, because an implementing pull request must not carry a closing
+keyword at all. The two signals disagreeing is a counted failure, not
+a guess, and a commit belonging to no pull request advances nothing.
+An issue with both an artifact and a merged pull request in one range
+takes the furthest rung of the two, ranked by position in the ladder
+file. WHICH label a rung advances to, and the line posted when it
+does, are likewise not written in the script but read from the same
+row — one comment per transition naming what the next stage owes. A
+row with no `advances_to` writes no label and a row with no
+`advance_message` posts no comment, so the last rung is inert by
+data rather than by a special case. The first `status:*` this
+workflow writes also removes `intent:new` on the same edit: an item
+with a stage is an item somebody triaged. The one exception the
+script owns is the Draft
 override, which is the ladder refusing to move rather than a rung of
 it: a merged spec.md advances **only if it carries `Status:
 Approved`**, and otherwise gets a warning comment and no advance.
@@ -248,12 +276,18 @@ a push adding several of the triple for one issue applies only the
 furthest transition, in one comment. Every write is idempotent (a
 label already present is not re-added; a comment whose
 `<!-- lifecycle:<stage>:<sha> -->` marker is already in the thread is
-not re-posted), so re-running a range is a no-op. A closed or missing
-issue is logged and skipped. The workflow uses the default
-`GITHUB_TOKEN` and posts as `github-actions[bot]` — infrastructure,
-not a persona — with `issues: write, contents: read` and no secrets.
-`status:in-review` and the `review:N` counter exist in the taxonomy
-but are not written by this workflow; their writers arrive with #8/#9.
+not re-posted), so re-running a range is a no-op; the merge rung needs
+no marker of its own for this, because once the label has advanced no
+row matches it again. A missing issue is logged and skipped, and so is
+a closed one — with one exception: a CLOSED issue still carrying the
+merge rung's label, whose pull request merged in the range, is a red
+counted failure that writes nothing at all, because the implementing
+pull request carried a closing keyword it must not carry (PR #67). The
+workflow uses the default `GITHUB_TOKEN` and posts as
+`github-actions[bot]` — infrastructure, not a persona — with
+`issues: write, contents: read, pull-requests: read` and no secrets.
+The ladder is written end to end here; `review:1..3` and
+`status:review-stuck` are review state and remain #8/#9's.
 
 ### review.policy
 `REVIEW.md` is the review protocol the reviewer personas compile
