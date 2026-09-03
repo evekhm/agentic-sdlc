@@ -129,9 +129,9 @@ to `status:review-stuck` for a human. Each label's semantics are
 [`docs/SPEC.md`](docs/SPEC.md) `lifecycle.labels`.
 
 When merged work turns out to be wrong, file the defect as its own
-issue. Which rung a repair re-enters at is an open question, tracked as
-[#32](https://github.com/evekhm/agentic-sdlc/issues/32); this document
-asserts nothing about it until it is settled.
+issue. If its `docs/SPEC.md` entry is unchanged, the repair skips the
+intent/spec/plan triple: issue, fix PR with a regression check, review,
+human merge. A spec-changing repair re-enters at PLAN. Ratified on #32.
 
 ## Where the rules actually live
 
