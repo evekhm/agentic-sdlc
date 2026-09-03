@@ -33,7 +33,10 @@ edit. The never-list at the end is absolute.
    who, which session, which stage, which worktree path.
 3. **Your own worktree.** Create it from `origin/main` on
    `<actor>/<issue>-<slug>` and do every edit and commit there. The
-   primary checkout is read-only reference.
+   primary checkout is read-only reference — except its `runs/`,
+   which is the one shared run root for every session ("Outputs go
+   in timestamped run folders" below); never write `runs/` inside a
+   worktree.
 4. **Read the chain.** AGENTS.md → INTENT.md → docs/SPEC.md → the
    issue thread bottom-up.
 5. **Produce the stage's artifact, commit by path, open a PR.** A
@@ -259,6 +262,22 @@ handoff comment.
 - `runs/` is local scratch and is gitignored. Anything worth keeping
   graduates from a run folder into a real, reviewed location (`docs/`,
   a script, a PR) — sanitized first.
+- **One `runs/` per machine: the primary checkout's.** Worktrees are
+  for code; artifacts are shared across sessions and read by the human
+  from the primary checkout (the one open in their IDE). Because
+  `runs/` is gitignored, a run folder written inside a worktree never
+  travels with the branch and is deleted with the worktree. So every
+  session, in every harness and worktree, resolves the run root to
+  the primary checkout before writing:
+
+  ```bash
+  RUNS_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/runs"
+  ```
+
+  From the primary checkout this is `./runs`; from any worktree it is
+  the same directory. A `runs/` that appears inside a worktree is a
+  bug: move its contents to the shared root before the worktree is
+  removed.
 - **Bookkeeping: every run artifact records its disposition.** By the
   time a session ends, every artifact the session produced carries a
   disposition naming what became of it: the issue or PR it turned

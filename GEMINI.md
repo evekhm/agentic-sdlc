@@ -64,6 +64,7 @@ Unless explicitly directed otherwise, your task is to process user inputs using 
     - Before the first edit, run the "Session checklist" in AGENTS.md: the issue is open and claimed by you, you are inside your own worktree, and the branch is `<actor>/<issue>-<slug>`.
     - If the issue you were pointed at is closed, or a peer has claimed it, stop and report; do not branch, commit or post on it. A closed issue means: file a follow-up per AGENTS.md "Before filing an issue", naming the closed issue as the one it extends, then work the follow-up.
     - Delivery is a PR that a human merges, followed by the Done/Decided/Next/Blocked handoff comment on the issue. A pushed branch without a PR is not delivered.
+    - Run artifacts never go in the worktree. Before writing any `runs/` output, resolve the shared run root exactly as AGENTS.md "Outputs go in timestamped run folders" shows (`git rev-parse --git-common-dir`, then `../runs`) and write there; it is the primary checkout's `runs/`, the one the human has open.
     - Document only harness mechanics verified against this runtime (`agy --help`, `agy models`). Never import Antigravity IDE features into these files by name without checking that headless agy exposes them.
 
 # Parallel sessions (Gemini / Antigravity)
@@ -84,6 +85,12 @@ agy 1.1.25:
   `cd .claude/worktrees/<actor>-<n>-<slug> && agy --add-dir "$PWD" ...`.
   A session whose workspace is the primary checkout is in the wrong
   place: stop, create the worktree, restart there.
+- **Run artifacts leave the workspace.** With the worktree as cwd, a
+  relative `runs/...` path lands inside the worktree and is lost when
+  it is removed. Write to the shared root instead (rule 8 above; the
+  resolution is in AGENTS.md). The shared root is outside the
+  worktree cwd, so if agy declines to write there, launch with the
+  root added: `--add-dir "$PWD" --add-dir "$RUNS_ROOT"`.
 - **Peer check:** `git worktree list` and the issue's last claim
   comment. Claude sessions name themselves `agentic-sdlc-*` in their
   claims; a Gemini claim names the harness (`agy`), the model tier,

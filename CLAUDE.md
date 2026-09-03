@@ -56,6 +56,11 @@ tracker"). This harness adds the tooling:
   shows as `locked:pid-live` in the report while it runs and
   `locked:pid-dead` if it crashed; the dispatching session unlocks and
   cleans up its own.
+- **Run artifacts:** `claude -w` and EnterWorktree make the worktree
+  the cwd, so a relative `runs/...` path lands inside the worktree and
+  dies with it. Resolve the shared root per AGENTS.md ("Outputs go in
+  timestamped run folders") before writing, and tell subagents the
+  absolute path — a subagent in its own worktree has the same trap.
 
 # Context ceiling
 
