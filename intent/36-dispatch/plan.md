@@ -78,6 +78,10 @@ warning text; the `*)` arm at 285–288 is subsumed by the `jq -ec`
 failure. **Proves it (Acceptance 2, 3):** T9 asserts each
 `advance_message` appears in `DRY_RUN=1` output read from the JSON by
 `jq`, and `grep -rn 'status:spec' scripts/` returns only reads of it.
+*Amended in implementation (odyssey):* the header comment at 15–18 was
+itself a copy of the artifact→label table, so it was replaced by a
+pointer to `personas/lifecycle.json` — without that the Acceptance 2
+grep still matched a table.
 
 ## T4 · `scripts/sync_agents.py` — D3
 
@@ -98,17 +102,17 @@ T9, `sync_agents.py --check`, and the two-build diff already in
 
 ## T5 · `scripts/ops/work.sh` (NEW) — D7, D8, D9, D10
 
-- [ ] **Arguments.** One positional issue-or-PR number, `#` optional;
+- [x] **Arguments.** One positional issue-or-PR number, `#` optional;
       `--as <persona>` the only flag (D9); `DRY_RUN=1` from the
       environment (D8). A second positional or any other flag exits 1 —
       nothing names a stage, folder, artifact or branch (D7).
       **Preflight:** `set -euo pipefail`; require `gh` and `jq`; read
       `personas/lifecycle.json` or exit 1. All `gh` calls go through one
       `gh_json()` helper so T9 can stub it.
-- [ ] **Resolve (D9).** If it is a PR: `Closes #<n>` in the body, else
+- [x] **Resolve (D9).** If it is a PR: `Closes #<n>` in the body, else
       the `<actor>/<n>-<slug>` branch name, else exit 1 `cannot resolve
       PR #<n> to an issue`.
-- [ ] **Refusals, in D5's order, before any write**, each exit 2 naming
+- [x] **Refusals, in D5's order, before any write**, each exit 2 naming
       the condition: (a) `refused: #<n> carries hold`; (b) `… is closed`
       / `… carries status:review-stuck`; (c) `… carries blocked`; (d) `…
       carries more than one status:* label: <list>`, reported and
@@ -116,7 +120,7 @@ T9, `sync_agents.py --check`, and the two-build diff already in
       on #<n> is held by <actor>`, while a claim naming the resolved
       owner is a resume and proceeds; (f) `refused: <persona> does not
       own stage <stage>` when `--as` names a non-owner.
-- [ ] **Stage** from the single `status:*` label via the JSON;
+- [x] **Stage** from the single `status:*` label via the JSON;
       `intent:new` with no `status:*` is `plan` (D4). **Owners:** every
       `personas/*.yaml` whose `stage` contains it (D2), sorted; zero
       owners exits 1. **Folder (D6):** one `intent/<n>-*/` → reuse; none
@@ -124,13 +128,13 @@ T9, `sync_agents.py --check`, and the two-build diff already in
       outside `[a-z0-9]` → `-`, trimmed, truncated to ≤24 at the last
       `-` leaving a non-empty slug); more than one → exit 2 naming them.
       **Branch** `<persona>/<n>-<slug>`.
-- [ ] **Harness (D10).** `config/deployments.yaml` →
+- [x] **Harness (D10).** `config/deployments.yaml` →
       `personas.<owner>.harness`; no pin exits 1. For `claude-code`,
       exec `claude --agent <persona> "#<n>"`; any other harness prints
       the persona, the target and that same one-line prompt, exit 0.
       **Multi-owner (D9):** more than one owner and no `--as` prints
       both instructions, launches neither, exits 0.
-- [ ] **`DRY_RUN=1`** prints number, stage, label, owner(s), folder,
+- [x] **`DRY_RUN=1`** prints number, stage, label, owner(s), folder,
       branch, harness and the exact command line, then exits 0 having
       written nothing; reads still run, so the guards are exercised.
       **Exits:** 0 launched or printed, 2 a stated D5 refusal, 1
@@ -153,6 +157,11 @@ Add `  - resume-protocol.md` to the block `skills:` list of the six
 already declares `stage: [maintain]`) and one `assert_in '### maintain'
 "$AGENT/instructions.md"` beside line 116, so the generated block is
 round-trip-proved on a persona built from scratch.
+*Amended in implementation (odyssey):* `maintain` is not a rung of
+`personas/lifecycle.json`, and D3 renders all five rungs with owners
+derived from the sources rather than the target's own stages, so
+`### maintain` can never appear; the asserts are `## Lifecycle stages`,
+`### review` and the sorted `- Owner: argus, atlas` instead.
 
 **T9 · tests**, plain bash in the style of
 `scripts/ops/tests/session_spend_test.sh` — `set -euo pipefail`,

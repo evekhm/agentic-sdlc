@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "The label <-> stage source of truth (#36, intent/36-dispatch/spec.md D1, D2).",
+    "One object per rung of the ladder, in ladder order. This is the ONLY place",
+    "the status:* label to lifecycle stage relation is written: the advancer",
+    "(scripts/ci/lifecycle_advance.sh), the compiler (scripts/sync_agents.py) and",
+    "the dispatcher (scripts/ops/work.sh) all read it and none of them restates it.",
+    "Ownership is NOT a key here: the owning persona of a stage is derived as every",
+    "personas/*.yaml whose `stage` list contains it, so moving a stage between",
+    "personas edits exactly one YAML file and nothing else (D2).",
+    "Keys: stage (a value from schema.json's stage enum), label (the single status:*",
+    "label meaning this stage is current), artifact (the file this stage owes, or",
+    "null where the output is code or a review), advances_to (the label written when",
+    "that artifact merges, or null at the end of the ladder), advance_message (the",
+    "one line the advancer posts on that transition), dispatch_brief (the one line a",
+    "session owning this stage is handed).",
+    "intake, deploy and maintain are stage-enum values with no rung and are absent",
+    "by construction."
+  ],
+  "stages": [
+    {
+      "stage": "plan",
+      "label": "status:planning",
+      "artifact": "intent.md",
+      "advances_to": "status:spec",
+      "advance_message": "Intent accepted (merge = PLAN gate). Next: draft spec.md into the same folder; Approved requires empty Open questions.",
+      "dispatch_brief": "Write the intent: the problem, the proposed outcome, the affected systems, the constraints, and the open questions."
+    },
+    {
+      "stage": "design",
+      "label": "status:spec",
+      "artifact": "spec.md",
+      "advances_to": "status:build",
+      "advance_message": "Spec approved (DESIGN gate). Next: plan.md + failing contract tests citing Decision IDs.",
+      "dispatch_brief": "Turn the accepted intent into a spec: numbered decisions with rationale plus an Acceptance list; Approved requires no open questions."
+    },
+    {
+      "stage": "build",
+      "label": "status:build",
+      "artifact": "plan.md",
+      "advances_to": "status:implementing",
+      "advance_message": "Plan committed (BUILD gate). Next: implementation at a pinned SHA; PR carries diff + plan sync + docs/SPEC.md upsert.",
+      "dispatch_brief": "Turn the Approved spec into an ordered plan: files touched, order of work, and the check that proves each task, before any code exists."
+    },
+    {
+      "stage": "implement",
+      "label": "status:implementing",
+      "artifact": null,
+      "advances_to": "status:in-review",
+      "advance_message": null,
+      "dispatch_brief": "Implement the committed plan at a pinned SHA; the pull request carries the diff, the plan sync, and the living-spec upsert."
+    },
+    {
+      "stage": "review",
+      "label": "status:in-review",
+      "artifact": null,
+      "advances_to": null,
+      "advance_message": null,
+      "dispatch_brief": "Review the open pull request against its spec and plan; post findings and a verdict, never a merge."
+    }
+  ]
+}
