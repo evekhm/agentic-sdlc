@@ -12,10 +12,15 @@
 # the whole input, which is why the same push always produces the same
 # labels.
 #
-#   intent.md added  →  status:spec          (PLAN gate passed)
-#   spec.md added    →  status:build         (DESIGN gate passed) —
-#                       ONLY if the merged spec says `Status: Approved`
-#   plan.md added    →  status:implementing  (BUILD gate passed)
+# WHICH label each merged artifact advances to, and the line posted when
+# it does, are not written here (#36, D2). They are read from
+# personas/lifecycle.json — the one table the compiler renders into
+# prompts and scripts/ops/work.sh dispatches against — matched on the
+# `artifact` column. Read that file for the ladder; this script only
+# applies it, with one exception it owns: a merged spec.md whose status
+# line is not `Status: Approved` advances nothing (see the Draft
+# override below), because that is the ladder refusing to move rather
+# than a rung of it.
 #
 # What this script deliberately does NOT write: `status:in-review` and
 # the `review:1..3` counter. Those belong to the review automation
@@ -84,6 +89,15 @@ done
 
 git rev-parse --git-dir >/dev/null 2>&1 || die "not a git repository"
 
+# The label <-> stage ladder is DATA, not a case statement in this file
+# (#36, D2). Which label a merged artifact advances to, and the line
+# posted when it does, are read from the one table every actor reads —
+# the compiler renders it into prompts and scripts/ops/work.sh dispatches
+# against it. A second copy here would be the drift this file exists to
+# prevent.
+LIFECYCLE_JSON="$(git rev-parse --show-toplevel)/personas/lifecycle.json"
+[ -r "$LIFECYCLE_JSON" ] || die "cannot read $LIFECYCLE_JSON"
+
 # A push that CREATED the branch reports an all-zero 'before'. There is
 # no range to read, and treating it as one would diff against the empty
 # tree and re-announce the entire history.
@@ -110,15 +124,6 @@ declare -A BEST_STAGE  # issue -> that stage's name
 declare -A BEST_PATH   # issue -> that stage's file path
 declare -A ALL_FILES   # issue -> space-separated basenames added
 
-rank_of() { # stage -> rank; plan is furthest along the lifecycle
-    case "$1" in
-        intent) echo 1;;
-        spec)   echo 2;;
-        plan)   echo 3;;
-        *)      echo 0;;
-    esac
-}
-
 # Plain counter: `${#BEST_STAGE[@]}` on a never-assigned associative
 # array trips `set -u`'s unbound-variable check on an empty push, so
 # count issues explicitly instead.
@@ -129,7 +134,11 @@ while IFS=$'\t' read -r _status path; do
     # 10# so a zero-padded folder (intent/04-…) is decimal, not octal.
     issue="$((10#${BASH_REMATCH[1]}))"
     stage="${BASH_REMATCH[2]}"
-    rank="$(rank_of "$stage")"
+    # Rank = position in the ladder's artifact column, so "furthest
+    # transition wins" is the file's ordering and not a second one here.
+    # An artifact the table does not name ranks 0 and never wins.
+    rank="$(jq -r --arg a "$stage.md" \
+        '([.stages[].artifact] | index($a) // -1) + 1' "$LIFECYCLE_JSON")"
     [ -n "${ALL_FILES[$issue]:-}" ] || n_crossings=$((n_crossings + 1))
     ALL_FILES[$issue]="${ALL_FILES[$issue]:-}${ALL_FILES[$issue]:+ }${stage}.md"
     if [ "$rank" -gt "${BEST_RANK[$issue]:-0}" ]; then
@@ -255,43 +264,40 @@ $marker"
         continue
     fi
 
-    # --- pick the transition --------------------------------------------------
-    target=""; marker_stage=""; message=""
-    case "$stage" in
-        intent)
-            target="status:spec"; marker_stage="spec"
-            message="Intent accepted (merge = PLAN gate). Next: draft spec.md into the same folder; Approved requires empty Open questions."
-            ;;
-        plan)
-            target="status:implementing"; marker_stage="implementing"
-            message="Plan committed (BUILD gate). Next: implementation at a pinned SHA; PR carries diff + plan sync + docs/SPEC.md upsert."
-            ;;
-        spec)
-            # Grep the MERGED file, not the working tree: what advanced
-            # the gate is what landed. Case-sensitive, and the line may
-            # carry more than the status — the house style is
-            # `**Issue:** #6 · **Status:** Approved (approval = merge of
-            # this PR)`, so the marker is mid-line and the label is
-            # bold. Markdown emphasis around `Status:` is tolerated for
-            # exactly that reason; the word Approved is not.
-            if ! spec_body="$(git show "${AFTER}:${path}")"; then
-                fail_issue "cannot read $path at $AFTER; #$issue left untouched"
-                continue
-            fi
-            if grep -Eq '(^|[^[:alnum:]_])\*{0,2}Status:\*{0,2}[[:space:]]+Approved([^[:alnum:]_]|$)' \
-                 <<<"$spec_body"; then
-                target="status:build"; marker_stage="build"
-                message="Spec approved (DESIGN gate). Next: plan.md + failing contract tests citing Decision IDs."
-            else
-                marker_stage="spec-draft"
-                message="**Warning: a spec.md merged without \`Status: Approved\`.** \`$path\` landed in this push but its status line is not Approved, so the DESIGN gate did NOT advance and the stage label is unchanged. Nothing is dispatched against a Draft (INTENT.md, stage 3): resolve the spec's Open questions, set \`Status: Approved\`, and the next merge advances it."
-            fi
-            ;;
-        *)
-            fail_issue "unreachable stage '$stage' for #$issue"
+    # --- pick the transition (read, never decided) ------------------------------
+    # The row keyed by the merged artifact carries both the label to write
+    # and the line to post. A stage the table does not name is a failure,
+    # not a guess — the old catch-all arm, now the jq lookup failing.
+    if ! row="$(jq -ec --arg a "$stage.md" \
+                  '.stages[] | select(.artifact == $a)' "$LIFECYCLE_JSON")"; then
+        fail_issue "no lifecycle row for '$stage.md' (#$issue)"
+        continue
+    fi
+    target="$(jq -r '.advances_to' <<<"$row")"
+    message="$(jq -r '.advance_message' <<<"$row")"
+    marker_stage="${target#status:}"
+
+    # The Draft override stays a CONDITION in this script and is not a row
+    # in the table: it is not a rung of the ladder, it is the ladder
+    # refusing to move. Grep the MERGED file, not the working tree: what
+    # advanced the gate is what landed. Case-sensitive, and the line may
+    # carry more than the status — the house style is `**Issue:** #6 ·
+    # **Status:** Approved (approval = merge of this PR)`, so the marker
+    # is mid-line and the label is bold. Markdown emphasis around
+    # `Status:` is tolerated for exactly that reason; the word Approved
+    # is not.
+    if [ "$stage" = "spec" ]; then
+        if ! spec_body="$(git show "${AFTER}:${path}")"; then
+            fail_issue "cannot read $path at $AFTER; #$issue left untouched"
             continue
-            ;;
-    esac
+        fi
+        if ! grep -Eq '(^|[^[:alnum:]_])\*{0,2}Status:\*{0,2}[[:space:]]+Approved([^[:alnum:]_]|$)' \
+               <<<"$spec_body"; then
+            target=""
+            marker_stage="spec-draft"
+            message="**Warning: a spec.md merged without \`Status: Approved\`.** \`$path\` landed in this push but its status line is not Approved, so the DESIGN gate did NOT advance and the stage label is unchanged. Nothing is dispatched against a Draft (INTENT.md, stage 3): resolve the spec's Open questions, set \`Status: Approved\`, and the next merge advances it."
+        fi
+    fi
 
     compression=""
     if [ "$files" != "$stage.md" ]; then
