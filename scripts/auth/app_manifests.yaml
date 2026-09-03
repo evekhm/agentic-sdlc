@@ -15,7 +15,13 @@
 #
 # Permission values follow the GitHub App manifest schema: "read",
 # "write", or the key omitted entirely for no access. `metadata: read`
-# is mandatory on every App.
+# is mandatory on every App, and so is `issues: write` (#47): the
+# dispatch protocol (#36) has every persona add `in-progress`, post the
+# `Claim:` line that scripts/ops/work.sh reads as the mutex holder, and
+# post its Done/Decided/Next/Blocked handoff on the issue it works. A
+# persona registered with `issues: read` gets 403 on all three and is
+# invisible to the mutex. `contents` and `pull_requests` still vary per
+# persona: reviewers stay comment-only and never push.
 
 athena:
   slug_suffix: athena-app
@@ -39,7 +45,7 @@ daedalus:
   default_permissions:
     contents: write
     pull_requests: write
-    issues: read
+    issues: write
     metadata: read
 
 cassandra:
@@ -75,7 +81,7 @@ argus:
     consensus keyed to Decision IDs. Comment-only.
   default_permissions:
     pull_requests: write
-    issues: read
+    issues: write
     contents: read
     metadata: read
 
@@ -87,6 +93,6 @@ atlas:
     consensus meaningful. Comment-only, same protocol as Argus.
   default_permissions:
     pull_requests: write
-    issues: read
+    issues: write
     contents: read
     metadata: read
