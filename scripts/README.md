@@ -50,7 +50,8 @@ Tests: `scripts/ci/tests/lifecycle_advance_test.sh`.
 
 Tests: `scripts/ops/tests/work_test.sh`,
 `scripts/ops/tests/worktrees_test.sh`,
-`scripts/ops/tests/session_spend_test.sh`.
+`scripts/ops/tests/session_spend_test.sh`,
+`scripts/ops/tests/claim_test.sh`.
 
 ## setup/ — one-time provisioning
 
