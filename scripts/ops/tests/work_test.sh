@@ -516,6 +516,32 @@ has "printing both and launching neither" "D20: it says it launched nothing"
 [ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "D20: a two-owner stage exchanged a token"; }
 pass "D20: two owners printed, zero tokens minted"
 
+banner "#43 D3/D8 a harness binary that is not installed is exit 1, before any mint"
+# The sibling of the missing-target refusal above, and the one refusal
+# that cannot be made in the generic preflight: which binary is needed
+# is unknown until the persona, its harness and any --as narrowing have
+# resolved. Without it the run mints a one-hour credential and then
+# execs a program that does not exist — 127, outside D8's 0/1/2
+# contract, with a live token abandoned.
+#
+# PATH is narrowed rather than the stub moved aside: this machine has a
+# REAL agy on PATH, and a test that reaches it would spend a live
+# persona launch. $WORK/bin-noharness carries the gh stub and nothing
+# else, and /usr/bin:/bin supplies jq, timeout and env.
+mkdir -p "$WORK/bin-noharness"
+cp "$WORK/bin/gh" "$WORK/bin-noharness/gh"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+saved_path="$PATH"
+PATH="$WORK/bin-noharness:/usr/bin:/bin"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 \
+  run 1 "D3: a harness binary that is not installed exits 1" -- 113
+PATH="$saved_path"
+has "agy is not installed" "D3: the refusal names the binary that is missing"
+has "nothing was minted" "D3: it says no token was exchanged"
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "D11: a token was minted for a launch that could not start"; }
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "D3: something was launched without its binary"; }
+pass "D11: zero mints and zero launches behind a missing harness binary"
+
 banner "#43 D12 a failed mint is fatal and nothing is launched"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
 TREE="$T" DRY=0 MINT_FAIL=1 LAUNCH_OK=1 \

@@ -647,6 +647,17 @@ if [ "${#LAUNCH[@]}" -eq 0 ]; then
     exit 0
 fi
 
+# The harness binary, checked BEFORE the mint below. Without this the
+# run exchanges a one-hour credential for a process that cannot start:
+# `exec timeout 5460 agy …` with agy off PATH exits 127 — outside D8's
+# 0/1/2 contract — and abandons a live token, which is exactly what
+# D11's grounds for minting last forbid. The generic preflight near the
+# top cannot do it: which binary is needed is not known until the
+# persona, its harness and its --as narrowing have all resolved.
+# LAUNCH is ( timeout <seconds> <binary> … ), so the binary is index 2.
+command -v "${LAUNCH[2]}" >/dev/null \
+    || die "${LAUNCH[2]} is not installed, so $launch_persona's $launch_harness session cannot start; nothing was minted"
+
 # --- Identity (#43, D11, D12, D13) ---------------------------------------------
 # The last step before the launch, so that every run which prints and
 # launches nothing performs no token exchange. A failed mint is FATAL:
