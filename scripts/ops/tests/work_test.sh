@@ -188,11 +188,12 @@ issue() {
     > "$FIXTURES/repos_test_repo_issues_$1.json"
   echo '[]' > "$FIXTURES/repos_test_repo_issues_$1_comments.json"
 }
-# pr <n> <body> <head-ref>
+# pr <n> <body> <head-ref> [<labels-csv>]
 pr() {
-  jq -n --argjson n "$1" --arg body "$2" \
+  jq -n --argjson n "$1" --arg body "$2" --arg labels "${4:-}" \
     '{number: $n, state: "open", title: "a pull request", body: $body,
-      labels: [], pull_request: {url: "x"}}' \
+      labels: ($labels | if . == "" then [] else split(",") end | map({name: .})),
+      pull_request: {url: "x"}}' \
     > "$FIXTURES/repos_test_repo_issues_$1.json"
   jq -n --arg ref "$3" '{head: {ref: $ref}}' \
     > "$FIXTURES/repos_test_repo_pulls_$1.json"
@@ -444,6 +445,26 @@ has "#108" "D9: both issues are named"
 pr 124 "Closes #108, and again: closes #108." "not-a-work-branch"
 run 0 "D9: the same issue named twice is still one issue" -- 124
 has "resolved from #124 via Closes #108" "D9: distinct numbers, not occurrences"
+
+banner "D5(a)/D9 hold on the PULL REQUEST refuses too (#50, Atlas AT-1)"
+# Resolving a PR to its issue must not throw the PR's own labels away:
+# the circuit breaker is placed where the operator is looking, and on a
+# pull request that is the pull request. The refusals therefore read the
+# UNION of both label sets, and the message names the side that carries
+# the label so the operator knows which one to clear.
+pr 127 "Closes #108" "odyssey/108-deterministic" "hold"
+run 2 "D5(a): hold on the PR exits 2 even though #108 is clean" -- 127
+has "carries hold" "D5(a): the refusal names hold"
+has "#127" "D5(a): the refusal names the pull request that carries it"
+pr 128 "Closes #108" "odyssey/108-deterministic" "blocked"
+run 2 "D5(c): blocked on the PR exits 2" -- 128
+has "carries blocked" "D5(c): the refusal names blocked"
+pr 129 "Closes #101" "odyssey/101-held"
+run 2 "D5(a): hold on the ISSUE still refuses through a clean PR" -- 129
+has "#101 carries hold" "D5(a): the issue's own labels are still read"
+pr 130 "Closes #108" "odyssey/108-deterministic"
+run 0 "D9: a PR carrying no labels still dispatches its issue" -- 130
+has "==> #108" "D9: the union adds nothing when the PR is unlabelled"
 
 banner "D9 a multi-owner stage prints both and launches neither"
 issue 112 open "status:in-review" "Under review"

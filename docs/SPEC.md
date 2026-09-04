@@ -321,7 +321,7 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 ### ops.dispatch
 `scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]` starts a
 session from a number (#36, `intent/36-dispatch/`). Deterministic
-bash + `gh` + `jq`, no model call: the issue's labels, the merged
+bash + `gh` + `jq`, no model call: the tracker's labels, the merged
 folder layout and three committed data files are the whole input, so
 the same number always resolves the same way. It resolves a pull
 request to its issue by a closing keyword and a same-repo `#<n>` in
@@ -343,7 +343,15 @@ with the condition named: `hold`; closed, or `status:review-stuck`;
 `blocked`; more than one `status:*` (reported, never guessed, and
 never `hold`-ed — the advancer is the single writer of the circuit
 breaker); `in-progress` claimed by another actor; and `--as` naming a
-persona that does not own the stage. The claim's holder is the
+persona that does not own the stage. When the number given is a pull
+request, those refusals read the UNION of the pull request's own labels
+and the resolved issue's — a `hold` on either side refuses, and the
+message names the side that carries it, because the circuit breaker is
+placed where the operator is looking and resolving to the issue must
+not discard it (#50, Atlas AT-1). The stage is not part of that union:
+it is derived from the issue's labels alone, since the state machine
+belongs to the unit of work and a `status:*` label on a pull request
+must not decide which rung the issue is on. The claim's holder is the
 *author* of the last comment that opens with `Claim` (AGENTS.md,
 "Working the tracker", step 2), mapped through the persona identity
 table — never a name read out of a comment body, which is an
