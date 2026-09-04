@@ -559,6 +559,20 @@ hasnt "--> atlas" "D9: --as argus dispatches nobody else"
 run 2 "D5(f): --as naming a non-owner exits 2" -- 112 --as odyssey
 has "odyssey does not own stage review" "D5(f): the refusal names the stage"
 
+banner "#129 a number on no rung is a refusal, not an error"
+# A defect-repair issue carries `bug` and no status:* (its fix PR is the
+# final stage); on a pull_request event the reviewers used to die on it,
+# one red check per reviewer on every fix PR. It is a stated refusal.
+issue 140 open "bug" "unattended.yml: preflight cannot sign RS256"
+run 2 "#129: a bug issue with no status:* exits 2" -- 140 --as argus
+has "refused: cannot derive a stage for #140" "#129: it is a refusal with the condition named"
+has "no status:* label and no intent:new" "#129: the sentence says which labels are missing"
+[ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "#129: something was launched or written"; }
+pass "#129: no session was launched and no write was attempted"
+pr 141 "Closes #140" "eva/140-unattended-cryptography"
+run 2 "#129: the fix pull request resolves to the bug issue and exits 2" -- 141 --as atlas
+has "refused: cannot derive a stage for #140" "#129: the refusal names the resolved issue, not the pull request"
+
 banner "#43 D1/D5/D6/D9 the antigravity row is real, and always headless"
 # The #36 suite used this stage as its "unlaunchable harness" case.
 # There IS a row now, so the scenario splits: this half asserts the row,

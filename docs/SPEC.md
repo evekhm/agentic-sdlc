@@ -439,12 +439,16 @@ first `:` or `;`, lowercased, runs of other characters to `-`, ≤24
 characters at a word boundary); the branch `<persona>/<n>-<slug>`;
 and the harness from `config/deployments.yaml`. There is deliberately
 no flag naming a stage, folder, artifact or branch — one would let a
-session work a stage the labels say is not current. Six refusals,
+session work a stage the labels say is not current. Seven refusals,
 checked in order before anything is dispatched and each exiting 2
 with the condition named: `hold`; closed, or `status:review-stuck`;
 `blocked`; more than one `status:*` (reported, never guessed, and
 never `hold`-ed — the advancer is the single writer of the circuit
-breaker); `in-progress` claimed by another actor; and `--as` naming a
+breaker); a number on no rung at all — no `status:*` and no
+`intent:new`, which is every defect-repair issue, whose fix pull
+request is the final stage and has no reviewer rung before merge
+(#129; it was an error before, one red reviewer check per fix pull
+request); `in-progress` claimed by another actor; and `--as` naming a
 persona that does not own the stage. When the number given is a pull
 request, those refusals read the UNION of the pull request's own labels
 and the resolved issue's — a `hold` on either side refuses, and the

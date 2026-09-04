@@ -57,7 +57,8 @@
 #      (a dry run, an unlaunchable harness, or a multi-owner stage that
 #      deliberately launches nothing)
 #   2  the number was NOT WORKED, BY DESIGN — either this script refused
-#      (one of the six D5 conditions) or the launched persona itself
+#      (one of the six D5 conditions, or a number on no rung, #129) or
+#      the launched persona itself
 #      reported `WORK-RESULT: refused|blocked`. One code, because a
 #      caller asks whether the number was worked, not which layer
 #      declined (#43, D23).
@@ -282,7 +283,13 @@ elif grep -Fxq "intent:new" <<<"$issue_labels"; then
     # Filed but not yet on the ladder: the first rung is where work starts.
     stage="$(jq -r '.stages[0].stage' "$LIFECYCLE_JSON")"
 else
-    die "cannot derive a stage for #$ISSUE: it carries no status:* label and no intent:new"
+    # Not on the ladder at all: a defect-repair issue (`bug`, no rung —
+    # its fix PR is the final stage, AGENTS.md) or a bare filing. Nothing
+    # is wrong with it; it is simply not a number this script works, so
+    # it is a refusal like the six above, not an error: unattended, the
+    # difference is a named green line versus a red check on every fix
+    # PR in the repository (#129).
+    refuse "cannot derive a stage for #$ISSUE: it carries no status:* label and no intent:new"
 fi
 
 row="$(jq -ec --arg s "$stage" '.stages[] | select(.stage == $s)' "$LIFECYCLE_JSON")" \
