@@ -48,7 +48,10 @@ BASE="${BASE:-$REMOTE/main}"
 # All git commands run against the common repository, whichever worktree
 # the script is invoked from.
 GIT_COMMON="$(git rev-parse --git-common-dir)"
-PRIMARY="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+# Read the whole stream: an awk that exits on the first match leaves git
+# writing into a closed pipe, and under `set -o pipefail` that SIGPIPE is
+# the script's exit status as soon as the list is long enough to matter.
+PRIMARY="$(git worktree list --porcelain | awk '/^worktree / && !p { print $2; p = 1 }')"
 
 if [ "${NO_FETCH:-0}" != 1 ]; then
   git fetch -q --prune "$REMOTE"
