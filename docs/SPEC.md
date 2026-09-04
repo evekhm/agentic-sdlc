@@ -261,20 +261,55 @@ reads the pushed range for ADDED files matching
 gate into the label — intent.md → `status:spec`, spec.md →
 `status:build`, plan.md → `status:implementing`. The implement rung
 owes no file, because what it owes is code, so it advances on a
-merged PULL REQUEST: the range's first-parent commits are walked
-oldest first, `gh api repos/<repo>/commits/<sha>/pulls` says which
-pull requests each belongs to, those merged into the default branch
-are kept, and each resolves to at most one issue by its BRANCH NAME
-first and a closing keyword second — the reverse of `ops.dispatch`'s
-order, because an implementing pull request must not carry a closing
-keyword at all. The two signals disagreeing is a counted failure, not
-a guess, and a commit belonging to no pull request advances nothing.
-An issue with both an artifact and a merged pull request in one range
-takes the furthest rung of the two, ranked by position in the ladder
-file. WHICH label a rung advances to, and the line posted when it
-does, are likewise not written in the script but read from the same
-row — one comment per transition naming what the next stage owes. A
-row with no `advances_to` writes no label and a row with no
+merged PULL REQUEST — and specifically on **the implementing** one
+(PR #102). Every commit of the range is walked in `git rev-list
+--topo-order --reverse`, a total order that contains each commit
+exactly once, and `gh api --paginate
+repos/<repo>/commits/<sha>/pulls` says which pull requests each
+belongs to. A merged pull request is kept when its
+`merge_commit_sha` is contained in that range; the base branch is
+not filtered on, because containment is the trunk test and a pull
+request merged into a landing branch that later lands reaches `main`
+on a second parent. A `merge_commit_sha` this checkout does not hold
+is a counted failure naming the pull request, never a silent drop.
+A surviving pull request is #`<n>`'s **implementing** pull request
+only when three conjuncts hold (PR #102): its head branch parses as
+`<actor>/<n>-<slug>`; its own file list, read from
+`gh api --paginate repos/<repo>/pulls/<n>/files` — the diff GitHub
+computes from the pull request's own refs, hence the same set under
+a merge-commit, a squash and a rebase merge — changes at least one
+path outside `intent/`; and exactly one `intent/<n>-*/` directory
+exists in the after-tree with `<slug>` as its slug. An answer to
+either API read that cannot be read — a non-zero exit or a payload
+that will not parse — is a counted failure naming the pull request,
+never a quiet skip. Two folders is a
+counted failure, zero yields no candidate, and there is no
+closing-keyword fallback at all: the implementing pull request is
+precisely the one that must not carry a closing keyword for its
+issue, so a branch that does not parse resolves to nothing whatever
+the body says. A pull request whose head repository is not this one
+is skipped, logged by number and never read as an identity claim —
+the fork gate (PR #102). A merge that names an issue sitting at the
+merge rung but is **not** its implementing pull request, because the
+branch's slug is not the intent folder's, is announced with exactly
+one `::warning::lifecycle_advance:` line naming the issue, the
+rejected pull request, its branch and the dispatch branch expected
+instead (PR #102) — never silence, and never a red, which stays
+reserved for a ladder that is provably broken. A slug mismatch whose
+file list never leaves `intent/` is an ordinary plan or spec
+amendment landing while the issue waits, and draws no warning at all.
+A near miss is not a
+candidate: it never applies `hold`, never comments and never fails
+the run. When one range carries two implementing pull requests for
+one issue — a shape a re-created dispatch branch produces — the one
+whose `merge_commit_sha` is later in that total order is the one
+applied and named. A commit belonging to no pull request advances
+nothing. An issue with both an artifact and a merged pull request in
+one range takes the furthest rung of the two, ranked by position in
+the ladder file. WHICH label a rung advances to, and the line posted
+when it does, are likewise not written in the script but read from the
+same row — one comment per transition naming what the next stage owes.
+A row with no `advances_to` writes no label and a row with no
 `advance_message` posts no comment, so the last rung is inert by
 data rather than by a special case. The first `status:*` this
 workflow writes also removes `intent:new` on the same edit: an item
@@ -294,9 +329,10 @@ not re-posted), so re-running a range is a no-op; the merge rung needs
 no marker of its own for this, because once the label has advanced no
 row matches it again. A missing issue is logged and skipped, and so is
 a closed one — with one exception: a CLOSED issue still carrying the
-merge rung's label, whose pull request merged in the range, is a red
-counted failure that writes nothing at all, because the implementing
-pull request carried a closing keyword it must not carry (PR #67). The
+merge rung's label, whose implementing pull request merged in the
+range, is a red counted failure that writes nothing at all: the ladder
+cannot advance a closed issue, and the human is told to reopen it and
+re-run the range (PR #67, PR #102). The
 workflow uses the default `GITHUB_TOKEN` and posts as
 `github-actions[bot]` — infrastructure, not a persona — with
 `issues: write, contents: read, pull-requests: read` and no secrets.
