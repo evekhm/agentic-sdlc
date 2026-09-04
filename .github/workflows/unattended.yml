@@ -133,6 +133,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      issues: read
     strategy:
       fail-fast: false
       matrix:
@@ -177,6 +178,12 @@ jobs:
           # variable of that name, set in the shell below, and is never
           # printed, written to a file or passed in an argument.
           PERSONA_APP_PRIVATE_KEY: ${{ secrets[format('{0}_APP_PRIVATE_KEY', matrix.upper)] }}
+          # Read-only default token for everything work.sh does BEFORE
+          # the launch: resolving the number, the refusal ladder, the
+          # claim mutex. This job has no write permission, so it cannot
+          # post; the launcher replaces it with the persona's own App
+          # token in the child's environment (ops.identity) (#128).
+          GH_TOKEN: ${{ github.token }}
           PERSONA: ${{ matrix.persona }}
           KEY_VAR_NAME: ${{ matrix.upper }}_APP_PRIVATE_KEY
           NUMBER: ${{ github.event.pull_request.number || inputs.number }}
