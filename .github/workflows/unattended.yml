@@ -133,6 +133,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      issues: read
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +145,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: python3 -m pip install --disable-pip-version-check pyyaml pyjwt
+      # pyjwt[crypto] pulls in cryptography, which PyJWT needs to sign
+      # RS256 (scripts/auth/_github_app.py mint_jwt). Plain pyjwt fails
+      # preflight with "Algorithm 'RS256' could not be found" (#126).
+      - run: python3 -m pip install --disable-pip-version-check pyyaml 'pyjwt[crypto]'
 
       # A subscriber whose placement this runner cannot host is one
       # NAMED skip line, never a silent drop: a persona that quietly
@@ -174,6 +178,12 @@ jobs:
           # variable of that name, set in the shell below, and is never
           # printed, written to a file or passed in an argument.
           PERSONA_APP_PRIVATE_KEY: ${{ secrets[format('{0}_APP_PRIVATE_KEY', matrix.upper)] }}
+          # Read-only default token for everything work.sh does BEFORE
+          # the launch: resolving the number, the refusal ladder, the
+          # claim mutex. This job has no write permission, so it cannot
+          # post; the launcher replaces it with the persona's own App
+          # token in the child's environment (ops.identity) (#128).
+          GH_TOKEN: ${{ github.token }}
           PERSONA: ${{ matrix.persona }}
           KEY_VAR_NAME: ${{ matrix.upper }}_APP_PRIVATE_KEY
           NUMBER: ${{ github.event.pull_request.number || inputs.number }}
