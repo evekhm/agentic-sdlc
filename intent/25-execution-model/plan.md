@@ -342,3 +342,108 @@ to invent a commitment the Decisions table does not carry.
    binding subscribes to. If the product owner reads D8 more strictly,
    the alternative is a single `repository_dispatch` type and an
    external forwarder, which trades the duplication for a component.
+
+## Deviations recorded during implementation
+
+Written while implementing, not afterwards. Each is a place the merged
+diff differs from the plan above; the plan text stays as it was drafted
+so the difference is readable.
+
+1. **T9 is two jobs, not one.** The plan's "one job" cannot work:
+   `secrets[...]` is evaluated before a step runs and can therefore be
+   indexed only by a MATRIX value, never by a persona name a shell
+   computed from `--subscribers`. The workflow is now a deterministic
+   `resolve` job that turns one event into a JSON matrix of
+   `{persona, placement, upper}`, and a `dispatch` job running that
+   matrix. D11's Observable independently wants this: two reviewers
+   posting from one job produce one run log, and "the room can open the
+   run" needs one per reviewer. Nothing else in T9 changed — still no
+   write grant, still the fork guard, still exit 2 green.
+2. **Env KEYS cannot be expressions, so the key travels under a fixed
+   name.** `${{ secrets[format(...)] }}` is set as `PERSONA_APP_PRIVATE_KEY`
+   and the step re-`export`s it under `$KEY_VAR_NAME` (built from
+   `matrix.upper`) before calling the adapter, which validates that name
+   against the persona source's own `authority.token` and refuses by
+   name if the two ever diverge. D3 is satisfied by construction: the
+   value is never an argument and never printed.
+3. **T4's "until #43 merges" note is obsolete.** #43 merged before this
+   plan was dispatched, so `scripts/ops/work.sh` already mints the
+   launched persona's token between the last refusal and the launch
+   (`ops.identity`). The adapters therefore mint nothing and export
+   nothing; the preflight's own token is discarded by `--quiet`.
+4. **T7 extracted a shared library the plan did not name.**
+   `scripts/ops/lib/github.sh` is sourced by both `work.sh` and
+   `post.sh`. D14 says post.sh resolves a pull request to its issue "the
+   same way work.sh resolves it", and two implementations of that
+   sentence is two answers, the wrong one being the one that leaks past
+   the circuit breaker. The extraction is behaviour-preserving —
+   every `die` message is unchanged and `work_test.sh` passes untouched.
+5. **The `execution` gate runs all three test files**, not only
+   `execution_test.sh` as sketched in T8's YAML. `placement_test.sh` and
+   `post_test.sh` are hermetic and need no secrets, so leaving them out
+   of CI would have made D13's race a test only a human ever runs.
+6. **The pull-request body carries no closing keyword.** The plan said
+   `Closes #25`; the implement rung is not the last rung of this issue
+   (review follows), and `lifecycle.labels` treats an implementing pull
+   request that closes its issue as a counted failure. The body says
+   "Implements the plan of #25" instead.
+
+7. **`UNSET_CREDENTIAL_IS_SKIP` — the missing secret is a refusal, not
+   an error, when the caller says so** (round 2, Argus R1-1). The manual
+   step below means this workflow merges before the keys exist, and the
+   plan's strict exit 1 would have put two red checks on every pull
+   request in the repository until a human loaded them — the failure
+   mode `hold` and exit 2 exist to avoid. The adapter now downgrades
+   exactly that branch to a stated exit-2 refusal naming the variable,
+   and only when the caller opts in; `unattended.yml` opts in and copies
+   the refusal into the run summary. The guard lives in the adapter, not
+   the workflow, because the adapter is the only place that knows the
+   variable's NAME — it reads it from the persona source — and because
+   shell is testable, which a workflow `if:` is not. Deleting the one
+   line in `unattended.yml` restores strictness after #7.
+8. **`gh_json` moved into the shared library** when #99 merged. #51 gave
+   it a `--paginate` mode in `work.sh` while T7 was extracting the
+   resolver that calls it; keeping both would have been the same
+   function in two files, which is what T7 exists to prevent. One
+   definition, in `scripts/ops/lib/github.sh`, with #51's comment intact.
+9. **`post.sh` checks who the API says wrote the comment** (round 2,
+   Argus R1-3). `--as` names the persona and `GH_TOKEN` decides the
+   author; nothing in the script can make the second follow the first,
+   but a run log claiming "posted as argus" over another App's comment
+   is a false attribution of the review record. The check reads
+   `.user.login` off the POST response and compares it with the persona
+   source's `authority.identity`; a mismatch is exit 1 naming both and
+   the URL to delete. It is post-hoc by necessity: an App installation
+   token is not a user, so there is no pre-write read that answers "who
+   am I?".
+10. **`max_cost_usd` is documented as declared, not enforced** (round 2,
+    Argus R1-4). D8 says exceeding a cap is a green exit with a comment
+    naming the cap; this plan delivers the declaration and the report
+    line, and no meter. Rather than let `docs/SPEC.md` describe a
+    ceiling nothing holds, both it and `config/execution.yaml` now say
+    so in as many words. The enforcement half needs a spend reading the
+    harness does not expose and is left to the duty issues (#8/#9/#10).
+
+### Manual steps pending — not doable from this VM
+
+- **#7 must load `ARGUS_APP_PRIVATE_KEY` and `ATLAS_APP_PRIVATE_KEY` as
+  repository Actions secrets** (Settings → Secrets and variables →
+  Actions → New repository secret, one per name, value = that App's
+  `.private-key.pem`). Until then the `gh-actions` adapter refuses by
+  name — which is the designed behaviour, not a defect — and no
+  unattended review can run; with `UNSET_CREDENTIAL_IS_SKIP=1` set by
+  the workflow (deviation 7) that refusal is a green job carrying the
+  missing secret's name in its run summary, so the pending step is
+  visible on every pull request without being a red check. Removing
+  that line from `unattended.yml` is the second half of this step. A
+  persona App cannot write repository settings, so this is a human
+  action.
+- **The T9 live smoke run** (`workflow_dispatch` with `dry_run: true` on
+  a scratch issue) can only happen once this pull request's workflow
+  file is on a branch GitHub will run, and its `gh-actions` leg needs
+  the secret above. The hermetic equivalent is green:
+  `placement_test.sh` runs the same adapter with the key variable set to
+  a dummy value and `DRY_RUN=1`, asserting the report and zero writes.
+- **D11's Observable — two reviews on an attendee's pull request** —
+  needs #8 and #9 to wire the review duty. This plan delivers the
+  substrate only, as T9 already stated.

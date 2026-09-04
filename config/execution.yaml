@@ -1,0 +1,36 @@
+# Persona -> execution binding (#25). One axis per file (#2 D1):
+# harness is config/deployments.yaml, placement is here. A persona with
+# no unattended duty has no entry. No secret value, no file path and no
+# home directory appears here (D3) — the private-key NAME already lives
+# in personas/<name>.yaml authority.token and is not restated.
+#
+# Read by scripts/ops/execution.py and by nothing else: no adapter,
+# workflow or shell script parses this file a second time (D2).
+#
+#   trigger       repo-event | scheduled | manual
+#   events        the GitHub event names, for repo-event only
+#   placement     an adapter directory name under scripts/placement/
+#                 (D17 — a name with no adapter fails --check)
+#   max_cost_usd  the declared dollar budget for one run (D8; turn and
+#                 time caps stay in personas/<name>.yaml limits).
+#                 DECLARED, NOT ENFORCED: --check requires a positive
+#                 number and the adapter prints it, so the number is
+#                 stated once and visible in the run log — but nothing
+#                 meters spend against it yet, and a run that passes it
+#                 is not stopped. Read it as the budget this duty is
+#                 expected to fit in, not as a ceiling the machine holds.
+
+personas:
+  argus:
+    trigger: repo-event
+    events: [pull_request]
+    placement: gh-actions
+    max_cost_usd: 2.00
+  atlas:
+    trigger: repo-event
+    events: [pull_request]
+    placement: gh-actions
+    max_cost_usd: 2.00
+  athena:    { trigger: manual, placement: vm-local, max_cost_usd: 5.00 }
+  daedalus:  { trigger: manual, placement: vm-local, max_cost_usd: 5.00 }
+  odyssey:   { trigger: manual, placement: vm-local, max_cost_usd: 10.00 }
