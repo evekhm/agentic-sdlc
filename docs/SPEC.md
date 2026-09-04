@@ -601,9 +601,13 @@ each. Which persona runs an arm is not written in the script: it is
 selected by a rule over config facts, the first persona in that file's
 own declaration order pinned to that harness whose App in
 `scripts/auth/app_manifests.yaml` grants every permission the
-observables need and which owns a stage some rung of
-`personas/lifecycle.json` labels, with that rung's label as the arm's
-relabel target. A harness for which the rule yields no persona fails
+observables need, which owns a stage some rung of
+`personas/lifecycle.json` labels, and whose own contract in `personas/`
+declares a branch surface to push — with that rung's label as the arm's
+relabel target and that surface's glob, not a name of the gate's
+invention, as the branch it is asked to push, so a persona reading its
+contract and refusing is never recorded as a persona that failed to
+load. A harness for which the rule yields no persona fails
 the run, naming the harness and what is missing, rather than being
 skipped or covered twice — an arm silently dropped is a gate reporting
 coverage it does not have. Trailing arguments override an arm with

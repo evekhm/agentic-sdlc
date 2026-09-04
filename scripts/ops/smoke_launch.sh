@@ -169,14 +169,37 @@ identity_of() { # <persona> -> the App login it acts as, or empty
     sed -n 's/^[[:space:]]*identity:[[:space:]]*"\(.*\)".*/\1/p' "$file" | head -1
 }
 
-# Why this persona cannot be an arm, or empty if it can. Both halves are
+# The branch surface the persona's OWN contract declares, as
+# `authority.github_write: "branch:<glob>"`. The push observable used a
+# name of this script's invention, `smoke/<issue>-<persona>`, which is
+# outside every persona's glob — so an arm that reads its contract and
+# refuses is doing exactly what the contract says, and the gate recorded
+# that correct refusal as "the persona did not load". The branch is
+# derived from the glob instead: its `*` replaced by `smoke-<issue>`.
+# A persona that declares no write surface cannot push at all and is
+# therefore not an arm — same rule, one more input.
+branch_glob_of() { # <persona> -> the glob after `branch:`, or empty
+    local file="$PERSONA_DIR/$1.yaml"
+    [ -f "$file" ] || return 0
+    sed -n 's/^[[:space:]]*github_write:[[:space:]]*"branch:\(.*\)".*/\1/p' "$file" | head -1
+}
+
+smoke_branch_of() { # <persona> -> the branch its own authority admits, or empty
+    local glob
+    glob="$(branch_glob_of "$1")"
+    [ -n "$glob" ] || return 0
+    printf '%s\n' "${glob%\*}smoke-$ISSUE"
+}
+
+# Why this persona cannot be an arm, or empty if it can. Each half is
 # named rather than collapsed into "does not qualify", because the
 # operator's fix differs: a permission is granted on github.com, a rung
-# is given by #11 or #25.
+# is given by #11 or #25, a write surface is declared in personas/.
 disqualifies() { # <persona> -> the reason, or empty
     [ "$(grant_of "$1" issues)"   = write ] || { echo "its App lacks issues: write";   return 0; }
     [ "$(grant_of "$1" contents)" = write ] || { echo "its App lacks contents: write"; return 0; }
     [ -n "$(relabel_of "$1")" ]             || { echo "it owns no stage any rung labels"; return 0; }
+    [ -n "$(branch_glob_of "$1")" ]         || { echo "its contract declares no branch: write surface"; return 0; }
     return 0
 }
 
@@ -192,7 +215,7 @@ arm_for() { # <harness> -> the selected persona; exits 1 naming the harness if n
     [ -n "$reasons" ] || reasons="
   (no persona is pinned to it at all)"
     echo "smoke_launch: no persona pinned to $harness can produce this arm's observables.$reasons" >&2
-    echo "smoke_launch: an arm needs issues: write to comment and contents: write to push, plus a stage some rung labels; $harness has no such persona, so the run fails rather than skipping it or covering another harness twice." >&2
+    echo "smoke_launch: an arm needs issues: write to comment, contents: write and a declared branch surface to push, plus a stage some rung labels; $harness has no such persona, so the run fails rather than skipping it or covering another harness twice." >&2
     exit 1
 }
 
@@ -247,7 +270,7 @@ n=0
 for arm in "${ARMS[@]}"; do
     n=$((n + 1))
     set -- $arm
-    note "run $n · $1 · $2 · relabel $(relabel_of "$2") · as $(identity_of "$2")"
+    note "run $n · $1 · $2 · relabel $(relabel_of "$2") · push $(smoke_branch_of "$2") · as $(identity_of "$2")"
 done
 note "housekeeping identity: $HOUSEKEEPER ($(identity_of "$HOUSEKEEPER"))"
 
@@ -336,17 +359,23 @@ it **THE LINE**, and deliver it three times:
 2. Post THE LINE as a comment on this issue, using
    \`gh issue comment $ISSUE --repo $GITHUB_REPO --body-file <a file>\`.
    Your \`GH_TOKEN\` is already your own App's; plain \`gh\` posts as you.
-3. Push THE LINE as a commit on the branch \`smoke/$ISSUE-YOU\`, WITHOUT
-   changing the branch this worktree is on — use a temporary worktree:
+3. Push THE LINE as a commit on **YOUR BRANCH**, which is the branch
+   YOUR OWN contract already admits and not a name this errand invented:
+   \`personas/YOU.yaml\` declares \`authority.github_write\` as
+   \`branch:<glob>\`, and YOUR BRANCH is that glob with \`smoke-$ISSUE\`
+   in place of its \`*\` — so for a glob \`YOU/*\` it is
+   \`YOU/smoke-$ISSUE\`. Push nothing outside your glob; if the errand
+   ever seems to ask you to, your contract wins and this step is what is
+   wrong. Do it WITHOUT changing the branch this worktree is on:
    \`\`\`
-   git worktree add -b smoke/$ISSUE-YOU /tmp/smoke-$ISSUE-YOU HEAD
+   git worktree add -b YOUR-BRANCH /tmp/smoke-$ISSUE-YOU HEAD
    # write /tmp/smoke-$ISSUE-YOU/SMOKE-$ISSUE.md containing THE LINE
    git -C /tmp/smoke-$ISSUE-YOU add SMOKE-$ISSUE.md
    git -C /tmp/smoke-$ISSUE-YOU \\
        -c user.name='YOUR LOGIN' \\
        -c user.email='YOUR LOGIN@users.noreply.github.com' \\
        commit -m 'smoke: YOU launched by work.sh (#$ISSUE)'
-   git -C /tmp/smoke-$ISSUE-YOU push $PUSH_URL smoke/$ISSUE-YOU
+   git -C /tmp/smoke-$ISSUE-YOU push $PUSH_URL YOUR-BRANCH
    \`\`\`
    Your git is already configured with a credential helper that mints
    your App token, so the push needs no token from you.
@@ -518,7 +547,7 @@ for arm in "${ARMS[@]}"; do
     n=$((n + 1))
     set -- $arm
     harness="$1"; persona="$2"
-    branch="smoke/$ISSUE-$persona"
+    branch="$(smoke_branch_of "$persona")"
 
     banner "run $n · $harness · $persona · #$ISSUE"
     check_token "$persona"
@@ -530,6 +559,18 @@ for arm in "${ARMS[@]}"; do
     # to end.
     gh_as "$HOUSEKEEPER" api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$branch" \
         >/dev/null 2>&1 || true
+    # The local side of the same reset. The errand has the arm push from a
+    # throwaway worktree at /tmp/smoke-<issue>-<persona> on a branch of
+    # that name; both survive the run, and on the NEXT run against the
+    # same scratch issue `git worktree add -b` fails on each of them. The
+    # arm then produces no commit and the push observable reports "the
+    # persona did not load" — a second run of a gate failing for no
+    # reason but the first run's litter.
+    git -C "$REPO_ROOT" worktree remove --force "/tmp/smoke-$ISSUE-$persona" \
+        >/dev/null 2>&1 || true
+    rm -rf "/tmp/smoke-$ISSUE-$persona"
+    git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
+    git -C "$REPO_ROOT" branch -D "$branch" >/dev/null 2>&1 || true
     before="$(now_utc)"
 
     rc=0; launch "$persona" || rc=$?
