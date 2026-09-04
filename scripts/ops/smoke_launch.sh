@@ -25,7 +25,9 @@
 #                  write` to comment, `contents: write` to push — and
 #                  which owns a stage that some rung of
 #                  personas/lifecycle.json labels, since `work.sh --as`
-#                  refuses a persona that does not own the current stage
+#                  refuses a persona that does not own the current stage,
+#                  and whose own contract declares a branch surface of
+#                  the form `branch:<prefix>*` to push on
 #   its relabel    the label of such a rung, from the same join
 #   housekeeping   the first persona in declaration order granting both
 #                  permissions, any harness: writing the issue body,
@@ -53,6 +55,20 @@
 #                          follow config and not this script.
 #   SMOKE_APP_MANIFESTS    read the App permissions from another file,
 #                          so a scratch copy proves the exit-1 branch.
+#   SMOKE_PERSONA_DIR      read the contracts (and lifecycle.json) from
+#                          another directory, so the two selection
+#                          clauses that read `personas/` — the rung and
+#                          the branch surface — are reachable in a test
+#                          instead of only through whatever the real
+#                          tree happens to contain.
+#
+# The issue must be a SCRATCH issue: this script's first writes overwrite
+# the body, delete `in-progress` (the only mutex this system has) and
+# rewrite the stage label, so pointing it at a real unit of work
+# corrupts tracker state before anything is launched. It refuses unless
+# the issue already carries the errand's own marker (a scratch issue this
+# script has run against before) or carries no lifecycle label at all (a
+# fresh one). See `scratch_refusal`.
 #
 # Trailing arguments name the arms explicitly: each persona binds to the
 # harness ITS OWN pin names and replaces that harness's derived arm. A
@@ -72,8 +88,8 @@ DRY_RUN="${DRY_RUN:-0}"
 
 DEPLOYMENTS="${SMOKE_DEPLOYMENTS:-$REPO_ROOT/config/deployments.yaml}"
 APP_MANIFESTS="${SMOKE_APP_MANIFESTS:-$REPO_ROOT/scripts/auth/app_manifests.yaml}"
-LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
-PERSONA_DIR="$REPO_ROOT/personas"
+PERSONA_DIR="${SMOKE_PERSONA_DIR:-$REPO_ROOT/personas}"
+LIFECYCLE_JSON="$PERSONA_DIR/lifecycle.json"
 
 ISSUE="${1:-}"
 case "$ISSUE" in
@@ -111,18 +127,60 @@ banner()  { echo; echo "=== $*"; }
 die()     { echo "smoke_launch: $*" >&2; exit 1; }
 
 # --- reading the config the arms are derived from -------------------------------
-# One parse of the pins, the same shape work.sh's harness_of uses, so
-# this script does not introduce a second reading of the file.
-pins() { # -> "<persona> <harness>", declaration order
+# ONE parse of the pins for this whole script, and it must agree with the
+# repository's other two readers — `scripts/sync_agents.py`'s
+# `yaml.safe_load` and `scripts/ops/work.sh`'s `harness_of` — on every
+# input either of them accepts. The first version of this function read
+# `harness:` only when it sat on the SAME line as the persona key, so a
+# pin written in the block form
+#
+#   daedalus:
+#     harness: antigravity
+#
+# — valid YAML, the form work.sh goes out of its way to support, and the
+# operator's routine edit (#44, D1) — vanished. The gate then ran ONE arm
+# and printed "every pinned harness launched": a green gate reporting
+# coverage of a harness it never touched, which is the exact silent
+# success D7 and D14 exist to forbid. Three properties are load-bearing
+# and each has a scenario in `scripts/ops/tests/smoke_launch_test.sh`:
+#
+#   both forms   inline `{ harness: x }` and the two-line block form.
+#   comments     a line whose first non-blank character is `#` is never
+#                a pin. Commenting a pin out while trying another used
+#                to invent a persona named `#` on a harness nobody
+#                pinned, and could reorder the arms.
+#   indentation  a persona key is a line at the FIRST indent seen inside
+#                `personas:`; anything deeper is that persona's own
+#                mapping, so a block-form persona carrying keys besides
+#                `harness:` does not turn one of them into a persona.
+#
+# A persona key whose harness cannot be read prints `-` rather than
+# disappearing, and the startup check below turns that into exit 1
+# naming the persona. Dropping a pin silently is the failure mode; the
+# whole point is that this reader cannot do it quietly.
+pins() { # -> "<persona> <harness>", declaration order; harness `-` if unreadable
     awk '
-        $1 == "personas:" { inside = 1; next }
-        /^[^[:space:]#]/  { inside = 0 }
+        /^[[:space:]]*(#|$)/ { next }
+        { ind = match($0, /[^[:space:]]/) - 1 }
+        $1 == "personas:" && ind == 0 { inside = 1; keyind = -1; pend = ""; next }
+        ind == 0 { if (pend != "") { print pend, "-"; pend = "" } inside = 0 }
         !inside { next }
-        {
-            n = $1; sub(/:$/, "", n)
-            for (k = 2; k <= NF; k++)
-                if ($k == "harness:") { v = $(k + 1); gsub(/[,}]/, "", v); print n, v }
+        keyind < 0 && $1 ~ /:$/ { keyind = ind }
+        ind > keyind && pend != "" && $1 == "harness:" {
+            v = $2; gsub(/[,}]/, "", v)
+            print pend, (v == "" ? "-" : v); pend = ""; next
         }
+        ind > keyind { next }
+        $1 ~ /:$/ {
+            if (pend != "") print pend, "-"
+            n = $1; sub(/:$/, "", n); pend = n
+            for (k = 2; k <= NF; k++)
+                if ($k == "harness:") {
+                    v = $(k + 1); gsub(/[,}]/, "", v)
+                    print n, (v == "" ? "-" : v); pend = ""; next
+                }
+        }
+        END { if (pend != "") print pend, "-" }
     ' "$DEPLOYMENTS"
 }
 
@@ -184,10 +242,35 @@ branch_glob_of() { # <persona> -> the glob after `branch:`, or empty
     sed -n 's/^[[:space:]]*github_write:[[:space:]]*"branch:\(.*\)".*/\1/p' "$file" | head -1
 }
 
+# The branch name is `${glob%\*}smoke-$ISSUE`, which is only inside the
+# glob when the glob is `<prefix>*` — one `*`, and it is the last
+# character. That shape is ALSO what the errand's own wording produces
+# ("that glob with `smoke-$ISSUE` in place of its `*`"), so constraining
+# the input here is what makes the two derivations one: the gate and the
+# arm cannot compute different branches, because a glob on which they
+# would differ is not an arm.
+#
+# The shapes that used to slip through, both of them a false negative
+# rather than an honest refusal: `branch:release` (no `*`) asks the arm
+# to push `releasesmoke-125`, outside the surface its contract declares,
+# so a persona that reads its contract correctly refuses and the gate
+# records that as `check_pushed_artifact`'s "the persona did not load, or
+# the token did not authenticate" — the exact misattribution this script
+# exists to remove; `branch:a*/b` yields a ref containing a literal `*`,
+# which git refuses, reported the same wrong way.
+branch_glob_ok() { # <glob> -> 0 if exactly one `*` and it is last
+    case "$1" in
+        '')       return 1 ;;
+        *'*'*'*') return 1 ;;
+        *'*')     return 0 ;;
+        *)        return 1 ;;
+    esac
+}
+
 smoke_branch_of() { # <persona> -> the branch its own authority admits, or empty
     local glob
     glob="$(branch_glob_of "$1")"
-    [ -n "$glob" ] || return 0
+    branch_glob_ok "$glob" || return 0
     printf '%s\n' "${glob%\*}smoke-$ISSUE"
 }
 
@@ -196,10 +279,14 @@ smoke_branch_of() { # <persona> -> the branch its own authority admits, or empty
 # operator's fix differs: a permission is granted on github.com, a rung
 # is given by #11 or #25, a write surface is declared in personas/.
 disqualifies() { # <persona> -> the reason, or empty
+    local glob
     [ "$(grant_of "$1" issues)"   = write ] || { echo "its App lacks issues: write";   return 0; }
     [ "$(grant_of "$1" contents)" = write ] || { echo "its App lacks contents: write"; return 0; }
     [ -n "$(relabel_of "$1")" ]             || { echo "it owns no stage any rung labels"; return 0; }
-    [ -n "$(branch_glob_of "$1")" ]         || { echo "its contract declares no branch: write surface"; return 0; }
+    glob="$(branch_glob_of "$1")"
+    [ -n "$glob" ] || { echo "its contract declares no branch: write surface"; return 0; }
+    branch_glob_ok "$glob" \
+        || { echo "its branch: write surface is \"$glob\", not <prefix>* — no smoke branch is inside it"; return 0; }
     return 0
 }
 
@@ -223,6 +310,16 @@ arm_for() { # <harness> -> the selected persona; exits 1 naming the harness if n
 command -v jq >/dev/null || die "jq is not on PATH; the arms cannot be derived without it"
 [ -r "$DEPLOYMENTS" ]   || die "$DEPLOYMENTS is not readable"
 [ -r "$APP_MANIFESTS" ] || die "$APP_MANIFESTS is not readable"
+
+# Every persona declared under `personas:` must yield a harness. A key
+# this reader cannot resolve is exit 1 naming it, never a shorter arm
+# list: a dropped pin is the one failure that would let this gate report
+# coverage of a harness it did not touch (#44, D7, D14).
+unreadable=""
+while read -r persona harness; do
+    [ "$harness" = "-" ] && unreadable="$unreadable $persona"
+done < <(pins)
+[ -z "$unreadable" ] || die "$DEPLOYMENTS declares$unreadable under personas: with no harness this script can read; the arms cannot be derived from a pin list it drops"
 
 HARNESSES=()
 while read -r harness; do HARNESSES+=("$harness"); done < <(pins | awk '!seen[$2]++ { print $2 }')
@@ -327,6 +424,50 @@ for prog in "$MINT" "$REPO_ROOT/scripts/ops/work.sh"; do
 done
 [ "$prereq_missing" -eq 0 ] || exit 1
 
+# --- the scratch-issue guard ----------------------------------------------------
+# Argv accepts any run of digits, and this script's first three writes are
+# destructive and land before a single arm is launched: it overwrites the
+# issue BODY with the errand, deletes `in-progress` — the only mutex this
+# system has (AGENTS.md, "Working the tracker") — and strips every
+# `status:*` label to put its own on. `scripts/ops/smoke_launch.sh 44`
+# instead of `125` therefore replaces a real issue's body with "SMOKE TEST
+# — not a unit of work", releases the mutex out from under whoever holds
+# it, rewrites the stage, and launches two live personas against it. That
+# is tracker-state corruption plus a released mutex, which is how two
+# sessions end up on one issue.
+#
+# So the number has to earn the writes. Exactly two kinds of issue do:
+# one this script has already run against, which carries the errand's own
+# marker in its body, and a fresh issue carrying no labels at all. A
+# labelled issue is somebody's unit of work; refusing it costs an
+# operator one `gh issue create` and costs nothing else.
+SCRATCH_MARKER='SMOKE TEST — not a unit of work.'
+
+scratch_refusal() { # <labels, one per line> <body> -> the reason, or empty
+    local labels="$1" body="$2" found
+    case "$body" in
+        *"$SCRATCH_MARKER"*) return 0 ;;
+    esac
+    found="$(printf '%s\n' "$labels" | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//')"
+    [ -n "$found" ] || return 0
+    echo "it carries labels ($found) and its body has no \"$SCRATCH_MARKER\" marker, so it is a unit of work, not a fixture"
+}
+
+require_scratch_issue() {
+    local json labels body why
+    json="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/issues/$ISSUE")" \
+        || die "cannot read #$ISSUE to check that it is a scratch issue; nothing was written"
+    labels="$(printf '%s' "$json" | jq -r '.labels[].name')"
+    body="$(printf '%s' "$json" | jq -r '.body // ""')"
+    why="$(scratch_refusal "$labels" "$body")"
+    [ -z "$why" ] || die "#$ISSUE is not a scratch issue: $why. Open a fresh unlabelled issue for the smoke run, or pass one this script has run against before. Nothing was written."
+}
+
+# No bypass variable: a guard with an off switch is the guard the hurried
+# operator turns off, and the two accepted shapes already cover every
+# legitimate use.
+require_scratch_issue
+
 # --- the instruction every arm will read ----------------------------------------
 # Written into the issue body rather than into the prompt: work.sh has
 # exactly one prompt literal for both harnesses (#43 D6), and a smoke
@@ -338,8 +479,13 @@ done
 # every arm now produces all three observables — which arm pushed and
 # which arm only commented used to be a property of the order they ran
 # in, and that is not a config fact.
+#
+# The first line carries $SCRATCH_MARKER because the guard above reads it
+# back: the marker is what makes a second run against the same scratch
+# issue legal, and writing it from the same variable is what keeps the
+# guard and the errand from drifting into disagreement.
 body="$(cat <<BODY
-**SMOKE TEST — not a unit of work.** Created by
+**$SCRATCH_MARKER** Created by
 \`scripts/ops/smoke_launch.sh\` for #43 (spec D19) and #44 (spec D7). Do
 the errand below and nothing else: do not open a pull request, do not
 modify a tracked file on this branch, do not touch any other issue.
@@ -386,7 +532,9 @@ Claiming this issue is not part of the errand. Neither is dispatching:
 you are ALREADY the session \`scripts/ops/work.sh\` launched for this
 issue, so running \`scripts/ops/work.sh\` (or any other launcher) here
 launches a copy of yourself on the issue you are already working, and
-that copy does the same. Do not run it.
+that copy does the same. Do not run it. (This paragraph is prose, and
+prose is not a restraint: the launcher-side refusal that would actually
+stop it is tracked on #134.)
 BODY
 )"
 
@@ -461,10 +609,14 @@ clear_claim() {
     return 0
 }
 
+# The labels to strip come from the same join `relabel_of` reads, not
+# from a list beside it: a hand-written enumeration in a script whose
+# whole subject is deriving these facts drifts the moment a rung is added
+# or renamed, and the one it carried already named a `status:done` that
+# `personas/lifecycle.json` does not have.
 relabel() { # <status-label>
     local want="$1" have
-    for have in status:planning status:spec status:build status:implementing \
-                status:in-review status:done; do
+    for have in $(jq -r '.stages[].label' "$LIFECYCLE_JSON"); do
         [ "$have" = "$want" ] && continue
         gh_as "$HOUSEKEEPER" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
             --remove-label "$have" >/dev/null 2>&1 || true
@@ -511,6 +663,7 @@ check_comment() { # <persona> <iso-8601-before-the-launch>
 # Shape-checked, not just non-empty: `gh api` prints the error body on
 # stdout for a 404, so `|| true` alone would hand a JSON blob to the
 # assertion and call a missing branch a pass.
+declare -A VERIFIED_REF=()
 check_pushed_artifact() { # <persona> <ref>
     local persona="$1" ref="$2" pushed want author size
     pushed="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" \
@@ -524,6 +677,7 @@ check_pushed_artifact() { # <persona> <ref>
         return
     fi
     ok "$ref exists on origin ($pushed)"
+    VERIFIED_REF["$ref"]="$pushed"
     want="$(identity_of "$persona")"
     author="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/commits/$pushed" \
                   --jq '.commit.author.name' 2>/dev/null || echo '')"
@@ -540,8 +694,52 @@ check_pushed_artifact() { # <persona> <ref>
     esac
 }
 
+# Deriving the branch from the persona's own contract moved the fixture
+# refs out of a dedicated `smoke/*` namespace and into each persona's
+# real one, next to its work branches. Collecting only the CURRENT arms'
+# refs therefore leaves `<other-persona>/smoke-<issue>` on origin
+# indefinitely after a pin flip or a trailing-argument override, and
+# `worktrees.sh --prune-remote` never takes them because it collects
+# merged branches and these are never merged. So the reset is over every
+# pinned persona's smoke ref for THIS issue, not over this run's arms.
+clear_smoke_refs() {
+    local persona branch
+    while read -r persona _; do
+        branch="$(smoke_branch_of "$persona")"
+        [ -n "$branch" ] || continue
+        gh_as "$HOUSEKEEPER" api -X DELETE \
+            "/repos/$GITHUB_REPO/git/refs/heads/$branch" >/dev/null 2>&1 || true
+    done < <(pins)
+}
+
+# The evidence this gate produces has to be evidence at the moment it is
+# read, not only at the moment it was taken. On the first live run,
+# sessions this script did not launch force-pushed over BOTH arms'
+# branches minutes after the observables were verified and the run had
+# exited 0: the SHAs in the transcript were no longer the SHAs on origin,
+# so the central proof was unreproducible and nothing said so. Re-reading
+# each verified ref at the end costs one API call per arm and converts a
+# silent divergence into a named failure. It does not FIX re-entrant
+# dispatch — that is a launcher-side refusal in `scripts/ops/work.sh`,
+# out of this file's set and tracked on #134 — it stops this gate from
+# reporting a green it can no longer stand behind.
+recheck_verified_refs() {
+    local ref now
+    [ "${#VERIFIED_REF[@]}" -gt 0 ] || { note "no push observable held, so there is none to re-read"; return 0; }
+    for ref in "${!VERIFIED_REF[@]}"; do
+        now="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" \
+                   --jq '.object.sha' 2>/dev/null || true)"
+        if [ "$now" = "${VERIFIED_REF[$ref]}" ]; then
+            ok "$ref still points at the commit this run verified (${VERIFIED_REF[$ref]})"
+        else
+            bad "$ref moved after this run verified it: ${VERIFIED_REF[$ref]} -> ${now:-deleted}. A session this gate did not launch wrote over the observable, so the evidence above is not reproducible."
+        fi
+    done
+}
+
 # --- the runs -------------------------------------------------------------------
 rm -rf "$SMOKE_DIR"
+clear_smoke_refs
 n=0
 for arm in "${ARMS[@]}"; do
     n=$((n + 1))
@@ -569,7 +767,15 @@ for arm in "${ARMS[@]}"; do
     git -C "$REPO_ROOT" worktree remove --force "/tmp/smoke-$ISSUE-$persona" \
         >/dev/null 2>&1 || true
     rm -rf "/tmp/smoke-$ISSUE-$persona"
-    git -C "$REPO_ROOT" worktree prune >/dev/null 2>&1 || true
+    # NO `git worktree prune` here. It is repo-wide and silent: it runs
+    # against the common git dir, so a peer session's unlocked worktree
+    # whose directory is momentarily absent loses its registration
+    # during a smoke run and the peer's next git command there fails
+    # with "not a git repository", with `2>&1 || true` swallowing any
+    # word of it. AGENTS.md puts pruning behind `scripts/ops/worktrees.sh`
+    # and the rule "never remove a worktree you did not create". It was
+    # near-redundant anyway: `worktree remove --force` above already
+    # deregisters this run's own worktree.
     git -C "$REPO_ROOT" branch -D "$branch" >/dev/null 2>&1 || true
     before="$(now_utc)"
 
@@ -582,6 +788,9 @@ for arm in "${ARMS[@]}"; do
 done
 
 # --- verdict -------------------------------------------------------------------
+banner "the observables are still the observables"
+recheck_verified_refs
+
 banner "verdict"
 note "$blocked observable(s) tolerated and are not failures"
 if [ "$failures" -gt 0 ]; then
