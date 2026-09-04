@@ -982,8 +982,12 @@ if [ -n "$WORK_COST_FILE" ]; then
               if (m ~ /gemini/) return "gemini"
               return ""
             }
-            function model_version(m, a) {
-              if (match(m, /gemini-([0-9]{1,2})\.([0-9]{1,2})/, a)) return a[1] "." a[2]
+            function model_version(m,   idx, s) {
+              idx = match(m, /gemini-[0-9]+\.[0-9]+/)
+              if (idx) {
+                s = substr(m, idx + 7, RLENGTH - 7)
+                return s
+              }
               return ""
             }
             function rate_tier(m,   f, v) {
@@ -993,12 +997,12 @@ if [ -n "$WORK_COST_FILE" ]; then
               if (m ~ /flash/) {
                 if (v == "1.5" || v == "2.0" || v == "2.5" ||
                     v == "3.5" || v == "3.6" || v == "3.7" || v == "3.8")
-                  return "0.15 0.0375 0.60"
+                  return "0.15 0.1875 0.30 0.0375 0.60"
                 return ""
               }
               if (m ~ /pro/) {
                 if (v == "1.5" || v == "2.5" || v == "3.1")
-                  return "1.25 0.3125 5.00"
+                  return "1.25 1.5625 2.50 0.3125 5.00"
                 return ""
               }
               return ""
@@ -1007,7 +1011,7 @@ if [ -n "$WORK_COST_FILE" ]; then
               r = rate_tier(m)
               if (r == "") exit 1
               split(r, p, " ")
-              printf "%.6f\n", (inp*p[1] + cr*p[2] + out*p[3]) / 1e6
+              printf "%.6f\n", (inp*p[1] + cr*p[4] + out*p[5]) / 1e6
             }')" || cost=""
         fi
         if [ -n "$cost" ]; then
