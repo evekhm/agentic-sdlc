@@ -84,7 +84,23 @@ esac
 shift
 OVERRIDES=("$@")
 
-SMOKE_DIR="$REPO_ROOT/runs/smoke-$ISSUE"
+# `runs/` is ONE directory per machine — the primary checkout's — and
+# not whatever worktree this run started from (AGENTS.md, "Outputs go in
+# timestamped run folders"). It is gitignored, so a run folder written
+# inside a worktree never travels with the branch and dies with the
+# worktree; every session in every harness resolves the root this way
+# before writing. The launched persona therefore puts its artifact
+# there, and this observable has to read the same place: looking under
+# $REPO_ROOT instead reports "left no artifact" for a file that exists,
+# which is a false negative for every session working the way this
+# repository tells sessions to work.
+git_common_dir="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || echo '')"
+case "$git_common_dir" in
+    '')  RUNS_ROOT="$REPO_ROOT/runs" ;;
+    /*)  RUNS_ROOT="$(cd "$git_common_dir/.." && pwd)/runs" ;;
+    *)   RUNS_ROOT="$(cd "$REPO_ROOT/$git_common_dir/.." && pwd)/runs" ;;
+esac
+SMOKE_DIR="$RUNS_ROOT/smoke-$ISSUE"
 
 failures=0
 blocked=0
@@ -313,7 +329,10 @@ same for every persona; nothing in it is keyed to a particular one.
 Write one line naming your persona, your harness and the UTC time. Call
 it **THE LINE**, and deliver it three times:
 
-1. Create \`runs/smoke-$ISSUE/YOU.md\` containing THE LINE.
+1. Create \`smoke-$ISSUE/YOU.md\` under the shared run root containing
+   THE LINE. The run root is the PRIMARY checkout's \`runs/\`, never this
+   worktree's — AGENTS.md, *Outputs go in timestamped run folders*:
+   \`RUNS_ROOT="\$(cd "\$(git rev-parse --git-common-dir)/.." && pwd)/runs"\`.
 2. Post THE LINE as a comment on this issue, using
    \`gh issue comment $ISSUE --repo $GITHUB_REPO --body-file <a file>\`.
    Your \`GH_TOKEN\` is already your own App's; plain \`gh\` posts as you.
@@ -334,7 +353,11 @@ it **THE LINE**, and deliver it three times:
 
 Then print \`WORK-RESULT: ok #$ISSUE smoke launch completed\`.
 
-Claiming this issue is not part of the errand.
+Claiming this issue is not part of the errand. Neither is dispatching:
+you are ALREADY the session \`scripts/ops/work.sh\` launched for this
+issue, so running \`scripts/ops/work.sh\` (or any other launcher) here
+launches a copy of yourself on the issue you are already working, and
+that copy does the same. Do not run it.
 BODY
 )"
 
@@ -357,14 +380,56 @@ check_token() { # <persona>
     fi
 }
 
-# `gh api` prints the error body on stdout, so every read below is
-# shape-checked rather than trusted: a 404's JSON is not a count.
-count_comments() {
-    local n
-    n="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
-             --jq 'length' 2>/dev/null || true)"
-    case "$n" in ''|*[!0-9]*) n=-1 ;; esac
-    printf '%s\n' "$n"
+# The clock the comment observable is measured against. A scratch issue
+# is reused run after run, so "is there a comment by this persona" is
+# always true after the first run and proves nothing; only "is there one
+# created after this arm was launched" does.
+#
+# It is a TIMESTAMP and not a count on purpose. Counting was the obvious
+# reading and it is wrong: `/issues/N/comments` paginates at 30 by
+# default, so once a scratch issue passes thirty comments the count
+# freezes at 30 and `.[-1]` names the thirtieth-oldest author. Both
+# assertions then fail on arms that did comment — a green run reported
+# red, naming the wrong persona. `since` plus an explicit `per_page` and
+# `--paginate` reads the whole thread; `select(.created_at > ...)` is
+# because `since` filters on `updated_at`, and an edited old comment is
+# not a new one.
+now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# `gh api` prints the error body on stdout, so this is a list of logins
+# or nothing: a 404's JSON has no `.[].user.login` and yields empty.
+comment_authors() { # <iso-8601> -> the login behind every comment created after it
+    gh_as "$HOUSEKEEPER" api --paginate \
+        "/repos/$GITHUB_REPO/issues/$ISSUE/comments?per_page=100&since=$1" \
+        --jq ".[] | select(.created_at > \"$1\") | .user.login" 2>/dev/null || true
+}
+
+# A scratch issue is a fixture, not a unit of work, and the errand tells
+# every arm that claiming is not part of it. An arm that claims anyway —
+# or whose session dies between the claim and the handoff — leaves
+# `in-progress` behind, and work.sh's mutex then refuses the NEXT arm on
+# a claim this very run produced (refusal (e), exit 2). Clearing it per
+# arm is what keeps one arm's accident from being reported as another
+# harness's failure; it removes the label only, never a comment, so the
+# thread still records what happened.
+# It VERIFIES rather than fires and hopes: `|| true` on the edit would
+# hide both a failed removal and GitHub serving the label list from
+# before it, and either one surfaces two steps later as work.sh refusing
+# the arm on a mutex the operator can see is gone — a failure report
+# naming the wrong cause, which is the one thing this gate must not do.
+clear_claim() {
+    local attempt
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        gh_as "$HOUSEKEEPER" api \
+            -X DELETE "/repos/$GITHUB_REPO/issues/$ISSUE/labels/in-progress" \
+            >/dev/null 2>&1 || true
+        gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/issues/$ISSUE" \
+            --jq '[.labels[].name] | index("in-progress") // "gone"' 2>/dev/null \
+            | grep -qx gone && return 0
+        sleep 2
+    done
+    note "in-progress is still on #$ISSUE after 10 attempts; work.sh's mutex will refuse this arm"
+    return 0
 }
 
 relabel() { # <status-label>
@@ -392,24 +457,22 @@ launch() { # <persona>; -> exit code of work.sh
 check_local_artifact() { # <persona>
     local persona="$1"
     if [ -s "$SMOKE_DIR/$persona.md" ]; then
-        ok "$persona wrote runs/smoke-$ISSUE/$persona.md: $(head -1 "$SMOKE_DIR/$persona.md")"
+        ok "$persona wrote $SMOKE_DIR/$persona.md: $(head -1 "$SMOKE_DIR/$persona.md")"
     else
-        bad "$persona left no artifact at runs/smoke-$ISSUE/$persona.md"
+        bad "$persona left no artifact at $SMOKE_DIR/$persona.md"
     fi
 }
 
 # Observable 2. Authorship, not content: the comment proves the minted
 # token reached the session as its own identity.
-check_comment() { # <persona> <comment-count-before>
-    local persona="$1" before="$2" want author after
+check_comment() { # <persona> <iso-8601-before-the-launch>
+    local persona="$1" since="$2" want authors
     want="$(identity_of "$persona")"
-    author="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
-                  --jq '.[-1].user.login' 2>/dev/null || echo '')"
-    after="$(count_comments)"
-    if [ "$after" -gt "$before" ] && [ "$author" = "$want" ]; then
-        ok "the newest comment on #$ISSUE is authored by $want"
+    authors="$(comment_authors "$since")"
+    if printf '%s\n' "$authors" | grep -qxF "$want"; then
+        ok "#$ISSUE carries a comment by $want posted after $since"
     else
-        bad "expected a new comment by $want; newest author is '${author:-none}'"
+        bad "no comment by $want on #$ISSUE after $since (authors since: $(printf '%s' "${authors:-none}" | tr '\n' ' '))"
     fi
 }
 
@@ -459,6 +522,7 @@ for arm in "${ARMS[@]}"; do
 
     banner "run $n · $harness · $persona · #$ISSUE"
     check_token "$persona"
+    clear_claim
     relabel "$(relabel_of "$persona")"
     # Cleared through the API, not through the launcher's own git: this
     # script must never push with whatever credentials the operator's
@@ -466,7 +530,7 @@ for arm in "${ARMS[@]}"; do
     # to end.
     gh_as "$HOUSEKEEPER" api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$branch" \
         >/dev/null 2>&1 || true
-    before="$(count_comments)"
+    before="$(now_utc)"
 
     rc=0; launch "$persona" || rc=$?
     [ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
