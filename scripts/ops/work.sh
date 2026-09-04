@@ -73,8 +73,22 @@ set -euo pipefail
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
 HEADLESS="${HEADLESS:-0}"
+# Unattended-run controls (#108). All three are opt-in and claude-code
+# headless only: unset, this script behaves exactly as it did before.
+#   WORK_MAX_USD          hard per-run spend ceiling, enforced by the harness
+#   WORK_PERMISSION_MODE  passed to --permission-mode; without it an
+#                         unattended persona is denied Edit/git/gh
+#   WORK_COST_FILE        path the observed cost (line 1) and the model the run
+#                         actually billed to (line 2) are written to,
+#                         so a caller can meter without scanning transcripts
+#   WORK_MODEL            re-tier ONE dispatch without a compiler run
+WORK_MAX_USD="${WORK_MAX_USD:-}"
+WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
+WORK_COST_FILE="${WORK_COST_FILE:-}"
+WORK_MODEL="${WORK_MODEL:-}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GITHUB_LIB="$REPO_ROOT/scripts/ops/lib/github.sh"
 LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
 DEPLOYMENTS="$REPO_ROOT/config/deployments.yaml"
 PERSONA_DIR="$REPO_ROOT/personas"
@@ -95,6 +109,27 @@ Modes are environment variables, never flags:
   HEADLESS=1  run the session non-interactively and map its
               WORK-RESULT line to an exit code. Antigravity personas
               are always headless; there is no interactive row.
+
+Unattended-run controls, claude-code headless only, all opt-in (#108):
+  WORK_MAX_USD=<amount>       hard per-run spend ceiling held by the
+                              harness, not merely declared in config.
+  WORK_PERMISSION_MODE=<mode> passed to --permission-mode. Without it
+                              the default mode denies Edit, git and gh,
+                              and the persona spends its preamble to
+                              report that it could not act.
+  WORK_COST_FILE=<path>       write this run's observed cost there, so a
+                              caller can meter a dispatch without
+                              scanning transcripts — which is wrong for
+                              worktrees anyway, since each working
+                              directory gets its own transcript tree.
+                              Line 1 is the cost; line 2 names the model
+                              the run actually billed to.
+  WORK_MODEL=<model>          run this one dispatch on another model. It
+                              must be this and not ANTHROPIC_MODEL: the
+                              environment variable does NOT override the
+                              model: line the compiler writes into the
+                              persona's agent file, so a run set that way
+                              bills to the compiled pin regardless.
 USAGE
 }
 
@@ -130,82 +165,87 @@ esac
 for cmd in gh jq; do
     command -v "$cmd" >/dev/null || die "$cmd is not installed"
 done
+[ -r "$GITHUB_LIB" ] || die "cannot read $GITHUB_LIB"
+# The pull-request resolver and has_label live here rather than in this
+# file so that D14's "the same way work.sh resolves it" is ONE
+# implementation: scripts/ops/post.sh gates its writes on the issues a
+# pull request closes, and two resolvers is two answers (#25, T7).
+# shellcheck source=lib/github.sh
+. "$GITHUB_LIB"
 [ -r "$LIFECYCLE_JSON" ] || die "cannot read $LIFECYCLE_JSON"
 jq -e '.stages | type == "array" and length > 0' "$LIFECYCLE_JSON" >/dev/null 2>&1 \
     || die "$LIFECYCLE_JSON has no usable 'stages' array"
 [ -r "$DEPLOYMENTS" ] || die "cannot read $DEPLOYMENTS"
 [ -d "$PERSONA_DIR" ] || die "cannot read $PERSONA_DIR"
 
-# The ONE read path to GitHub. Every call goes through it, so a test can
-# put a stub `gh` first on PATH and the whole script becomes hermetic.
-gh_json() { # <api-path>
-    gh api "$1"
-}
+# gh_json — including #51's `--paginate` mode — now lives in
+# scripts/ops/lib/github.sh with the resolver that calls it, sourced
+# above (#25, T7). It is the same function; a list read that forgets
+# `--paginate` reads the oldest thirty items here exactly as it did
+# when the definition sat in this file.
 
 # --- Resolve the number (D9) ---------------------------------------------------
-# A pull request is not the unit of work; the issue is. A closing keyword
-# and `#<n>` in the body first, then the <actor>/<n>-<slug> branch name,
-# then give up:
-# guessing which issue a PR belongs to is how two sessions end up on one
-# issue.
-view=""
-if ! view="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER")"; then
-    die "cannot read #$NUMBER from $GITHUB_REPO"
-fi
+# gh_json, resolve_issue and has_label come from scripts/ops/lib/github.sh,
+# sourced in the preflight above (#25, T7). A pull request is not the unit
+# of work; the issue is, and the resolver is shared with
+# scripts/ops/post.sh so the dispatcher and the circuit breaker cannot
+# disagree about which issue a pull request belongs to. It sets ISSUE,
+# RESOLVED_VIA and ISSUE_JSON — and, when the number given was a pull
+# request, IS_PR and PR_JSON — reporting through this file's own die().
+resolve_issue "$NUMBER"
+view="$ISSUE_JSON"
 
-ISSUE="$NUMBER"
-RESOLVED_VIA=""
-if [ "$(jq -r 'if .pull_request then "pr" else "issue" end' <<<"$view")" = "pr" ]; then
-    pr_body="$(jq -r '.body // ""' <<<"$view")"
-    # Every closing keyword GitHub honours, case-insensitively, same-repo
-    # `#n` only: `Fixes #205` closes #205 on merge whether or not this
-    # script reads the word, and a dispatcher that only knows `closes`
-    # sends the session to the PR instead of the unit of work. Cross-repo
-    # `owner/repo#9` and URL forms deliberately do not match — they close
-    # an issue that is not in this tracker.
-    closes="$(grep -Eoi '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' \
-        <<<"$pr_body" | grep -Eo '[0-9]+$' | sort -un || true)"
-    closes_count=0
-    [ -z "$closes" ] || closes_count="$(grep -c . <<<"$closes")"
-    if [ "$closes_count" -gt 1 ]; then
-        # Two closing references is two units of work. D5(d)'s never-guess
-        # rule applies: report them and stop rather than take the first.
-        die "PR #$NUMBER closes more than one issue: $(sed 's/^/#/' <<<"$closes" \
-            | tr '\n' ' ')— dispatch one of them by its own number"
-    fi
-    if [ "$closes_count" -eq 1 ]; then
-        ISSUE="$closes"
-        RESOLVED_VIA="Closes #$ISSUE in the body"
-    else
-        pr_view=""
-        if ! pr_view="$(gh_json "repos/$GITHUB_REPO/pulls/$NUMBER")"; then
-            die "cannot resolve PR #$NUMBER to an issue"
-        fi
-        head_ref="$(jq -r '.head.ref // ""' <<<"$pr_view")"
-        if [[ "$head_ref" =~ ^[a-z][a-z-]*/([0-9]+)- ]]; then
-            ISSUE="${BASH_REMATCH[1]}"
-            RESOLVED_VIA="the branch name $head_ref"
-        else
-            die "cannot resolve PR #$NUMBER to an issue"
-        fi
-    fi
-    if ! view="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE")"; then
-        die "PR #$NUMBER resolves to #$ISSUE, which cannot be read"
-    fi
+# The pull request's own labels, kept because `view` is now the ISSUE's.
+# The pull request is not the unit of work, but it IS a place an operator
+# puts a label, and a `hold` written there must stop the dispatch rather
+# than be thrown away with the rest of that response (#50, Atlas AT-1).
+# PR_JSON is that response, held by the resolver for exactly this.
+PR_LABELS=""
+if [ "$IS_PR" = "1" ]; then
+    PR_LABELS="$(jq -r '.labels[].name' <<<"$PR_JSON")"
 fi
 
 state="$(jq -r '.state' <<<"$view")"
 title="$(jq -r '.title // ""' <<<"$view")"
-labels="$(jq -r '.labels[].name' <<<"$view")"
+issue_labels="$(jq -r '.labels[].name' <<<"$view")"
 
-has_label() { grep -Fxq "$1" <<<"$labels"; }
+# The refusals below read the UNION of the resolved issue's labels and,
+# when a pull-request number was given, the pull request's own — a
+# circuit breaker on either side stops the dispatch (#50, Atlas AT-1).
+# For a plain issue number PR_LABELS is empty and this is the issue's
+# set unchanged. The STAGE is deliberately not part of the union: it is
+# derived from `issue_labels` below, because the state machine belongs
+# to the unit of work and a status:* label on a pull request must not
+# decide which rung the issue is on (D9).
+labels="$(printf '%s\n%s\n' "$issue_labels" "$PR_LABELS" | grep -v '^$' | sort -u || true)"
+
+# has_label is the library's, and is still a closure over the `labels`
+# set above — the union — exactly as this file has always spelled it.
+# Which side carries a label, so a refusal sends the operator to the
+# number they have to clear rather than to the other one. BOTH sides are
+# named when both carry it: reporting only the issue there hands the
+# operator half the work, and they clear it, re-run, and are refused a
+# second time by the other number (PR #95, Argus R1-2).
+label_side() { # <label> -> "#<issue>" | "#<pr> (the pull request)" | "#<issue> (and #<pr>, the pull request)"
+    local on_issue=0 on_pr=0
+    if grep -Fxq "$1" <<<"$issue_labels"; then on_issue=1; fi
+    if grep -Fxq "$1" <<<"$PR_LABELS"; then on_pr=1; fi
+    if [ "$on_issue" = 1 ] && [ "$on_pr" = 1 ]; then
+        printf '#%s (and #%s, the pull request)' "$ISSUE" "$NUMBER"
+    elif [ "$on_issue" = 1 ]; then
+        printf '#%s' "$ISSUE"
+    else
+        printf '#%s (the pull request)' "$NUMBER"
+    fi
+}
+
 
 # --- Refusals, in D5's order, before anything else -----------------------------
 # A refusal is a report, never a partial claim.
 
 # (a) hold is absolute — not even a look further down the list.
 if has_label "hold"; then
-    refuse "#$ISSUE carries hold"
+    refuse "$(label_side hold) carries hold"
 fi
 
 # (b) humans have taken over.
@@ -213,19 +253,19 @@ if [ "$state" != "open" ]; then
     refuse "#$ISSUE is closed"
 fi
 if has_label "status:review-stuck"; then
-    refuse "#$ISSUE carries status:review-stuck"
+    refuse "$(label_side status:review-stuck) carries status:review-stuck"
 fi
 
 # (c) blocked is a report-and-stop, not a wait.
 if has_label "blocked"; then
-    refuse "#$ISSUE carries blocked"
+    refuse "$(label_side blocked) carries blocked"
 fi
 
 # (d) more than one status:* is a corrupted state machine. Report the
 #     labels and stop: never guess which is true, and never apply `hold`
 #     either — the stage advancer is the single writer of the circuit
 #     breaker, and two writers is two circuit breakers (#4, D1).
-status_labels="$(grep '^status:' <<<"$labels" || true)"
+status_labels="$(grep '^status:' <<<"$issue_labels" || true)"
 status_count=0
 [ -z "$status_labels" ] || status_count="$(grep -c . <<<"$status_labels")"
 if [ "$status_count" -gt 1 ]; then
@@ -238,7 +278,7 @@ if [ "$status_count" -eq 1 ]; then
         '.stages[] | select(.label == $l) | .stage' "$LIFECYCLE_JSON")"
     [ -n "$stage" ] \
         || die "#$ISSUE carries '$status_labels', which is not a rung in $LIFECYCLE_JSON"
-elif has_label "intent:new"; then
+elif grep -Fxq "intent:new" <<<"$issue_labels"; then
     # Filed but not yet on the ladder: the first rung is where work starts.
     stage="$(jq -r '.stages[0].stage' "$LIFECYCLE_JSON")"
 else
@@ -315,24 +355,34 @@ persona_for_login() { # <login> -> persona name, or empty
 #     same goes for a thread this script cannot read — an unverifiable
 #     mutex is a held mutex. Removing `in-progress` is how a session
 #     hands the issue back (AGENTS.md, "Working the tracker", step 5).
+#     `in-progress` is read from the UNION like every other refusal
+#     above, so its four messages name the side that carries the label
+#     through `label_side` rather than asserting it of the issue — a
+#     mutex an operator set on the pull request was being reported
+#     against a clean issue number they could not clear it from (PR #95,
+#     Argus R1-1). The THREAD is always the issue's, on both sides: the
+#     claim AGENTS.md prescribes is posted on the unit of work, so a
+#     pull-request-side `in-progress` refuses with both numbers in view
+#     — the one carrying the label and the one whose thread was read.
 claim_holder=""
 if has_label "in-progress"; then
     resumers="$owners"
     [ -z "$AS" ] || resumers="$AS"
+    held_on="$(label_side in-progress)"
     comments=""
-    comments="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE/comments")" \
-        || refuse "in-progress on #$ISSUE is set and its thread cannot be read, so the holder cannot be established"
+    comments="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE/comments" --paginate)" \
+        || refuse "in-progress on $held_on is set and #$ISSUE's thread cannot be read, so the holder cannot be established"
     claim_re='\A[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
     claim_login="$(jq -r --arg re "$claim_re" \
         '[.[] | select((.body // "") | test($re; "i"))] | last | .user.login // ""' \
         <<<"$comments")"
     [ -n "$claim_login" ] \
-        || refuse "in-progress on #$ISSUE is set but no comment opens with a structured claim line (AGENTS.md, \"Working the tracker\", step 2): the mutex names no holder"
+        || refuse "in-progress on $held_on is set but no comment opens with a structured claim line (AGENTS.md, \"Working the tracker\", step 2) in #$ISSUE's thread: the mutex names no holder"
     claim_holder="$(persona_for_login "$claim_login")"
     [ -n "$claim_holder" ] \
-        || refuse "in-progress on #$ISSUE is held by $claim_login, a login no persona identity names"
+        || refuse "in-progress on $held_on is held by $claim_login, a login no persona identity names"
     grep -Fxq "$claim_holder" <<<"$resumers" \
-        || refuse "in-progress on #$ISSUE is held by $claim_holder"
+        || refuse "in-progress on $held_on is held by $claim_holder"
 fi
 
 # (f) --as must name an owner of the stage the labels say is current.
@@ -518,6 +568,27 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
             if [ "$headless" = "1" ]; then
                 LAUNCH_ARGV+=( claude -p "$PROMPT" --agent "$persona"
                                --output-format json )
+                # An unattended dispatch needs a spend ceiling the machine
+                # holds, not one a config file merely declares (#108). Both
+                # flags are print-mode only and both are opt-in: unset, the
+                # argv is byte-for-byte what it was before.
+                [ -z "$WORK_MAX_USD" ] \
+                    || LAUNCH_ARGV+=( --max-budget-usd "$WORK_MAX_USD" )
+                # Without this the default mode denies Edit, git and gh, and
+                # the persona burns its ~35k-token preamble to report that it
+                # could not act. The denials are counted in the envelope's
+                # permission_denials field; see WORK_COST_FILE below.
+                [ -z "$WORK_PERMISSION_MODE" ] \
+                    || LAUNCH_ARGV+=( --permission-mode "$WORK_PERMISSION_MODE" )
+                # Re-tier one dispatch without recompiling the persona. This
+                # MUST be the flag: ANTHROPIC_MODEL does not override the
+                # `model:` line the compiler writes into the agent file, and
+                # measuring the difference is not optional -- a run launched
+                # with the environment variable set to a cheaper model billed
+                # in full to the compiled pin while the caller's ledger
+                # recorded the model it had asked for.
+                [ -z "$WORK_MODEL" ] \
+                    || LAUNCH_ARGV+=( --model "$WORK_MODEL" )
             else
                 LAUNCH_ARGV+=( claude --agent "$persona" "$PROMPT" )
             fi
@@ -868,6 +939,38 @@ tok=""
 # Echoed first, always: nothing a session said is swallowed by the
 # mapping that follows.
 printf '%s\n' "$raw"
+
+# What the run cost, recorded BEFORE any exit path below: a dispatch that
+# refused or timed out still spent money, and a guard that only sees the
+# successes cannot hold a budget (#108). The envelope is the right source
+# because it travels with the run — a transcript lands in a per-working-
+# directory tree, so a dispatch inside a worktree writes its usage
+# somewhere a caller scanning the main tree will never look, and the
+# ceiling silently never trips.
+if [ -n "$WORK_COST_FILE" ]; then
+    cost="$(printf '%s' "$raw" | jq -r '.total_cost_usd // empty' 2>/dev/null)" || cost=""
+    case "$cost" in ''|*[!0-9.]*) cost="" ;; esac
+    if [ -n "$cost" ]; then
+        # Line 1 is the cost. Line 2 is the model or models the run ACTUALLY
+        # billed to, read from the envelope rather than echoed back from what
+        # the caller asked for -- a ledger that records the request cannot
+        # show a re-tiering that silently did not happen, which is exactly how
+        # a run meant for a cheap model was billed to an expensive one while
+        # the ledger said otherwise. A caller wanting only the cost reads the
+        # first line.
+        models="$(printf '%s' "$raw" \
+            | jq -r '(.modelUsage // {}) | keys | join(",")' 2>/dev/null)" || models=""
+        printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
+    else
+        # Truncate rather than guess. A caller that reads an empty cost
+        # must refuse; one that reads a fabricated 0 would keep spending.
+        : > "$WORK_COST_FILE"
+        echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
+    fi
+    denials="$(printf '%s' "$raw" | jq -r '(.permission_denials // []) | length' 2>/dev/null)" || denials=0
+    [ "${denials:-0}" = "0" ] \
+        || echo "==> $launch_persona hit $denials permission denial(s); set WORK_PERMISSION_MODE if it needs to act." >&2
+fi
 
 status="$(printf '%s' "$raw" | process_status "$launch_harness" 2>/dev/null)" || status=""
 [ -n "$status" ] || status="ERROR"

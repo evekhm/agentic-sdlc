@@ -54,16 +54,49 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # --- the stubs ----------------------------------------------------------------
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
-# Canned reads only. Anything that is not `gh api <path>` is a write
-# attempt as far as this test is concerned, and is recorded.
-if [ "${1:-}" != "api" ] || [ "$#" -ne 2 ]; then
+# Canned reads only. Anything that is not `gh api [--paginate] <path>`
+# is a write attempt as far as this test is concerned, and is recorded.
+paginate=0
+args=()
+for a in "$@"; do
+  case "$a" in
+    --paginate) paginate=1 ;;
+    *) args+=("$a") ;;
+  esac
+done
+if [ "${args[0]:-}" != "api" ] || [ "${#args[@]}" -ne 2 ]; then
   echo "gh $*" >> "$WRITES"
   echo "stub gh: refusing non-read call: $*" >&2
   exit 1
 fi
-file="$FIXTURES/${2//\//_}.json"
-[ -f "$file" ] || { echo "stub gh: no fixture for $2" >&2; exit 1; }
-cat "$file"
+path="${args[1]%%\?*}"
+query=""
+[ "${args[1]}" = "$path" ] || query="${args[1]#*\?}"
+file="$FIXTURES/${path//\//_}.json"
+[ -f "$file" ] || { echo "stub gh: no fixture for $path" >&2; exit 1; }
+# PAGINATION IS MODELLED, because the truncation IS the defect (#51,
+# Atlas AT-2). The real API answers a LIST read one page at a time —
+# 30 items by default, `per_page` up to 100 — and a caller that does
+# not paginate gets the first page and no hint that there is another.
+# A stub that always returned the whole fixture would make a
+# regression test for the 31st comment vacuous: it would pass against
+# the unfixed script too. Object fixtures (an issue, a pull request)
+# are not lists and are returned whole.
+if ! jq -e 'type == "array"' "$file" >/dev/null 2>&1; then
+  cat "$file"
+  exit 0
+fi
+per_page=30
+case "$query" in
+  *per_page=*) per_page="${query##*per_page=}"; per_page="${per_page%%&*}" ;;
+esac
+if [ "$paginate" = "1" ]; then
+  # One JSON array per page, exactly as `gh api --paginate` emits them.
+  jq -c --argjson n "$per_page" \
+    'if length == 0 then [] else [range(0; length; $n) as $i | .[$i:$i+$n]][] end' "$file"
+else
+  jq -c --argjson n "$per_page" '.[0:$n]' "$file"
+fi
 STUB
 # The two harness stubs. Unless a scenario sets LAUNCH_OK=1 they behave
 # exactly as the #36 suite's stub claude did: record the attempt in
@@ -188,11 +221,12 @@ issue() {
     > "$FIXTURES/repos_test_repo_issues_$1.json"
   echo '[]' > "$FIXTURES/repos_test_repo_issues_$1_comments.json"
 }
-# pr <n> <body> <head-ref>
+# pr <n> <body> <head-ref> [<labels-csv>]
 pr() {
-  jq -n --argjson n "$1" --arg body "$2" \
+  jq -n --argjson n "$1" --arg body "$2" --arg labels "${4:-}" \
     '{number: $n, state: "open", title: "a pull request", body: $body,
-      labels: [], pull_request: {url: "x"}}' \
+      labels: ($labels | if . == "" then [] else split(",") end | map({name: .})),
+      pull_request: {url: "x"}}' \
     > "$FIXTURES/repos_test_repo_issues_$1.json"
   jq -n --arg ref "$3" '{head: {ref: $ref}}' \
     > "$FIXTURES/repos_test_repo_pulls_$1.json"
@@ -207,6 +241,18 @@ claim() {
     shift 2
   done
   printf '%s\n' "$thread" > "$FIXTURES/repos_test_repo_issues_${n}_comments.json"
+}
+# pad_thread <n> <count> — <count> ordinary comments inserted BEFORE the
+# last comment of #<n>'s thread, which pushes that last comment past the
+# API's 30-item first page. A dispatcher that reads only page one sees
+# the claims before the padding and never the one after it (#51).
+pad_thread() {
+  local file="$FIXTURES/repos_test_repo_issues_$1_comments.json" padded
+  padded="$(jq -c --argjson c "$2" \
+    '.[0:-1]
+       + [range(0; $c) | {user: {login: "drive-by-user"}, body: "just a comment"}]
+       + .[-1:]' "$file")"
+  printf '%s\n' "$padded" > "$file"
 }
 
 # run <expected-exit> <name> -- <args...>; stdout+stderr land in $OUT.
@@ -444,6 +490,60 @@ has "#108" "D9: both issues are named"
 pr 124 "Closes #108, and again: closes #108." "not-a-work-branch"
 run 0 "D9: the same issue named twice is still one issue" -- 124
 has "resolved from #124 via Closes #108" "D9: distinct numbers, not occurrences"
+
+banner "D5(a)/D9 hold on the PULL REQUEST refuses too (#50, Atlas AT-1)"
+# Resolving a PR to its issue must not throw the PR's own labels away:
+# the circuit breaker is placed where the operator is looking, and on a
+# pull request that is the pull request. The refusals therefore read the
+# UNION of both label sets, and the message names the side that carries
+# the label so the operator knows which one to clear.
+pr 127 "Closes #108" "odyssey/108-deterministic" "hold"
+run 2 "D5(a): hold on the PR exits 2 even though #108 is clean" -- 127
+has "carries hold" "D5(a): the refusal names hold"
+has "#127" "D5(a): the refusal names the pull request that carries it"
+pr 128 "Closes #108" "odyssey/108-deterministic" "blocked"
+run 2 "D5(c): blocked on the PR exits 2" -- 128
+has "carries blocked" "D5(c): the refusal names blocked"
+pr 129 "Closes #101" "odyssey/101-held"
+run 2 "D5(a): hold on the ISSUE still refuses through a clean PR" -- 129
+has "#101 carries hold" "D5(a): the issue's own labels are still read"
+pr 130 "Closes #108" "odyssey/108-deterministic"
+run 0 "D9: a PR carrying no labels still dispatches its issue" -- 130
+has "==> #108" "D9: the union adds nothing when the PR is unlabelled"
+
+banner "D5(e) the mutex reads the WHOLE thread, not its first page (#51, Atlas AT-2)"
+# THE FAIL-OPEN DIRECTION, which is why AT-2 is high: odyssey claimed
+# this issue, handed it back in prose, and athena claimed it again 31
+# comments later. The API answers 30 comments a page, so a mutex that
+# reads one page sees odyssey's stale claim, calls it a resume of its
+# own work, and launches a SECOND session onto an issue athena is
+# holding. Reading the whole thread is what makes "the last comment
+# opening with Claim" (docs/SPEC.md, `ops.dispatch`) true of a thread
+# longer than thirty.
+issue 131 open "in-progress,status:implementing" "Handed over late in a long thread"
+claim 131 "evekhm-odyssey-app[bot]" "Claim: IMPLEMENT stage — odyssey." \
+  "evekhm-athena-app[bot]" "Claim: DESIGN stage — athena."
+pad_thread 131 30
+run 2 "D5(e): a claim on comment 32 still holds the issue" -- 131
+has "is held by athena" "D5(e): the holder is read past the API's first page"
+hasnt "command:" "D5(e): nothing is dispatched over a claim on page two"
+
+banner "D5(e)/D5(a) a unioned refusal names the side that carries it (PR #95 review)"
+# R1-1: `in-progress` joined the union, but its four messages still
+# asserted the label of the issue. An operator who set it on the pull
+# request was sent to a clean number they could not clear it from. The
+# thread read stays the issue's — that is where a claim is posted — so
+# both numbers appear, each doing its own job.
+pr 132 "Closes #108" "odyssey/108-deterministic" "in-progress"
+run 2 "D5(e): in-progress on the PR exits 2 even though #108 is clean" -- 132
+has "in-progress on #132 (the pull request)" \
+  "D5(e): the refusal names the side that carries the label"
+# R1-2: when BOTH sides carry it, naming only the issue makes the
+# operator clear one number, re-run, and be refused by the other.
+pr 133 "Closes #101" "odyssey/101-held" "hold"
+run 2 "D5(a): hold on both sides exits 2" -- 133
+has "#101 (and #133, the pull request) carries hold" \
+  "D5(a): both sides are named in one refusal"
 
 banner "D9 a multi-owner stage prints both and launches neither"
 issue 112 open "status:in-review" "Under review"

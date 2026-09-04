@@ -1,5 +1,6 @@
-# The three CI gates (#6, intent/6-ci-gates/). Everything AGENTS.md
-# asks of a contributor that a machine can check, checked by a machine:
+# The four CI gates (#6, intent/6-ci-gates/; #25 added the fourth).
+# Everything AGENTS.md asks of a contributor that a machine can check,
+# checked by a machine:
 #
 #   drift      personas/ + config/ recompile to exactly the committed
 #              targets — a hand-edited compiled file cannot merge
@@ -7,12 +8,17 @@
 #              personas/ — deterministic, tree-wide, every run
 #   spec-check a PR touching behavior-bearing paths updates
 #              docs/SPEC.md or declares `Spec-impact: none — <reason>`
+#   execution  config/execution.yaml parses, every binding is well
+#              formed, every persona named has a source, every
+#              placement resolves to an adapter directory, and every
+#              subscribed event is one .github/workflows/unattended.yml
+#              actually triggers on (#25, D2, D8, D17)
 #
-# All three are deterministic scripts, runnable locally by the same
+# All four are deterministic scripts, runnable locally by the same
 # command CI runs. No model tokens, no vendor API calls, no secrets:
 # `permissions: contents: read` is the whole grant, so this workflow is
 # safe to run on a fork PR. The jobs are independent and run in
-# parallel — a PR sees all three verdicts on one push, not the first
+# parallel — a PR sees all four verdicts on one push, not the first
 # failure only.
 #
 # `edited` is in the trigger list so adding the Spec-impact marker to a
@@ -72,6 +78,38 @@ jobs:
 
       - name: Scan every tracked file
         run: bash scripts/ci/sanitize_check.sh
+
+  execution:
+    name: execution — bindings, adapters and triggers agree
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the parser's dependency
+        run: python3 -m pip install --disable-pip-version-check pyyaml
+
+      - name: Validate config/execution.yaml
+        # The same command the adapters and the dispatch workflow run
+        # against. A binding on a placement with no adapter, or on an
+        # event the trigger list omits, fails here rather than at 03:00
+        # in a run nobody is watching.
+        run: python3 scripts/ops/execution.py --check
+
+      - name: Execution model tests
+        run: bash scripts/ops/tests/execution_test.sh
+
+      - name: Placement adapter tests
+        run: bash scripts/ops/tests/placement_test.sh
+
+      - name: Posting-path tests
+        run: bash scripts/ops/tests/post_test.sh
 
   spec-check:
     name: spec-check — docs/SPEC.md obligation
