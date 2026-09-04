@@ -478,6 +478,23 @@ repo's own copies) rather than a flag — argv stays closed, as in
 `work.sh` (`scripts/ops/work.sh:74`, `:85-88`). This is the only new
 input surface the task adds.
 
+**Deviation 2026-09-04 (odyssey, implementing).** The task adds a
+**third** environment variable, `DRY_RUN`, alongside
+`SMOKE_DEPLOYMENTS` and `SMOKE_APP_MANIFESTS`. Grounds: the two
+overrides alone do not make the pin-flip test runnable. Pointing the
+script at a scratch `deployments.yaml` and letting it proceed spends
+one live launch per harness *per assertion about the banners* — and
+launches personas against a real scratch issue with the pins deliberately
+wrong, which is the one thing the arms are supposed to prevent. `DRY_RUN=1`
+resolves and prints the arms and exits before the first mint, write or
+launch, exactly as `scripts/ops/work.sh:74` does with the same variable
+name, so the new surface is a spelling this repository already has
+rather than a concept. The D14 negative needs no such help — selection
+precedes every write by construction — but it is run under `DRY_RUN=1`
+too, so the whole T4 proof set is one non-mutating command per case.
+Argv stays closed: the trailing-argument override remains the only
+thing `smoke_launch.sh` reads from argv besides the issue number.
+
 **Amended r1.** The old T4 was an arm *swap*: a before/after table
 naming two personas, two relabel labels, two artifact paths and two bot
 logins, five numbered notes about the swap, and an instruction to keep

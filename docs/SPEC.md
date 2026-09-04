@@ -596,9 +596,19 @@ session runs `scripts/ops/work.sh <n>` from a terminal, which is not a
 thing a slash command can be.
 Tests: `scripts/ops/tests/work_test.sh` against stubs, and
 `scripts/ops/smoke_launch.sh <scratch-issue>` for one real launch per
-harness — three named observables each, with the claim half of the
-Antigravity run reported as `BLOCKED ON #47` until that App's
-`issues: write` permission is granted, rather than asserted to fail.
+harness present in `config/deployments.yaml` — three named observables
+each. Which persona runs an arm is not written in the script: it is
+selected by a rule over config facts, the first persona in that file's
+own declaration order pinned to that harness whose App in
+`scripts/auth/app_manifests.yaml` grants every permission the
+observables need and which owns a stage some rung of
+`personas/lifecycle.json` labels, with that rung's label as the arm's
+relabel target. A harness for which the rule yields no persona fails
+the run, naming the harness and what is missing, rather than being
+skipped or covered twice — an arm silently dropped is a gate reporting
+coverage it does not have. Trailing arguments override an arm with
+another persona, each binding to the harness its own pin names, and are
+held to the same rule.
 
 ### ops.identity
 A dispatched session runs as its own persona, never as the operator

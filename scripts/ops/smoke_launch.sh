@@ -2,56 +2,244 @@
 # One measured launch per harness, against a live scratch issue
 # (#43, intent/43-harness-agnostic-launch/spec.md D18, D19).
 #
-#   scripts/ops/smoke_launch.sh <scratch-issue>
+#   scripts/ops/smoke_launch.sh <scratch-issue> [persona ...]
 #
 # work_test.sh proves the launcher's LOGIC against stubs. Nothing a stub
-# says can prove that agy actually loads `.agents/agents/<p>/agent.md`,
-# that a minted App token actually authenticates a push, or that the
+# says can prove that a harness actually loads the compiled target, that
+# a minted App token actually authenticates a push, or that the
 # `WORK-RESULT:` line actually survives a real harness's JSON. That is
-# what this script is for: two real sessions, three named observables
-# each, so a failure says WHICH one broke rather than "the smoke failed".
+# what this script is for: one real session per harness, three named
+# observables each, so a failure says WHICH one broke rather than "the
+# smoke failed".
 #
-# It writes the scratch issue's body itself, so the instruction the two
-# sessions read is part of this script and a re-run is identical to the
-# first run. The body asks for a two-minute errand, not a stage: the
-# point is one measured launch per harness. Each launch is still capped
-# by the persona's own `limits.timeout_mins`, because work.sh caps it.
+# NO PERSONA NAME IS WRITTEN IN THIS FILE (#44, spec D7). Which harnesses
+# run and which persona runs each are DERIVED from config, so flipping a
+# pin changes what this gate covers with no edit here:
+#
+#   the harnesses  every distinct `personas.*.harness` value in
+#                  config/deployments.yaml, in first-appearance order
+#   the arm for a  the FIRST persona, in that file's own declaration
+#   harness        order, pinned to that harness whose App in
+#                  scripts/auth/app_manifests.yaml grants every
+#                  permission this arm's observables need — `issues:
+#                  write` to comment, `contents: write` to push — and
+#                  which owns a stage that some rung of
+#                  personas/lifecycle.json labels, since `work.sh --as`
+#                  refuses a persona that does not own the current stage
+#   its relabel    the label of such a rung, from the same join
+#   housekeeping   the first persona in declaration order granting both
+#                  permissions, any harness: writing the issue body,
+#                  relabelling and reading comments makes no model call
+#
+# A harness with NO qualifying persona is exit 1 naming the harness and
+# what is missing — never a skipped arm, and never exit 0 having covered
+# some other harness twice (#44, spec D14). That is the whole of the
+# tolerate mechanism: an observable an arm's persona cannot produce is
+# rejected at selection, not excused at assertion time. The verdict's
+# tolerated count stays and now prints 0.
 #
 # Identity is NEVER checked with `gh api user`: an App token has no user
 # and gets 403 (findings Q7). The token-side check is
 # `GET /installation/repositories`; the outcome-side check is who
-# authored the comment (odyssey) or the pushed commit (daedalus).
+# authored the comment and the pushed commit, compared against the
+# persona's own `authority.identity`.
 #
-# D18/D19: three Apps are registered `issues: read`, so daedalus cannot
-# claim or hand off until the human step in #47 lands. That half is
-# written as "403 -> report BLOCKED ON #47 and keep going; 200/201 ->
-# pass", never as "must be 403" — when the permission is granted this
-# script starts passing it with no edit.
+# Environment (argv stays closed to everything but the arms, as in
+# work.sh):
+#   DRY_RUN=1              resolve and print the arms, launch nothing,
+#                          mint nothing, write nothing.
+#   SMOKE_DEPLOYMENTS      read the pins from another file, so a scratch
+#                          copy with one pin flipped proves the arms
+#                          follow config and not this script.
+#   SMOKE_APP_MANIFESTS    read the App permissions from another file,
+#                          so a scratch copy proves the exit-1 branch.
+#
+# Trailing arguments name the arms explicitly: each persona binds to the
+# harness ITS OWN pin names and replaces that harness's derived arm. A
+# name that is not a persona, two names resolving to one harness, or a
+# name whose App or rung does not qualify is exit 1 — the override picks
+# a different arm, it does not switch the selection rule off.
 #
 # Exit 0 = every required observable held. Exit 1 = one did not, or the
-# inputs were unusable. A tolerated 403 is not a failure.
+# inputs were unusable.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GITHUB_REPO="${GITHUB_REPO:-evekhm/agentic-sdlc}"
 PUSH_URL="https://github.com/$GITHUB_REPO.git"
+DRY_RUN="${DRY_RUN:-0}"
+
+DEPLOYMENTS="${SMOKE_DEPLOYMENTS:-$REPO_ROOT/config/deployments.yaml}"
+APP_MANIFESTS="${SMOKE_APP_MANIFESTS:-$REPO_ROOT/scripts/auth/app_manifests.yaml}"
+LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
+PERSONA_DIR="$REPO_ROOT/personas"
 
 ISSUE="${1:-}"
 case "$ISSUE" in
-    ''|*[!0-9]*) echo "usage: scripts/ops/smoke_launch.sh <scratch-issue>" >&2; exit 1 ;;
+    ''|*[!0-9]*)
+        echo "usage: scripts/ops/smoke_launch.sh <scratch-issue> [persona ...]" >&2
+        exit 1 ;;
 esac
+shift
+OVERRIDES=("$@")
 
 SMOKE_DIR="$REPO_ROOT/runs/smoke-$ISSUE"
-SMOKE_BRANCH="smoke/$ISSUE-daedalus"
 
 failures=0
 blocked=0
 ok()      { echo "  ok       $*"; }
 bad()     { echo "  FAILED   $*"; failures=$((failures + 1)); }
-tolerate(){ echo "  BLOCKED ON #47   $*"; blocked=$((blocked + 1)); }
 note()    { echo "  note     $*"; }
 banner()  { echo; echo "=== $*"; }
+die()     { echo "smoke_launch: $*" >&2; exit 1; }
+
+# --- reading the config the arms are derived from -------------------------------
+# One parse of the pins, the same shape work.sh's harness_of uses, so
+# this script does not introduce a second reading of the file.
+pins() { # -> "<persona> <harness>", declaration order
+    awk '
+        $1 == "personas:" { inside = 1; next }
+        /^[^[:space:]#]/  { inside = 0 }
+        !inside { next }
+        {
+            n = $1; sub(/:$/, "", n)
+            for (k = 2; k <= NF; k++)
+                if ($k == "harness:") { v = $(k + 1); gsub(/[,}]/, "", v); print n, v }
+        }
+    ' "$DEPLOYMENTS"
+}
+
+harness_of() { # <persona> -> its pinned harness, or empty
+    pins | awk -v want="$1" '$1 == want { print $2; exit }'
+}
+
+# The App permission block, read from the manifest source. `contents`
+# and `pull_requests` vary per persona (reviewers are comment-only and
+# never push), which is exactly what makes the selection a real test.
+grant_of() { # <persona> <permission> -> the granted value, or empty
+    awk -v want="$1" -v key="$2" '
+        /^[a-z][a-z0-9_-]*:[[:space:]]*$/ {
+            p = $1; sub(/:$/, "", p); inperm = 0; next
+        }
+        /^  default_permissions:[[:space:]]*$/ { inperm = 1; next }
+        /^  [^ ]/ { inperm = 0 }
+        inperm && p == want && $1 == key ":" { print $2; exit }
+    ' "$APP_MANIFESTS"
+}
+
+# The label of a rung this persona owns. `work.sh --as` refuses a persona
+# that does not own the stage the labels say is current (refusal (f)), so
+# a relabel target that is not derived from the same join is a refusal
+# waiting to happen. A persona all of whose stages are rungless — the
+# stage-enum values lifecycle.json records as "absent by construction" —
+# yields nothing here and can never be an arm.
+relabel_of() { # <persona> -> the status:* label to put on the scratch issue, or empty
+    local persona="$1" file stages stage label
+    file="$PERSONA_DIR/$persona.yaml"
+    [ -f "$file" ] || return 0
+    stages="$(awk '$1 == "stage:" { gsub(/[][,]/, " "); $1 = ""; print }' "$file")"
+    for stage in $stages; do
+        label="$(jq -r --arg s "$stage" \
+            '.stages[] | select(.stage == $s) | .label' "$LIFECYCLE_JSON")"
+        [ -n "$label" ] && { printf '%s\n' "$label"; return 0; }
+    done
+    return 0
+}
+
+identity_of() { # <persona> -> the App login it acts as, or empty
+    local file="$PERSONA_DIR/$1.yaml"
+    [ -f "$file" ] || return 0
+    sed -n 's/^[[:space:]]*identity:[[:space:]]*"\(.*\)".*/\1/p' "$file" | head -1
+}
+
+# Why this persona cannot be an arm, or empty if it can. Both halves are
+# named rather than collapsed into "does not qualify", because the
+# operator's fix differs: a permission is granted on github.com, a rung
+# is given by #11 or #25.
+disqualifies() { # <persona> -> the reason, or empty
+    [ "$(grant_of "$1" issues)"   = write ] || { echo "its App lacks issues: write";   return 0; }
+    [ "$(grant_of "$1" contents)" = write ] || { echo "its App lacks contents: write"; return 0; }
+    [ -n "$(relabel_of "$1")" ]             || { echo "it owns no stage any rung labels"; return 0; }
+    return 0
+}
+
+arm_for() { # <harness> -> the selected persona; exits 1 naming the harness if none
+    local harness="$1" persona why reasons=""
+    while read -r persona _; do
+        [ "$(harness_of "$persona")" = "$harness" ] || continue
+        why="$(disqualifies "$persona")"
+        [ -z "$why" ] && { printf '%s\n' "$persona"; return 0; }
+        reasons="$reasons
+  $persona: $why"
+    done < <(pins)
+    [ -n "$reasons" ] || reasons="
+  (no persona is pinned to it at all)"
+    echo "smoke_launch: no persona pinned to $harness can produce this arm's observables.$reasons" >&2
+    echo "smoke_launch: an arm needs issues: write to comment and contents: write to push, plus a stage some rung labels; $harness has no such persona, so the run fails rather than skipping it or covering another harness twice." >&2
+    exit 1
+}
+
+# --- the derivation ---------------------------------------------------------------
+command -v jq >/dev/null || die "jq is not on PATH; the arms cannot be derived without it"
+[ -r "$DEPLOYMENTS" ]   || die "$DEPLOYMENTS is not readable"
+[ -r "$APP_MANIFESTS" ] || die "$APP_MANIFESTS is not readable"
+
+HARNESSES=()
+while read -r harness; do HARNESSES+=("$harness"); done < <(pins | awk '!seen[$2]++ { print $2 }')
+[ "${#HARNESSES[@]}" -gt 0 ] || die "$DEPLOYMENTS pins no persona to any harness"
+
+# Trailing arguments override the derived arm for the harness their own
+# pin names. Validated before anything is written: an unusable override
+# discovered after the issue was relabelled is the failure the preflight
+# below exists to prevent.
+declare -A OVERRIDE_ARM=()
+for persona in ${OVERRIDES+"${OVERRIDES[@]}"}; do
+    harness="$(harness_of "$persona")"
+    [ -n "$harness" ] || die "$persona is not a persona pinned in $DEPLOYMENTS"
+    [ -z "${OVERRIDE_ARM[$harness]:-}" ] \
+        || die "$persona and ${OVERRIDE_ARM[$harness]} both resolve to $harness; one arm per harness"
+    why="$(disqualifies "$persona")"
+    [ -z "$why" ] || die "$persona cannot be the $harness arm: $why"
+    OVERRIDE_ARM[$harness]="$persona"
+done
+
+ARMS=()
+for harness in "${HARNESSES[@]}"; do
+    if [ -n "${OVERRIDE_ARM[$harness]:-}" ]; then
+        ARMS+=("$harness ${OVERRIDE_ARM[$harness]}")
+    else
+        # `|| exit 1` and not `set -e`: arm_for's exit 1 ends the command
+        # substitution's subshell, so without this the run would carry on
+        # with an empty arm — the silent success D14 forbids.
+        persona="$(arm_for "$harness")" || exit 1
+        ARMS+=("$harness $persona")
+    fi
+done
+
+HOUSEKEEPER=""
+while read -r persona _; do
+    [ "$(grant_of "$persona" issues)"   = write ] || continue
+    [ "$(grant_of "$persona" contents)" = write ] || continue
+    HOUSEKEEPER="$persona"; break
+done < <(pins)
+[ -n "$HOUSEKEEPER" ] \
+    || die "no persona's App grants both issues: write and contents: write, so the run has no housekeeping identity"
+
+banner "derived from $(basename "$DEPLOYMENTS") + $(basename "$APP_MANIFESTS")"
+n=0
+for arm in "${ARMS[@]}"; do
+    n=$((n + 1))
+    set -- $arm
+    note "run $n · $1 · $2 · relabel $(relabel_of "$2") · as $(identity_of "$2")"
+done
+note "housekeeping identity: $HOUSEKEEPER ($(identity_of "$HOUSEKEEPER"))"
+
+if [ "$DRY_RUN" = "1" ]; then
+    echo
+    echo "smoke_launch: DRY_RUN=1 — arms resolved above; nothing launched, minted or written."
+    exit 0
+fi
 
 # --- identity, in-band ----------------------------------------------------------
 # This script used to shell out to `ghp`, a wrapper that exists only in
@@ -100,50 +288,58 @@ for prog in "$MINT" "$REPO_ROOT/scripts/ops/work.sh"; do
 done
 [ "$prereq_missing" -eq 0 ] || exit 1
 
-# --- the instruction the two sessions will read -------------------------------
+# --- the instruction every arm will read ----------------------------------------
 # Written into the issue body rather than into the prompt: work.sh has
-# exactly one prompt literal for both harnesses (D6), and a smoke test
-# that needed a second one would be testing something work.sh does not do.
+# exactly one prompt literal for both harnesses (#43 D6), and a smoke
+# test that needed a second one would be testing something work.sh does
+# not do. ONE errand for every arm, keyed on the reader's own persona
+# rather than branching per name: which personas read it is a fact of
+# the pins, so a branch per name would be a hardcoded arm in the one
+# place the arms are supposed to be derived (#44 D7). It is also why
+# every arm now produces all three observables — which arm pushed and
+# which arm only commented used to be a property of the order they ran
+# in, and that is not a config fact.
 body="$(cat <<BODY
 **SMOKE TEST — not a unit of work.** Created by
-\`scripts/ops/smoke_launch.sh\` for #43 (spec D19). Do the errand below
-and nothing else: do not open a pull request, do not modify a tracked
-file on this branch, do not touch any other issue.
+\`scripts/ops/smoke_launch.sh\` for #43 (spec D19) and #44 (spec D7). Do
+the errand below and nothing else: do not open a pull request, do not
+modify a tracked file on this branch, do not touch any other issue.
 
-If you are **odyssey**:
+Throughout, **YOU** is your own persona name — the agent you were
+launched as — and **YOUR LOGIN** is the App login your persona
+instructions give under *Acts as GitHub identity*. The errand is the
+same for every persona; nothing in it is keyed to a particular one.
 
-1. Create \`runs/smoke-$ISSUE/odyssey.md\` containing one line naming
-   your persona, your harness and the UTC time.
-2. Post that same line as a comment on this issue, using
+Write one line naming your persona, your harness and the UTC time. Call
+it **THE LINE**, and deliver it three times:
+
+1. Create \`runs/smoke-$ISSUE/YOU.md\` containing THE LINE.
+2. Post THE LINE as a comment on this issue, using
    \`gh issue comment $ISSUE --repo $GITHUB_REPO --body-file <a file>\`.
    Your \`GH_TOKEN\` is already your own App's; plain \`gh\` posts as you.
-3. Print \`WORK-RESULT: ok #$ISSUE smoke launch completed\`.
-
-If you are **daedalus**:
-
-1. Push a commit carrying one line naming your persona, your harness and
-   the UTC time, WITHOUT changing the branch this worktree is on — use a
-   temporary worktree:
+3. Push THE LINE as a commit on the branch \`smoke/$ISSUE-YOU\`, WITHOUT
+   changing the branch this worktree is on — use a temporary worktree:
    \`\`\`
-   git worktree add -b $SMOKE_BRANCH /tmp/smoke-$ISSUE-daedalus HEAD
-   # write /tmp/smoke-$ISSUE-daedalus/SMOKE-$ISSUE.md with the same line
-   git -C /tmp/smoke-$ISSUE-daedalus add SMOKE-$ISSUE.md
-   git -C /tmp/smoke-$ISSUE-daedalus \\
-       -c user.name='evekhm-daedalus-app[bot]' \\
-       -c user.email='evekhm-daedalus-app[bot]@users.noreply.github.com' \\
-       commit -m 'smoke: daedalus launched by work.sh (#43)'
-   git -C /tmp/smoke-$ISSUE-daedalus push $PUSH_URL $SMOKE_BRANCH
+   git worktree add -b smoke/$ISSUE-YOU /tmp/smoke-$ISSUE-YOU HEAD
+   # write /tmp/smoke-$ISSUE-YOU/SMOKE-$ISSUE.md containing THE LINE
+   git -C /tmp/smoke-$ISSUE-YOU add SMOKE-$ISSUE.md
+   git -C /tmp/smoke-$ISSUE-YOU \\
+       -c user.name='YOUR LOGIN' \\
+       -c user.email='YOUR LOGIN@users.noreply.github.com' \\
+       commit -m 'smoke: YOU launched by work.sh (#$ISSUE)'
+   git -C /tmp/smoke-$ISSUE-YOU push $PUSH_URL smoke/$ISSUE-YOU
    \`\`\`
    Your git is already configured with a credential helper that mints
    your App token, so the push needs no token from you.
-2. Print \`WORK-RESULT: ok #$ISSUE smoke launch completed\`.
+
+Then print \`WORK-RESULT: ok #$ISSUE smoke launch completed\`.
 
 Claiming this issue is not part of the errand.
 BODY
 )"
 
 printf '%s\n' "$body" > "/tmp/smoke-$ISSUE-body.md"
-gh_as odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+gh_as "$HOUSEKEEPER" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
     --body-file "/tmp/smoke-$ISSUE-body.md" >/dev/null \
     || { echo "smoke_launch: cannot write the scratch issue body" >&2; exit 1; }
 
@@ -161,25 +357,11 @@ check_token() { # <persona>
     fi
 }
 
-# D18/D19: the half that #47 gates. Written as a capability probe, not
-# as an assertion about the current permission set.
-check_claim() { # <persona>
-    local persona="$1"
-    if gh_as "$persona" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
-           --add-label in-progress >/dev/null 2>&1; then
-        ok "$persona can claim (issues: write is granted)"
-        gh_as "$persona" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
-            --remove-label in-progress >/dev/null 2>&1 || true
-    else
-        tolerate "$persona cannot add a label — its App is registered issues: read"
-    fi
-}
-
 # `gh api` prints the error body on stdout, so every read below is
 # shape-checked rather than trusted: a 404's JSON is not a count.
 count_comments() {
     local n
-    n="$(gh_as odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
+    n="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
              --jq 'length' 2>/dev/null || true)"
     case "$n" in ''|*[!0-9]*) n=-1 ;; esac
     printf '%s\n' "$n"
@@ -190,15 +372,15 @@ relabel() { # <status-label>
     for have in status:planning status:spec status:build status:implementing \
                 status:in-review status:done; do
         [ "$have" = "$want" ] && continue
-        gh_as odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+        gh_as "$HOUSEKEEPER" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
             --remove-label "$have" >/dev/null 2>&1 || true
     done
-    gh_as odyssey issue edit "$ISSUE" --repo "$GITHUB_REPO" \
+    gh_as "$HOUSEKEEPER" issue edit "$ISSUE" --repo "$GITHUB_REPO" \
         --add-label "$want" >/dev/null \
         || { echo "smoke_launch: cannot put $want on #$ISSUE" >&2; exit 1; }
 }
 
-launch() { # <persona>; -> exit code of work.sh on stdout's last line
+launch() { # <persona>; -> exit code of work.sh
     local persona="$1" rc=0
     echo "  --- launching $persona (capped by its own limits.timeout_mins)"
     HEADLESS=1 "$REPO_ROOT/scripts/ops/work.sh" --as "$persona" "$ISSUE" || rc=$?
@@ -206,12 +388,7 @@ launch() { # <persona>; -> exit code of work.sh on stdout's last line
     return "$rc"
 }
 
-# The stage's own artifact is a whole stage's worth of work; this run is
-# deliberately one launch, not a stage, so the observable is the errand's
-# artifact, and it is a different file per harness because the errand is:
-# odyssey writes locally under runs/ (gitignored, so a smoke run leaves
-# the tree clean), daedalus writes into the commit it pushes — asking it
-# for a second local copy would prove nothing the pushed file does not.
+# Observable 1. runs/ is gitignored, so a smoke run leaves the tree clean.
 check_local_artifact() { # <persona>
     local persona="$1"
     if [ -s "$SMOKE_DIR/$persona.md" ]; then
@@ -220,9 +397,48 @@ check_local_artifact() { # <persona>
         bad "$persona left no artifact at runs/smoke-$ISSUE/$persona.md"
     fi
 }
+
+# Observable 2. Authorship, not content: the comment proves the minted
+# token reached the session as its own identity.
+check_comment() { # <persona> <comment-count-before>
+    local persona="$1" before="$2" want author after
+    want="$(identity_of "$persona")"
+    author="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
+                  --jq '.[-1].user.login' 2>/dev/null || echo '')"
+    after="$(count_comments)"
+    if [ "$after" -gt "$before" ] && [ "$author" = "$want" ]; then
+        ok "the newest comment on #$ISSUE is authored by $want"
+    else
+        bad "expected a new comment by $want; newest author is '${author:-none}'"
+    fi
+}
+
+# Observable 3. The push is the token-handoff proof: a harness's stock
+# fallback agent has no instruction to push anything, so a scratch branch
+# on origin means the persona loaded AND its minted token authenticated.
+# Shape-checked, not just non-empty: `gh api` prints the error body on
+# stdout for a 404, so `|| true` alone would hand a JSON blob to the
+# assertion and call a missing branch a pass.
 check_pushed_artifact() { # <persona> <ref>
-    local persona="$1" ref="$2" size
-    size="$(gh_as odyssey api \
+    local persona="$1" ref="$2" pushed want author size
+    pushed="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" \
+                  --jq '.object.sha' 2>/dev/null || true)"
+    case "$pushed" in
+        [0-9a-f][0-9a-f]*) [ "${#pushed}" = "40" ] || pushed="" ;;
+        *) pushed="" ;;
+    esac
+    if [ -z "$pushed" ]; then
+        bad "$persona pushed no $ref — the persona did not load, or the token did not authenticate"
+        return
+    fi
+    ok "$ref exists on origin ($pushed)"
+    want="$(identity_of "$persona")"
+    author="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/commits/$pushed" \
+                  --jq '.commit.author.name' 2>/dev/null || echo '')"
+    [ "$author" = "$want" ] \
+        && ok "its head commit is authored by $want" \
+        || bad "its head commit is authored by '${author:-unknown}'"
+    size="$(gh_as "$HOUSEKEEPER" api \
                 "/repos/$GITHUB_REPO/contents/SMOKE-$ISSUE.md?ref=$ref" \
                 --jq '.size' 2>/dev/null || true)"
     case "$size" in
@@ -232,69 +448,39 @@ check_pushed_artifact() { # <persona> <ref>
     esac
 }
 
-# --- run 1: claude-code / odyssey ---------------------------------------------
-banner "run 1 · claude-code · odyssey · #$ISSUE"
+# --- the runs -------------------------------------------------------------------
 rm -rf "$SMOKE_DIR"
-check_token odyssey
-relabel status:implementing
-before="$(count_comments)"
-rc=0; launch odyssey || rc=$?
-[ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
-                || bad "work.sh exited $rc, not 0"
-check_local_artifact odyssey
-after_author="$(gh_as odyssey api "/repos/$GITHUB_REPO/issues/$ISSUE/comments" \
-                    --jq '.[-1].user.login' 2>/dev/null || echo '')"
-after_count="$(count_comments)"
-if [ "$after_count" -gt "$before" ] && [ "$after_author" = "evekhm-odyssey-app[bot]" ]; then
-    ok "the newest comment on #$ISSUE is authored by evekhm-odyssey-app[bot]"
-else
-    bad "expected a new comment by evekhm-odyssey-app[bot]; newest author is '${after_author:-none}'"
-fi
-check_claim odyssey
+n=0
+for arm in "${ARMS[@]}"; do
+    n=$((n + 1))
+    set -- $arm
+    harness="$1"; persona="$2"
+    branch="smoke/$ISSUE-$persona"
 
-# --- run 2: antigravity / daedalus --------------------------------------------
-banner "run 2 · antigravity · daedalus · #$ISSUE"
-check_token daedalus
-relabel status:build
-# Cleared through the API, not through the launcher's own git: this
-# script must never push with whatever credentials the operator's shell
-# happens to carry — that is the identity confusion #43 exists to end.
-gh_as odyssey api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$SMOKE_BRANCH" \
-    >/dev/null 2>&1 || true
-rc=0; launch daedalus || rc=$?
-[ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
-                || bad "work.sh exited $rc, not 0"
-# The push is the token-handoff proof: agy's stock fallback agent has no
-# instruction to push anything, so a scratch branch on origin means the
-# persona loaded AND its minted token authenticated.
-# Shape-checked, not just non-empty: `gh api` prints the error body on
-# stdout for a 404, so `|| true` alone would hand a JSON blob to the
-# assertion and call a missing branch a pass.
-pushed="$(gh_as odyssey api "/repos/$GITHUB_REPO/git/ref/heads/$SMOKE_BRANCH" \
-              --jq '.object.sha' 2>/dev/null || true)"
-case "$pushed" in
-    [0-9a-f][0-9a-f]*) [ "${#pushed}" = "40" ] || pushed="" ;;
-    *) pushed="" ;;
-esac
-if [ -n "$pushed" ]; then
-    ok "$SMOKE_BRANCH exists on origin ($pushed)"
-    author="$(gh_as odyssey api "/repos/$GITHUB_REPO/commits/$pushed" \
-                  --jq '.commit.author.name' 2>/dev/null || echo '')"
-    [ "$author" = "evekhm-daedalus-app[bot]" ] \
-        && ok "its head commit is authored by evekhm-daedalus-app[bot]" \
-        || bad "its head commit is authored by '${author:-unknown}'"
-    check_pushed_artifact daedalus "$SMOKE_BRANCH"
-else
-    bad "daedalus left no artifact — there is no branch to read one from"
-    bad "daedalus pushed no $SMOKE_BRANCH — the persona did not load, or the token did not authenticate"
-fi
-check_claim daedalus
+    banner "run $n · $harness · $persona · #$ISSUE"
+    check_token "$persona"
+    relabel "$(relabel_of "$persona")"
+    # Cleared through the API, not through the launcher's own git: this
+    # script must never push with whatever credentials the operator's
+    # shell happens to carry — that is the identity confusion #43 exists
+    # to end.
+    gh_as "$HOUSEKEEPER" api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$branch" \
+        >/dev/null 2>&1 || true
+    before="$(count_comments)"
+
+    rc=0; launch "$persona" || rc=$?
+    [ "$rc" = "0" ] && ok "work.sh exited 0 (the session reported WORK-RESULT: ok)" \
+                    || bad "work.sh exited $rc, not 0"
+    check_local_artifact  "$persona"
+    check_comment         "$persona" "$before"
+    check_pushed_artifact "$persona" "$branch"
+done
 
 # --- verdict -------------------------------------------------------------------
 banner "verdict"
-note "$blocked observable(s) reported BLOCKED ON #47 and are not failures"
+note "$blocked observable(s) tolerated and are not failures"
 if [ "$failures" -gt 0 ]; then
     echo "smoke_launch: $failures observable(s) failed."
     exit 1
 fi
-echo "smoke_launch: both harnesses launched; every required observable held."
+echo "smoke_launch: every pinned harness launched; every required observable held."
