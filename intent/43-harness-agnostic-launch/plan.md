@@ -211,6 +211,20 @@ Five edits, all below line 357.
   `timeout "$WRAP" …` (D6, "the whole child"). The report prints the
   array through `printf '%q '` so what is shown is what runs.
 
+  *(Amended 2026-09-03, PR #60, round-2 finding R2-1; D15 and D16(a).
+  The INTERACTIVE row's wrapper is `timeout --foreground "$WRAP" …`.
+  GNU `timeout` calls `setpgid(0,0)` unless given that flag, and once
+  T8's amendment removed the `exec` the call stopped being a no-op: the
+  harness landed in a process group that is not the terminal's
+  foreground group, where its first `tcsetattr` — raw mode, which every
+  interactive TUI sets at startup — raises SIGTTOU and stops it, with a
+  live token already minted, until the cap fires. The headless rows keep
+  the plain form deliberately: nothing there reads or reconfigures a
+  terminal, and group-wide signalling is what should kill a runaway
+  non-interactive harness and its children at the cap. Knock-on: the T5
+  binary preflight indexes the harness binary at `LAUNCH[3]` when the
+  flag is present, `LAUNCH[2]` otherwise.)*
+
 - **Preflight (D3, D20).** In the per-owner loop (410–431), after
   `target_of`, mark a missing target `(missing)` in the printed line
   and record it. **After** the multi-owner early return (434–441) and
@@ -220,9 +234,18 @@ Five edits, all below line 357.
 
 - **`--add-dir` is `$REPO_ROOT` (D1, D24)** — the value already
   derived at line 54, absolute by construction, never `git rev-parse`
-  from the caller's cwd, and no `cd` anywhere. The report gains a
-  `root:` line so the operator sees which checkout a session will
-  edit.
+  from the caller's cwd, and no `cd` to anywhere other than
+  `$REPO_ROOT`. The report gains a `root:` line so the operator sees
+  which checkout a session will edit.
+
+  *(Amended 2026-09-03, PR #60, round-2 findings R2-2 / AT-R2-1; D1 as
+  amended on `main` in #70. This bullet read "and no `cd` anywhere" —
+  the fourth copy of the clause F5 struck from `spec.md`, AT-3 struck
+  from `work.sh:505` and the living spec already reflects. `work.sh`
+  does `cd "$REPO_ROOT"` exactly once, immediately before the launch,
+  because claude-code has no `--add-dir` and takes the working
+  directory as the project; what D1 as amended forbids is a `cd` to
+  anywhere else.)*
 
 **Proves it (Acceptance 1, 4, 8):** T4's suite, extended —
 `DRY_RUN=1` for a `status:build` issue prints the full agy line with
@@ -258,13 +281,33 @@ at launch; not printed)`, with the login read from
 `personas/<p>.yaml`'s `authority.identity` — the field
 `persona_for_login()` (249–260) already parses.
 
-**Proves it (Acceptance 2, 5):** `DRY_RUN=1` output contains the
+**Amended 2026-09-03 (PR #60, round-1 review finding AT-2; D11 as
+amended).** Two changes to the hand-off above. (1) The prefix form is
+now an `export` inside a subshell that then `exec`s, because the four
+`GIT_CONFIG_*` pairs of T7 are appended at the caller's own offset and
+their names are therefore computed; the properties the prefix had are
+the ones a builtin `export` keeps — never argv, never a file, never an
+`echo`. An `env VAR=… ` prefix would have been the obvious alternative
+and is rejected: it puts the token in a world-readable argv. (2) Xtrace
+is suppressed for the window between the mint and the launch and the
+caller's setting restored the moment the child returns. Bash's `set -x`
+expands both `tok="$(…)"` and every assignment of the value, so
+`bash -x scripts/ops/work.sh <n>` wrote the live token to stderr — and
+a Claude Code session captures tool stderr verbatim into an on-disk
+transcript. The suppression is a no-op when xtrace is off.
+
+**Proves it (Acceptance 2, 5, 16):** `DRY_RUN=1` output contains the
 identity line, `$MINTS` is empty, and the output matches no
 `[A-Za-z0-9_]{36,}`; the two-owner stage leaves `$MINTS` empty (D20);
 in a `fixture_tree` whose stub mint exits 1, `work.sh` exits 1 naming
 the persona with `$WRITES` empty; with the stub minting and
 `GH_TOKEN=ambient-not-this-one` exported, the stub `agy` records the
-`GH_TOKEN` it saw and the test asserts it is the minted value.
+`GH_TOKEN` it saw and the test asserts it is the minted value. Added
+for the amendment: one scenario per row runs the fixture launch under
+`bash -x`, captures stdout and stderr together, and fails if
+`stub-token-for-` appears — with the trace asserted present, so the
+check cannot pass vacuously, and the child asserted to have received
+the token, so it proves suppression rather than withholding.
 
 ## T7 · `scripts/auth/git-credential-persona` (NEW) — D13
 
@@ -280,22 +323,56 @@ to `mint_app_token.py` in the same directory — resolved from
 `work.sh` installs it through the child's environment only:
 
 ```
-GIT_CONFIG_COUNT=3
-KEY_0 credential.helper                        VALUE_0 ""        # reset the list
-KEY_1 credential.https://github.com.helper     VALUE_1 "<abs path> <persona>"
-KEY_2 url.https://github.com/.insteadOf        VALUE_2 git@github.com:
+GIT_CONFIG_COUNT=4
+KEY_0 credential.helper                        VALUE_0 ""        # reset the generic list
+KEY_1 credential.https://github.com.helper     VALUE_1 ""        # reset the URL-specific list
+KEY_2 credential.https://github.com.helper     VALUE_2 "<abs path> <persona>"
+KEY_3 url.https://github.com/.insteadOf        VALUE_3 git@github.com:
 ```
 
-The empty first value is load-bearing: git *appends* helpers, so
-without the reset an operator's global helper answers first and the
-session pushes as the operator — the exact bug D12 exists to stop.
-The `insteadOf` rewrite is equally load-bearing: this repository's
-`origin` is SSH, and an SSH remote never consults a credential helper.
+**Amended 2026-09-03 (PR #60, round-1 review finding AT-7).** The four
+pairs are unchanged; the indices are not. They are appended at
+`${GIT_CONFIG_COUNT:-0}` rather than written at 0, and the count is
+extended rather than set, so a caller that already installs
+`http.proxy` or `safe.directory` through `GIT_CONFIG_*` keeps its own
+entries instead of having them silently replaced. With nothing
+inherited the offset is 0 and the child's environment is what it was.
+The two installs — interactive and headless — were byte-identical
+copies and are now one `launch_child()` function, which is also what
+makes a computed index affordable.
+
+**Amended during implementation (was 3 entries; grounds below).**
+**Grounds corrected 2026-09-03 (PR #60, review finding F7): the
+install is unchanged, the reasoning first written here was not.** The
+empty values are load-bearing: git collects every matching
+`credential.helper` and `credential.<url>.helper` into **one** ordered
+list, an empty value clears whatever has accumulated so far, and a
+later entry appends to it. Without a reset an operator's global helper
+is in that list ahead of ours and answers the push, so the session
+pushes as the operator — the exact bug D12 exists to stop.
+
+There are *two* resets, and the honest description of why is **belt and
+braces**, not a measured necessity. The evidence originally quoted here
+— `git config --get-all 'credential.https://github.com.helper'` showing
+gh's helper first under the 3-entry install — is the wrong instrument:
+that command reports raw configuration, it does not model credential
+resolution, and `GIT_CONFIG_*` entries carry command-line precedence,
+i.e. they are applied after system, global and local. On those
+semantics the 3-entry form would very likely have won too. What the
+two resets buy is that ours ends up the only helper in the list
+*however* the operator configured theirs, on either key; the resets are
+idempotent, and the failure they guard against is silent. That is worth
+one extra pair of environment variables. The `insteadOf` rewrite is
+load-bearing for a separate reason:
+this repository's `origin` is SSH, and an SSH remote never consults a
+credential helper.
 
 **First check:** confirm how git invokes a helper configured with an
 argument (`GIT_TRACE=1 git credential fill`), and use the `!f() { … };
 f` shell-snippet form instead if the absolute-path-plus-argument form
-does not reach the script.
+does not reach the script. *(Done — the absolute-path-plus-argument
+form reaches the script; this check is what turned up the ordering bug
+above.)*
 
 **Proves it (Acceptance 6):** a test in
 `scripts/ops/tests/work_test.sh` that runs the helper directly against
@@ -317,8 +394,7 @@ disagree on key names, keep one `response_text()` and one
 `process_status()` helper with a per-harness `jq` expression each —
 two expressions, one mapping.
 
-Headless only (D15: interactive keeps `exec` and the harness's own
-exit code, and has no stdout to parse):
+Headless (D14):
 
 | observed | exit |
 |---|---|
@@ -335,11 +411,44 @@ a session said is swallowed. Exit 2 is deliberately the same code as
 `refuse()` (72): a caller asks whether the number was worked, not
 which layer declined (D23).
 
-**Proves it (Acceptance 7):** four `fixture_tree` scenarios driving
+**Amended 2026-09-03 (PR #60, round-1 review finding AT-5; D15 and D23
+as amended).** The interactive row maps too, and is no longer `exec`ed.
+`exec timeout … ` returns the *wrapper's* status, so the row could hand
+a caller 124 when the cap fires and 125/126/127 for `timeout`'s own
+errors — outside #36 D8's 0/1/2 vocabulary — and a harness exiting 2
+for a reason of its own read as a designed refusal. The child now runs
+in the foreground, inheriting stdin, stdout, stderr and the terminal
+(which is all "the operator's terminal *is* the session" required;
+`timeout` was already an un-`exec`ed process between the two), and
+`work.sh` waits and maps: child 0 → 0, anything non-zero → 1 with the
+raw status named on stderr and, for 124, the cap named. Exit 2 is
+produced by the launcher's own refusals and by D14's parsed
+`refused`/`blocked`, never forwarded from a child.
+
+**Proves it (Acceptance 7, 15):** four `fixture_tree` scenarios driving
 the stub `agy` through `$AGY_JSON` — one canned document per row of
-the table — asserting the four exits; plus one asserting that
-interactive `claude-code` is `exec`ed and its own status is returned
-unmapped.
+the table — asserting the four exits; plus four on the interactive row,
+through a pty (`script -qec`, which the no-tty guard of T9 now
+requires), asserting stub 0 → 0 and stubs 3, 2 and 124 → 1 with the raw
+status in the message and the cap named for 124. The mapping of 3 to 1
+is itself the proof that `exec` is gone.
+
+*(Amended 2026-09-03, PR #60, round-2 finding R2-1.* ***"the child now
+runs in the foreground" was only half true.*** *Dropping `exec` left
+`timeout`'s `setpgid(0,0)` — previously a no-op, because `timeout` was
+the process the shell had made the terminal's foreground group leader —
+free to put the harness in a background process group with the tty
+still attached: it could neither read the terminal (SIGTTIN) nor set raw
+mode (SIGTTOU) and would stop with a live token until the cap. The
+interactive wrapper is therefore `timeout --foreground` (see T5). The
+four pty scenarios were blind to it because the stub `claude` never
+touched the terminal, so the first of them now also asserts that the
+child's process group **is** the terminal's foreground group and that a
+real `tcsetattr` against the pty succeeds — the proof that the exit map
+is not the whole of D15. The group comparison is the deterministic
+assertion and it gates the raw-mode probe: SIGTTOU is delivered to the
+whole process group, so an unguarded probe stops the suite rather than
+failing it.)*
 
 ## T9 · `.claude/commands/work.md` (NEW) — D16
 
@@ -349,10 +458,31 @@ description. It is outside `TARGET_DIRS` (sync_agents.py:639), so the
 drift gate ignores it and this is not a compiler bypass. No
 `.agents/workflows/` twin.
 
-**Proves it (Acceptance 10):** `/work 43` in an interactive session
+**Amended 2026-09-03 (PR #60, round-1 review findings AT-1, N2 and
+Argus's open item (a); D16 as amended).** The body is not
+`scripts/ops/work.sh $ARGUMENTS`. Its `` !`…` `` form runs in the
+harness's own non-TTY bash *before* the turn, so for the four
+`claude-code`-pinned personas it reached D5's interactive row and
+`exec`ed a session that cannot start for want of a terminal — after
+minting a one-hour credential, which is what D11's grounds forbid; and
+a legitimate exit 2 surfaced as a failed tool call. The body is now
+`` !`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
+$?]"` ``, with `allowed-tools` widened to match the mode-prefixed line,
+and the cwd-relative property stated in the `description` rather than
+left to be rediscovered. The complementary half is in `work.sh`, beside
+the harness-binary preflight and **before** the mint: an interactive
+row with no tty on stdin or stdout exits 1 naming `HEADLESS=1`, having
+minted nothing and started no child — the guard that also holds for
+cron, a CI step and a subagent's bash.
+
+**Proves it (Acceptance 10, 14):** `/work 43` in an interactive session
 runs the script with `43` (shown once during implementation);
-statically, the file contains exactly one `scripts/ops/work.sh` line
-and `git status` shows nothing added under `.agents/workflows/`.
+statically, the file contains exactly one command line and it is the
+`HEADLESS=1 … ; echo "[work.sh exit $?]"` form, and `git status` shows
+nothing added under `.agents/workflows/`. In `work_test.sh`: the
+interactive row invoked with stdout captured (i.e. no tty) exits 1, the
+message names `HEADLESS=1`, and `$MINTS` and `$LAUNCHES` are both
+empty; the same stage under `HEADLESS=1` launches and exits 0.
 
 ## T10 · `AGENTS.md` — dispatch has one door — D17
 
@@ -401,6 +531,23 @@ each observable a named line so a failure says which one.
 **Proves it (Acceptance 9):** the script exits 0 today with the
 `BLOCKED ON #47` line present. Run it once during implementation
 against a scratch issue and cite the output in the PR.
+
+**Amended during implementation.** Two changes, both forced by the run
+itself:
+
+- *The artifact observable is the errand's artifact, not the stage's.*
+  The implement stage declares no artifact at all ("the output is code
+  or a review") and the build stage's is a whole plan, while this run is
+  explicitly one measured launch rather than a stage. odyssey's artifact
+  is `runs/smoke-<n>/odyssey.md` (gitignored, so the tree stays clean);
+  daedalus's is the `SMOKE-<n>.md` inside the commit it pushes, read
+  back through the contents API — a second local copy would prove
+  nothing the pushed file does not.
+- *The errand lives in the scratch issue's body, which the script
+  writes.* `work.sh` has exactly one prompt literal for both harnesses
+  (D6); a smoke test needing a second one would be testing something
+  `work.sh` does not do. Writing the body makes a re-run identical to
+  the first run.
 
 ## T12 · `docs/SPEC.md` — the living spec — Acceptance 13, and the #25 contract
 
@@ -451,19 +598,23 @@ touches behaviour-bearing paths, so the diff must carry `docs/SPEC.md`
 | 4 | T5 | 11 | T10 |
 | 5 | T6 | 12 | T12 |
 | 6 | T7 | 13 | T12 |
-| 7 | T8 | | |
+| 7 | T8 | 14 | T9 |
+| | | 15 | T8 |
+| | | 16 | T6 |
 
 ## Readings taken
 
 Two places where the spec admits more than one implementation and this
 plan chose; both are cheap to overrule by editing the row.
 
-1. **D6's wrapper applies to the interactive row too** — `exec timeout
+1. **D6's wrapper applies to the interactive row too** — `timeout
    $((T*60+60)) claude --agent …`. D6 says "the whole child is wrapped"
-   without qualifying the mode, and D15 preserves only `exec` and the
-   exit code, which `timeout` propagates. The consequence is that an
-   interactive session is killed at the persona's cap; if that is
-   wrong, D6 should say "headless".
+   without qualifying the mode. The consequence is that an interactive
+   session is killed at the persona's cap; if that is wrong, D6 should
+   say "headless". *(Amended 2026-09-03, PR #60, AT-5: the reading
+   stands, the `exec` in front of it does not. The wrapper's 124 was
+   exactly the code that escaped #36 D8's vocabulary, so the row now
+   runs the child in the foreground and maps its status — see T8.)*
 2. **The `WORK-RESULT` line is read from the decoded response text**,
    not from `.response` by name, so one code path serves both
    harnesses. D14 names `.response`, which is agy's key; Claude Code's

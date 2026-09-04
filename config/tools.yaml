@@ -33,7 +33,14 @@ capabilities:
 
   delegate:
     claude-code: [Agent]
-    antigravity: [subagent_dispatch]
+    # `manage_subagents`, measured against agy 1.1.25 (#43 smoke run).
+    # The previous spelling, `subagent_dispatch`, is not a tool this
+    # harness knows, and an unrecognised name in `agent.md`'s `tools:`
+    # block is a HARD error: exit 1, `status: "ERROR"`, zero tokens, no
+    # session at all — not the silent fallback a bad `model:` produces.
+    # Every antigravity persona carrying `delegate` was unlaunchable
+    # until this line changed.
+    antigravity: [manage_subagents]
 
   ask_user:
     claude-code: [AskUserQuestion]

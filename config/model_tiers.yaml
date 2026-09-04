@@ -2,9 +2,11 @@
 # config/ files) where vendor names appear; persona sources never name
 # models (personas/schema.json, D3). Adjacent tiers may share a model:
 # the tier names the task contract, not the price (AGENTS.md).
-# This file is the sole source of a run's model: it is resolved through
-# the compiled persona target for the harness pinned in
-# config/deployments.yaml
+# This file is the only place a model is chosen. A workflow that pinned
+# one in its environment would be a second binding nobody could find;
+# the grant that once allowed that to win over this file is retired
+# (#25, D15), and .github/workflows/unattended.yml names no model, no
+# tier and no cost at all.
 
 harnesses:
   claude-code:
