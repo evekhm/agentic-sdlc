@@ -33,7 +33,7 @@ authority:
   github_write: "branch:daedalus/*"
   paths:
     - "intent/**"
-    - "tests/**"
+    - "scripts/*/tests/**"
   identity: "evekhm-daedalus-app[bot]"
   app_id: 4798773
   client_id: "Iv23lisVWUKRkKNnqCbE"

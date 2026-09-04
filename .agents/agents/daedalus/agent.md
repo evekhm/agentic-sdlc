@@ -138,7 +138,8 @@ Checked in this order, before any write:
 - GitHub write: may push branches matching `daedalus/*`, open pull
   requests from them, open issues, and post comments — never the default
   branch
-- Paths this actor's pull requests may touch: `intent/**`, `tests/**`
+- Paths this actor's pull requests may touch: `intent/**`,
+  `scripts/*/tests/**`
 - Acts as GitHub identity: evekhm-daedalus-app[bot]
 - Credential: the secret NAMED DAEDALUS_APP_PRIVATE_KEY (a name, never a
   value and never a path)
