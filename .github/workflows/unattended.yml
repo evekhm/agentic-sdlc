@@ -144,7 +144,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: python3 -m pip install --disable-pip-version-check pyyaml pyjwt
+      - run: python3 -m pip install --disable-pip-version-check pyyaml pyjwt cryptography
 
       # A subscriber whose placement this runner cannot host is one
       # NAMED skip line, never a silent drop: a persona that quietly
