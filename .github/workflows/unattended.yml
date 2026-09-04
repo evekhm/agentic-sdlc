@@ -144,7 +144,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: python3 -m pip install --disable-pip-version-check pyyaml pyjwt
+      # pyjwt[crypto] pulls in cryptography, which PyJWT needs to sign
+      # RS256 (scripts/auth/_github_app.py mint_jwt). Plain pyjwt fails
+      # preflight with "Algorithm 'RS256' could not be found" (#126).
+      - run: python3 -m pip install --disable-pip-version-check pyyaml 'pyjwt[crypto]'
 
       # A subscriber whose placement this runner cannot host is one
       # NAMED skip line, never a silent drop: a persona that quietly
