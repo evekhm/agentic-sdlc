@@ -352,7 +352,12 @@ PR here (agent or human), regardless of harness:
   record (issue or thread reference required) — never filler.
 - A PR that touches behavior-bearing paths without changing behavior
   (refactor, comments, test-only) declares that in the PR body with
-  the machine marker line `Spec-impact: none — <reason>`.
+  the machine marker line `Spec-impact: none — <reason>`. This is a
+  literal, grep-matched prefix (`scripts/ci/spec_check.sh`), not a
+  sentence to paraphrase: "no spec impact", "documentation-only" or
+  any other wording that merely states the same thing in prose fails
+  the check. Write the line exactly as shown, verbatim, including the
+  em dash before the reason.
 - CI enforces this: `scripts/ci/spec_check.sh`, run by the
   `spec-check` job in `.github/workflows/ci-gates.yml`, fails a PR
   that touches behavior-bearing paths unless the diff touches
