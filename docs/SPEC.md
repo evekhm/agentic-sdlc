@@ -625,12 +625,23 @@ arguments override an arm with another persona, each binding to the
 harness its own pin names, and are held to the same rule.
 The gate's first writes are destructive — it overwrites the issue body
 with the errand, deletes `in-progress`, and rewrites the stage label —
-so the issue number has to earn them: it refuses any issue that is not
-either one carrying the errand's own marker in its body or a fresh one
-carrying no labels at all, before writing anything. After the arms run
-it re-reads each ref whose push it verified: a ref that moved is a
-failure, because evidence a session the gate did not launch has since
-overwritten is not evidence.
+so the number has to earn them, and exactly one fact does: the body
+already carries the errand's own marker, written either by a previous
+run of the gate or by the operator opening the fixture issue. The
+opt-in is a line on the issue rather than a flag in the invoking shell,
+so the tracker itself records which numbers the gate may destroy.
+Absence of labels is not an opt-in: an untriaged issue carries none and
+is somebody's unit of work from the moment it is filed. A pull-request
+number is refused first and on its own, before the marker is looked at,
+because the issues endpoint serves pull requests, `gh issue edit`
+resolves one silently, and a pull request's body is exactly where the
+marker gets quoted. Nothing is written before either refusal. After the
+arms run the gate re-reads each ref whose push it verified: a ref that
+moved is a failure, because evidence a session the gate did not launch
+has since overwritten is not evidence — and a re-read that could not be
+performed after three attempts is reported as a failed read rather than
+as a moved ref, so a transient API error is not misreported as an
+overwrite.
 
 ### ops.identity
 A dispatched session runs as its own persona, never as the operator
