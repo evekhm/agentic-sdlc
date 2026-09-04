@@ -26,9 +26,18 @@ trap 'rm -rf "$WORK"' EXIT
 
 WRITES="$WORK/writes.log"
 : > "$WRITES"
+# The INVOCATION log is separate from the write log and records every
+# `gh` call, reads included (D13 as amended). It is what lets an item
+# assert that a read did NOT happen (item 26) and that a read carried
+# `--paginate` (item 20); the write log keeps its own meaning, so
+# "anything else reaching gh is an attempted write" is untouched.
+INVOKES="$WORK/invocations.log"
+: > "$INVOKES"
 mkdir -p "$WORK/bin" "$WORK/fixtures"
 FIXTURES="$WORK/fixtures"
-export WRITES FIXTURES
+TESTREPO="evekhm/agentic-sdlc"
+export WRITES INVOKES FIXTURES
+export GITHUB_REPO="$TESTREPO"
 export PATH="$WORK/bin:$PATH"
 
 pass() { echo "PASS: $*"; }
@@ -37,13 +46,17 @@ banner() { printf '\n--- %s\n' "$*"; }
 
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
-# The stub answers exactly the two READS the advancer makes, and only
-# from files in $FIXTURES — no network, no token. A missing fixture
-# falls through to the pre-#57 behaviour, so every scenario written
-# before merge discovery existed still runs against an issue the stub
-# cannot read and DRY_RUN substitutes an open, unlabelled one for.
-# Anything else reaching gh in a dry run is a write that should never
-# have been attempted, and is recorded as one.
+# The stub answers exactly the READS the advancer makes, and only from
+# files in $FIXTURES — no network, no token. A missing fixture falls
+# through to the pre-#57 behaviour, so every scenario written before
+# merge discovery existed still runs against an issue the stub cannot
+# read and DRY_RUN substitutes an open, unlabelled one for. Anything
+# else reaching gh in a dry run is a write that should never have been
+# attempted, and is recorded as one.
+#
+# Every invocation — reads included — is appended to $INVOKES first
+# (D13 as amended). $WRITES keeps its own, narrower meaning.
+printf '%s\n' "gh $*" >> "$INVOKES"
 if [ "${1:-}" = "issue" ] && [ "${2:-}" = "view" ]; then
   if [ -f "$FIXTURES/issue-${3:-}.json" ]; then
     cat "$FIXTURES/issue-${3:-}.json"
@@ -52,9 +65,19 @@ if [ "${1:-}" = "issue" ] && [ "${2:-}" = "view" ]; then
   exit 1
 fi
 if [ "${1:-}" = "api" ]; then
-  case "${2:-}" in
+  # `gh api --paginate <path>` puts the flag first, so scan the argv for
+  # the path rather than assuming $2.
+  path=""
+  for a in "$@"; do
+    case "$a" in
+      api|--paginate) ;;
+      -*) ;;
+      *) [ -n "$path" ] || path="$a";;
+    esac
+  done
+  case "$path" in
     */commits/*/pulls)
-      sha="${2#*/commits/}"
+      sha="${path#*/commits/}"
       sha="${sha%/pulls}"
       if [ -f "$FIXTURES/pulls-$sha.json" ]; then
         cat "$FIXTURES/pulls-$sha.json"
@@ -64,12 +87,24 @@ if [ "${1:-}" = "api" ]; then
         echo '[]'
       fi
       exit 0;;
+    */pulls/*/files)
+      # D15 conjunct (2): the pull request's OWN file list. A fixture
+      # is required — a pull request nobody described has no file list
+      # to judge, and answering [] silently would hide the omission.
+      n="${path#*/pulls/}"
+      n="${n%/files}"
+      if [ -f "$FIXTURES/files-$n.json" ]; then
+        cat "$FIXTURES/files-$n.json"
+        exit 0
+      fi
+      echo "no files fixture for pull request $n" >&2
+      exit 1;;
     repos/*)
       echo '{"default_branch":"main"}'
       exit 0;;
   esac
 fi
-echo "gh $*" >> "$WRITES"
+printf '%s\n' "gh $*" >> "$WRITES"
 exit 1
 STUB
 chmod +x "$WORK/bin/gh"
@@ -87,6 +122,7 @@ echo seed > seed.txt
 git add -A
 git commit -qm seed
 C0="$(git rev-parse HEAD)"
+MAIN="$(git rev-parse --abbrev-ref HEAD)"
 
 printf '# Intent\n' > intent/999-test/intent.md
 git add -A
@@ -132,6 +168,102 @@ git add -A
 git commit -qm 'plan for 997'
 C5="$(git rev-parse HEAD)"
 
+# --- #72's fixtures -----------------------------------------------------------
+# The landing-branch shape (D1 as amended, Argus F2). #42 — #35's own
+# implementing pull request in this repository — reached main exactly
+# like MF does: merged into a branch that later landed, so it is on a
+# merge's SECOND parent and a --first-parent walk never sees it.
+#
+#   main   C5 ─────────────── ML
+#            \               /
+#   land      L0 ───── MF ──/
+#                    /
+#   landfeat        LF
+git checkout -q -b land "$C5"
+echo land > land.txt
+git add -A
+git commit -qm 'landing branch base'
+L0="$(git rev-parse HEAD)"
+git checkout -q -b landfeat "$L0"
+echo implementation > implementation.txt
+git add -A
+git commit -qm 'the implementation'
+git checkout -q land
+git merge -q --no-ff -m 'Merge pull request #4260' landfeat
+MF="$(git rev-parse HEAD)"
+git checkout -q "$MAIN"
+git merge -q --no-ff -m 'Merge the landing branch' land
+ML="$(git rev-parse HEAD)"
+
+# The REBASE shape (D15 conjunct (2) as amended, Argus R2-1). R2 is the
+# pull request's own last commit and its parent R1 is the same pull
+# request's second-to-last, so `git diff R2^ R2` is one plan-sync file
+# under intent/ while the pull request itself changed seven paths
+# outside it. Only the API file list can tell those apart.
+echo rebased > rebase-code.txt
+git add -A
+git commit -qm 'rebased commit 1: the code'
+R1="$(git rev-parse HEAD)"
+printf '# Plan\n\nplan sync\n' > intent/999-test/plan.md
+git add -A
+git commit -qm 'rebased commit 2: the plan sync'
+R2="$(git rev-parse HEAD)"
+
+# No intent/ directory at all in the AFTER tree (D15 conjunct (3), item
+# 23). Built off C0 and left unchecked-out, so the working checkout
+# still holds intent/999-test/ while the tree being read does not.
+git checkout -q -b nofolder "$C0"
+echo none > nofolder.txt
+git add -A
+git commit -qm 'a tree with no intent folders'
+NF="$(git rev-parse HEAD)"
+git checkout -q "$MAIN"
+
+# TWO intent/999-*/ directories: corrupted state, not a slug mismatch.
+# notes.md is deliberately not one of the ladder's artifacts, so this
+# adds a folder without adding an artifact candidate.
+git checkout -q -b twofolders "$R2"
+mkdir -p intent/999-dup
+printf 'notes\n' > intent/999-dup/notes.md
+git add -A
+git commit -qm 'a second 999 folder'
+TF="$(git rev-parse HEAD)"
+git checkout -q "$MAIN"
+
+# Two accepted pull requests for one issue in one range (D15's
+# second-candidate rule, item 24). MB is topologically LATER than MA and
+# its commits are the OLDER ones by date — the re-created dispatch
+# branch cut from an older base that D15's rationale names.
+#
+#   main   R2 ── MA ─────────── ML2
+#           \   /              /
+#   pr-a     A1           land2
+#             \            /
+#   pr-b       (from MA) B1 ── MB
+git checkout -q -b pr-a "$R2"
+echo a > a.txt
+git add -A
+GIT_AUTHOR_DATE='2030-01-01T00:00:00Z' GIT_COMMITTER_DATE='2030-01-01T00:00:00Z' \
+  git commit -qm 'pull request A: the code'
+git checkout -q "$MAIN"
+GIT_AUTHOR_DATE='2030-01-02T00:00:00Z' GIT_COMMITTER_DATE='2030-01-02T00:00:00Z' \
+  git merge -q --no-ff -m 'Merge pull request #4290' pr-a
+MA="$(git rev-parse HEAD)"
+git checkout -q -b land2 "$MA"
+git checkout -q -b pr-b "$MA"
+echo b > b.txt
+git add -A
+GIT_AUTHOR_DATE='2020-01-01T00:00:00Z' GIT_COMMITTER_DATE='2020-01-01T00:00:00Z' \
+  git commit -qm 'pull request B: the code'
+git checkout -q land2
+GIT_AUTHOR_DATE='2020-01-02T00:00:00Z' GIT_COMMITTER_DATE='2020-01-02T00:00:00Z' \
+  git merge -q --no-ff -m 'Merge pull request #4291' pr-b
+MB="$(git rev-parse HEAD)"
+git checkout -q "$MAIN"
+GIT_AUTHOR_DATE='2031-01-01T00:00:00Z' GIT_COMMITTER_DATE='2031-01-01T00:00:00Z' \
+  git merge -q --no-ff -m 'Merge the second landing branch' land2
+ML2="$(git rev-parse HEAD)"
+
 OUT=""
 run() { # <before> <after> <name>
   local rc=0
@@ -167,7 +299,7 @@ row() { jq -r --arg a "$1" ".stages[] | select(.artifact == \$a) | .$2" \
 lrow() { jq -r --arg l "$1" ".stages[] | select(.label == \$l) | .$2" \
            "$SANDBOX/personas/lifecycle.json"; }
 
-reset_fixtures() { rm -f "$FIXTURES"/*.json; }
+reset_fixtures() { rm -f "$FIXTURES"/*.json; : > "$INVOKES"; }
 issue_fixture() { # <number> <state> [label ...]
   local n="$1" state="$2" labels='[]'
   shift 2
@@ -175,10 +307,44 @@ issue_fixture() { # <number> <state> [label ...]
   jq -nc --argjson n "$n" --arg s "$state" --argjson l "$labels" \
     '{number: $n, state: $s, labels: $l, comments: []}' > "$FIXTURES/issue-$n.json"
 }
-pulls_fixture() { # <sha> <pr-number> <head-ref> <body> [base-ref]
-  jq -nc --argjson n "$2" --arg h "$3" --arg b "$4" --arg base "${5:-main}" \
+# <sha> <pr-number> <head-ref> <body> [merge-commit-sha] [head-repo|null] [base-ref]
+#
+# merge_commit_sha defaults to the commit the pull request is reported
+# on, which is the merge-commit and the squash shape both; head.repo
+# defaults to this repository, and `null` writes a JSON null for the
+# deleted-fork case (D16). base.ref is settable so a scenario can prove
+# it is NOT filtered on any more (D1 as amended).
+#
+# A default file list is written alongside — one path outside `intent/`,
+# so a pull request the scenario does not describe passes D15 conjunct
+# (2) the way an ordinary implementing pull request does. files_fixture
+# overrides it.
+pulls_fixture() {
+  local repo_json
+  case "${6:-$TESTREPO}" in
+    null) repo_json='null';;
+    *) repo_json="$(jq -nc --arg r "${6:-$TESTREPO}" '{full_name: $r}')";;
+  esac
+  jq -nc --argjson n "$2" --arg h "$3" --arg b "$4" --arg base "${7:-main}" \
+    --arg m "${5:-$1}" --argjson repo "$repo_json" \
     '[{number: $n, merged_at: "2026-01-01T00:00:00Z", state: "closed",
-       base: {ref: $base}, head: {ref: $h}, body: $b}]' > "$FIXTURES/pulls-$1.json"
+       merge_commit_sha: $m, base: {ref: $base},
+       head: {ref: $h, repo: $repo}, body: $b}]' > "$FIXTURES/pulls-$1.json"
+  [ -f "$FIXTURES/files-$2.json" ] || files_fixture "$2" scripts/ci/lifecycle_advance.sh
+}
+files_fixture() { # <pr-number> <path>...
+  local n="$1"
+  shift
+  printf '%s\n' "$@" | jq -Rc '{filename: .}' | jq -sc '.' > "$FIXTURES/files-$n.json"
+}
+invoked() { # <extended-regex> <name>
+  if grep -Eq -- "$1" "$INVOKES"; then pass "$2"
+  else cat "$INVOKES" >&2; fail "$2 (no gh invocation matching: $1)"; fi
+}
+not_invoked() { # <extended-regex> <name>
+  if grep -Eq -- "$1" "$INVOKES"; then
+    cat "$INVOKES" >&2; fail "$2 (unexpected gh invocation matching: $1)"
+  else pass "$2"; fi
 }
 
 # ---------------------------------------------------------------------------
@@ -283,23 +449,27 @@ has "Trigger: pull request #4242 merged in ${CM:0:12}" \
   "S1: the trigger clause names the pull request and the commit it was found on"
 hasnt "Bootstrap compression" "S1: a merge candidate adds no files, so there is nothing to compress"
 
-banner "S2 · D2 · a branch with no number falls back to the closing keyword"
+banner "S2 · item 3 · D2 as amended · a branch that does not parse yields no candidate, whatever the body says"
 reset_fixtures
 pulls_fixture "$CM" 4243 hotfix-no-number "Emergency repair. Closes #999"
 issue_fixture 999 OPEN status:implementing
-run "$C4" "$CM" "S2: the keyword-resolved range exits 0"
-has "--add-label $(lrow status:implementing advances_to)" "S2: the same transition is applied"
-has "Trigger: pull request #4243 merged in" "S2: the trigger names the keyword-resolved pull request"
+run "$C4" "$CM" "S2: the unparseable-branch range exits 0"
+has "is not on an issue dispatch branch" "S2: the pull request is named and dropped"
+hasnt "--add-label" "S2: a closing keyword no longer resolves anything"
+hasnt "gh issue comment" "S2: and posts nothing"
+hasnt "by closing keyword" "S2: the keyword vocabulary appears nowhere in the output"
 
-banner "S3 · D2 · branch and keyword disagreeing is a refusal, not a guess"
-reset_fixtures
-pulls_fixture "$CM" 4244 odyssey/999-test "Closes #998"
-issue_fixture 999 OPEN status:implementing
-run_fail "$C4" "$CM" "S3: the disagreement range ends red"
-has "#999 by branch name" "S3: the failure names the branch's issue"
-has "#998 by closing keyword" "S3: the failure names the keyword's issue"
-has "not guessing" "S3: the failure says it is refusing rather than picking"
-hasnt "--add-label" "S3: no label is written for a pull request that resolves to two issues"
+banner "S3 · item 3 · D2 as amended · the keyword path is gone from the script, not merely unused"
+if grep -q 'kw_count' "$ADVANCER"; then
+  grep -n 'kw_count' "$ADVANCER" >&2
+  fail "S3: the advancer still carries the closing-keyword counter"
+fi
+pass "S3: the identifier kw_count appears nowhere in the advancer"
+if grep -q 'by closing keyword' "$ADVANCER"; then
+  grep -n 'by closing keyword' "$ADVANCER" >&2
+  fail "S3: the advancer still reports a closing-keyword resolution"
+fi
+pass "S3: the string 'by closing keyword' appears nowhere in the advancer"
 
 banner "S4 · D1 · the squash shape: one ordinary commit, no merge commit"
 reset_fixtures
@@ -434,6 +604,268 @@ if grep -q 'status:planning' "$ADVANCER"; then
   fail "S16: the advancer names a status label the ladder file owns"
 fi
 pass "S16: the advancer carries no status:planning literal either"
+
+# ---------------------------------------------------------------------------
+# #72 — the repair. Every scenario below fails against 1ea5a97 (the
+# script as PR #67 shipped it) and passes after the fix; the acceptance
+# item each one pins is named in its banner. Same hermetic rules: the
+# throwaway repository, DRY_RUN=1, the stub first on PATH, and every
+# expected label and message read out of the fixture ladder.
+# ---------------------------------------------------------------------------
+
+banner "S17 · item 15 · D15 · AT-1: the typo branch does not consume the transition"
+reset_fixtures
+pulls_fixture "$CM" 4260 odyssey/999-typo "A typo fix."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S17: the typo-branch range exits 0"
+hasnt "--add-label" "S17: the wrong pull request advances nothing"
+hasnt "gh issue comment" "S17: and posts nothing"
+has "is not #999's dispatch branch" "S17: the branch is rejected by name"
+
+reset_fixtures
+pulls_fixture "$CM" 4261 odyssey/999-test "The real implementation."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S17: the real implementation's range exits 0"
+has "--add-label $(lrow status:implementing advances_to)" \
+  "S17: the label the typo did not consume is still there for the real pull request"
+has "Trigger: pull request #4261 merged in" "S17: and the trigger names the right pull request"
+
+banner "S18 · item 16 · D2 · F1 ≡ AT-5: a body full of closing keywords is not a red run"
+reset_fixtures
+pulls_fixture "$CM" 4262 odyssey/999-test "Closes #36, Closes #35, close #36"
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S18: PR #45's body shape exits 0"
+exactly "--add-label" 1 "S18: exactly one transition"
+has "--add-label $(lrow status:implementing advances_to)" "S18: and it is the implement rung's"
+hasnt "::error::" "S18: no error anywhere in the run"
+hasnt "#36" "S18: the run never mentions #36"
+hasnt "#35" "S18: the run never mentions #35"
+
+reset_fixtures
+pulls_fixture "$CM" 4263 odyssey/999-test "Implements the plan for #999. This also fixes #12 in passing."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S18: Atlas's prose body exits 0"
+exactly "--add-label" 1 "S18: exactly one transition for the prose body too"
+hasnt "::error::" "S18: no error for ordinary prose"
+hasnt "#12" "S18: the run never mentions #12"
+
+banner "S19 · item 17 · D1 · F2: a pull request that reached main on a second parent"
+reset_fixtures
+pulls_fixture "$MF" 4264 odyssey/999-test "Merged into the landing branch." "$MF" "$TESTREPO" land
+issue_fixture 999 OPEN status:implementing
+run "$C5" "$ML" "S19: the landing-branch range exits 0"
+has "--add-label $(lrow status:implementing advances_to)" \
+  "S19: a pull request merged into a non-default base still advances the rung"
+has "Trigger: pull request #4264 merged in ${MF:0:12}" \
+  "S19: the trigger names the pull request and its own merge commit"
+
+banner "S19 · item 17 · D1 · a merge commit outside the range is not this push's event"
+reset_fixtures
+pulls_fixture "$L0" 4265 odyssey/999-test "Merged long ago." "$C1"
+issue_fixture 999 OPEN status:implementing
+run "$C5" "$ML" "S19: the out-of-range merge exits 0"
+has "which is outside" "S19: the pull request is named and dropped"
+hasnt "--add-label" "S19: nothing is written for a merge this push did not carry"
+
+banner "S19 · item 17 · D1 · a merge commit the checkout does not contain is red, never silent"
+reset_fixtures
+pulls_fixture "$L0" 4266 odyssey/999-test "Merged somewhere this clone cannot see." \
+  0000000000000000000000000000000000000042
+issue_fixture 999 OPEN status:implementing
+run_fail "$C5" "$ML" "S19: the unreachable merge commit ends red"
+has "::error::" "S19: it is a counted failure"
+has "pull request #4266" "S19: the failure names the pull request"
+has "fetch-depth: 0" "S19: and names the likely cause"
+hasnt "--add-label" "S19: nothing is written"
+
+banner "S20 · item 18 · D15 · AT-6: the right number, the wrong slug"
+reset_fixtures
+pulls_fixture "$CM" 4267 odyssey/999-998-land "Landing #998's work."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S20: the landing-style branch exits 0"
+hasnt "--add-label" "S20: a branch whose slug is not #999's advances nothing"
+hasnt "gh issue comment" "S20: and posts nothing"
+
+banner "S21 · item 21 · D17 · the near miss is announced, exactly once"
+exactly "::warning::lifecycle_advance:" 1 "S21: exactly one warning line"
+has "::warning::lifecycle_advance: #999 is at status:implementing" "S21: it names the issue and its rung"
+has "pull request #4267" "S21: it names the rejected pull request"
+has "odyssey/999-998-land" "S21: it names the branch that merged"
+has "odyssey/999-test" "S21: and the dispatch branch D15 expected instead"
+
+reset_fixtures
+pulls_fixture "$CM" 4268 odyssey/999-998-land "Landing #998's work."
+issue_fixture 999 OPEN status:in-review
+run "$C4" "$CM" "S21: the same merge with the rung already past exits 0"
+hasnt "::warning::lifecycle_advance:" "S21: an issue that is not at the merge rung draws no warning"
+
+reset_fixtures
+pulls_fixture "$CM" 4269 odyssey/999-test "The real implementation."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S21: an ordinary advance exits 0"
+hasnt "::warning::lifecycle_advance:" "S21: an issue with no near miss never warns"
+
+banner "S22 · item 19 · D16 · F9: a fork's branch name is not an identity claim"
+reset_fixtures
+pulls_fixture "$CM" 4270 odyssey/999-test "A drive-by contribution." "$CM" someone-else/agentic-sdlc
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S22: the fork range exits 0"
+has "pull request #4270 is from a fork" "S22: the skip is logged by number"
+hasnt "--add-label" "S22: no label is written"
+hasnt "gh issue comment" "S22: no comment is posted"
+hasnt "::warning::lifecycle_advance:" "S22: and no near miss is recorded for a fork"
+
+reset_fixtures
+pulls_fixture "$CM" 4271 odyssey/999-test "The fork was deleted." "$CM" null
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S22: the deleted-fork range exits 0"
+has "pull request #4271 is from a fork" "S22: a null head.repo behaves identically"
+hasnt "--add-label" "S22: still nothing is written"
+
+banner "S23 · item 20 · D1 · F11: the commits/pulls lookup is paginated"
+reset_fixtures
+pulls_fixture "$CM" 4272 odyssey/999-test "The implementation."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S23: the paginated range exits 0"
+invoked '^gh api --paginate repos/[^ ]+/commits/[0-9a-f]+/pulls$' \
+  "S23: every commits/pulls read carries --paginate"
+not_invoked '^gh api repos/[^ ]+/commits/' \
+  "S23: no unpaginated commits/pulls read is made at all"
+invoked '^gh api --paginate repos/[^ ]+/pulls/4272/files$' \
+  "S23: the file-list read is paginated too"
+
+banner "S23 · item 20 · D2 · AT-14: a zero-padded number in the BODY is not a disagreement"
+reset_fixtures
+pulls_fixture "$CM" 4273 odyssey/999-test "Closes #0999"
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S23: the zero-padded-keyword range exits 0"
+exactly "--add-label" 1 "S23: exactly one transition"
+hasnt "::error::" "S23: and no false disagreement"
+
+banner "S24 · item 22 · D15 conjunct (2) · an intent-only pull request is not an implementation"
+reset_fixtures
+pulls_fixture "$CM" 4274 odyssey/999-test "A spec amendment."
+files_fixture 4274 intent/999-test/spec.md
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S24: the intent-only range exits 0"
+hasnt "--add-label" "S24: a pull request that changes nothing outside intent/ advances nothing"
+hasnt "gh issue comment" "S24: and posts nothing"
+hasnt "::warning::lifecycle_advance:" "S24: a wrong-file-list merge is not a near miss (D17(a))"
+has "changes nothing outside intent/" "S24: the reason is logged"
+
+reset_fixtures
+pulls_fixture "$CM" 4275 odyssey/999-test "The implementation."
+files_fixture 4275 intent/999-test/spec.md scripts/ci/lifecycle_advance.sh
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S24: the same pull request with one path outside intent/ exits 0"
+has "--add-label $(lrow status:implementing advances_to)" \
+  "S24: one path outside intent/ is the whole difference"
+
+banner "S24 · item 22 · D15 conjunct (2) · the rebase shape is judged on the file list, not on msha^"
+reset_fixtures
+pulls_fixture "$R2" 4276 odyssey/999-test "Rebase-merged." "$R2"
+files_fixture 4276 intent/999-test/plan.md scripts/ci/lifecycle_advance.sh \
+  scripts/ci/tests/lifecycle_advance_test.sh docs/SPEC.md AGENTS.md README.md \
+  personas/lifecycle.json
+issue_fixture 999 OPEN status:implementing
+run "$ML" "$R2" "S24: the rebase-shaped range exits 0"
+has "--add-label $(lrow status:implementing advances_to)" \
+  "S24: a rebase merge whose last commit is only a plan sync still advances"
+
+banner "S25 · item 23 · D15 conjunct (3) · no intent folder in the AFTER tree, and none is a warning"
+reset_fixtures
+pulls_fixture "$NF" 4277 odyssey/999-test "The implementation." "$NF"
+issue_fixture 999 OPEN status:implementing
+[ -d "$SANDBOX/intent/999-test" ] || fail "S25: the working checkout should still hold intent/999-test"
+run "$C0" "$NF" "S25: the folderless range exits 0"
+has "has no intent/999-*/ directory" "S25: the reason is logged"
+hasnt "--add-label" "S25: nothing is written"
+hasnt "::warning::lifecycle_advance:" \
+  "S25: zero folders is not a near miss — the read is of the tree, not of the checkout"
+
+banner "S25 · item 23 · D15 conjunct (3) · two intent folders is corrupted state"
+reset_fixtures
+pulls_fixture "$TF" 4278 odyssey/999-test "The implementation." "$TF"
+issue_fixture 999 OPEN status:implementing
+run_fail "$R2" "$TF" "S25: the two-folder range ends red"
+has "::error::" "S25: it is a counted failure"
+has "intent/999-dup/" "S25: the failure names both folders"
+has "intent/999-test/" "S25: the failure names both folders (the second)"
+hasnt "--add-label" "S25: nothing is written"
+
+banner "S26 · item 24 · D15 · two accepted pull requests: the topologically later one wins"
+reset_fixtures
+pulls_fixture "$MA" 4290 odyssey/999-test "The first attempt." "$MA"
+pulls_fixture "$MB" 4291 odyssey/999-test "The one that landed last." "$MB" "$TESTREPO" land2
+issue_fixture 999 OPEN status:implementing
+run "$R2" "$ML2" "S26: the two-candidate range exits 0"
+exactly "--add-label" 1 "S26: exactly one transition"
+has "Trigger: pull request #4291 merged in ${MB:0:12}" \
+  "S26: the transition names the pull request whose merge commit is later in topo order"
+hasnt "Trigger: pull request #4290" "S26: and not the one whose commits are newer by date"
+
+banner "S27 · item 25 · D17 · a near miss never reaches D5's chain or D9's rule"
+reset_fixtures
+pulls_fixture "$CM" 4292 odyssey/999-998-land "Landing #998's work."
+issue_fixture 999 OPEN status:implementing status:build
+run "$C4" "$CM" "S27: the near miss on a two-status issue exits 0"
+hasnt "--add-label hold" "S27: hold is NOT applied by a near miss"
+hasnt "Corrupted stage state" "S27: no corrupted-state comment is posted"
+hasnt "gh issue comment" "S27: nothing is posted at all"
+
+reset_fixtures
+pulls_fixture "$CM" 4293 odyssey/999-998-land "Landing #998's work."
+issue_fixture 999 CLOSED status:implementing
+run "$C4" "$CM" "S27: the near miss on a closed issue at the merge rung exits 0"
+hasnt "::error::" "S27: D9's red does not fire on a near miss"
+hasnt "--add-label" "S27: and nothing is written"
+
+banner "S28 · item 26 · D18 · the defect-repair path is never read and never an error"
+reset_fixtures
+pulls_fixture "$CM" 4294 odyssey/50-work-sh "Fixes the dispatcher. Closes #50"
+issue_fixture 50 CLOSED
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S28: the repair merge exits 0"
+hasnt "--add-label" "S28: nothing is written"
+hasnt "::error::" "S28: GitHub's own close on the keyword is an ordinary fact"
+hasnt "::warning::lifecycle_advance:" "S28: and draws no near miss either"
+not_invoked 'issue view 50' "S28: #50 is never fetched — asserted from the invocation log"
+
+reset_fixtures
+pulls_fixture "$CM" 4295 odyssey/50-work-sh "Fixes the dispatcher. Closes #50"
+issue_fixture 50 OPEN status:implementing
+run "$C4" "$CM" "S28: the same merge with #50 open at the merge rung exits 0"
+hasnt "--add-label" "S28: a hand-labelled folderless issue still advances nothing"
+hasnt "::warning::lifecycle_advance:" "S28: and still draws no warning"
+not_invoked 'issue view 50' "S28: #50 is still never fetched"
+
+banner "S29 · item 27 · D12 D14 · the repair's living-spec upsert is observable"
+LIFECYCLE_ENTRY="$(awk '/^### lifecycle\.labels$/{f=1;next} /^### /{f=0} f' "$REPO/docs/SPEC.md")"
+[ -n "$LIFECYCLE_ENTRY" ] || fail "S29: docs/SPEC.md has no lifecycle.labels entry"
+while IFS= read -r dead; do
+  [ -n "$dead" ] || continue
+  if printf '%s\n' "$LIFECYCLE_ENTRY" | grep -qF -- "$dead"; then
+    fail "S29: lifecycle.labels still says '$dead'"
+  fi
+done <<'DEAD'
+those merged into the default branch
+first-parent commits
+BRANCH NAME
+The two signals disagreeing is a counted failure, not a guess
+carried a closing keyword it must not carry
+DEAD
+pass "S29: none of the five sentences #72 falsified survives in lifecycle.labels"
+for alive in "dispatch branch" "fork" "::warning::"; do
+  printf '%s\n' "$LIFECYCLE_ENTRY" | grep -qF -- "$alive" \
+    || fail "S29: lifecycle.labels does not describe '$alive'"
+done
+pass "S29: lifecycle.labels describes the identity test, the fork gate and the near-miss warning"
+printf '%s\n' "$LIFECYCLE_ENTRY" | grep -qE '\(PR #[0-9]+\)' \
+  || fail "S29: lifecycle.labels carries no (PR #<n>) citation"
+pass "S29: lifecycle.labels cites the pull request that changed it"
+[ "$(grep -c '^### ' "$REPO/docs/SPEC.md")" -eq 14 ] \
+  || fail "S29: the section count of docs/SPEC.md changed"
+pass "S29: the section count of docs/SPEC.md is unchanged"
 
 reset_fixtures
 

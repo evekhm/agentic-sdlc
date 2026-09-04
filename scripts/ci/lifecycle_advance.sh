@@ -17,9 +17,26 @@
 # merged file (#57, D1). Which rung does which is the `advances_on`
 # column of personas/lifecycle.json, read the same way everything else
 # here is; the pull requests of a range are found through
-# `gh api repos/<repo>/commits/<sha>/pulls` over its first-parent
-# commits, and each is resolved to at most one issue by its branch name
-# first and a closing keyword second (D2).
+# `gh api --paginate repos/<repo>/commits/<sha>/pulls` over EVERY commit
+# of the range in `--topo-order --reverse`, and a merged pull request is
+# kept only when its `merge_commit_sha` is contained in that range.
+#
+# Which merged pull request is THE implementing one is a separate
+# question from "was one merged at all", and #72 is the defect of
+# answering only the second (#57, D15). A pull request is the
+# implementing pull request of issue <n> when all three hold:
+#   (1) its head branch parses as `<actor>/<n>-<slug>`;
+#   (2) its own file list — `repos/<repo>/pulls/<n>/files`, the diff
+#       GitHub computes from the pull request's own refs, so it is the
+#       same set under a merge-commit, a squash and a rebase merge —
+#       changes at least one path outside `intent/`;
+#   (3) exactly one `intent/<n>-*/` directory exists in the <after>
+#       tree and <slug> is its slug.
+# A pull request from a fork never contends at all (D16), and a branch
+# that parses but misses the slug is announced as a near miss rather
+# than by silence (D17). There is no closing-keyword fallback: the
+# implementing pull request is precisely the one that must NOT carry a
+# closing keyword for its issue (D2 as amended, D9).
 #
 # WHICH label each merged artifact advances to, and the line posted when
 # it does, are not written here (#36, D2). They are read from
@@ -61,15 +78,20 @@
 #   draft does not advance a merged spec.md without `Status: Approved`
 #                         warns and leaves the stage where it was.
 #                         "Nothing is dispatched against a Draft."
-#   merge is a rung       a pull request merged into the default branch
-#                         and resolving to an issue whose current label
-#                         is the `advances_on: "merge"` row advances that
-#                         issue. A push carrying no pull request advances
+#   merge is a rung       a pull request whose merge landed IN the pushed
+#                         range and which is the implementing pull
+#                         request of an issue whose current label is the
+#                         `advances_on: "merge"` row advances that issue.
+#                         A push carrying no such pull request advances
 #                         nothing — there is no second trigger.
+#   a near miss is loud   a merged pull request that names an issue at
+#                         the merge rung but is not its implementing one
+#                         gets one `::warning::` line, never silence and
+#                         never a red (#57, D17).
 #   closed at merge is red a closed issue still carrying the merge rung's
-#                         label, with its pull request merged in the
-#                         range, is a counted failure and NOTHING is
-#                         written to it: the implementing pull request
+#                         label, with its implementing pull request
+#                         merged in the range, is a counted failure and
+#                         NOTHING is written to it: that pull request
 #                         carried a closing keyword it must not carry
 #                         (#57, D9).
 #
@@ -150,9 +172,13 @@ declare -A BEST_RANK   # issue -> rank of the furthest stage added
 declare -A BEST_STAGE  # issue -> that stage's name
 declare -A BEST_PATH   # issue -> that stage's file path
 declare -A ALL_FILES   # issue -> space-separated basenames added
-declare -A MERGE_PR    # issue -> the merged pull request number (filled below)
-declare -A MERGE_SHA   # issue -> the first-parent commit it was found on
-declare -A SEEN_PR     # pull request number -> already resolved in this range
+declare -A MERGE_PR    # issue -> the implementing pull request number (below)
+declare -A MERGE_SHA   # issue -> that pull request's merge_commit_sha
+declare -A MERGE_RANK  # issue -> that sha's index in the ordered range (D15)
+declare -A SEEN_PR     # pull request number -> already examined in this range
+declare -A NEAR_PR     # issue -> the near-miss pull request number (D17)
+declare -A NEAR_HEAD   # issue -> that pull request's head branch
+declare -A NEAR_EXPECT # issue -> the dispatch branch D15 expected instead
 
 # Two discovery steps now feed ONE loop: files added under
 # intent/<issue>-<slug>/ and pull requests merged in the range. The list
@@ -161,8 +187,10 @@ declare -A SEEN_PR     # pull request number -> already resolved in this range
 # associative array trips `set -u`'s unbound-variable check, and the
 # merge path can leave BEST_STAGE entirely empty.
 CANDIDATES=""
+NEAR_LIST=""
 n_crossings=0
 n_candidates=0
+n_near=0
 while IFS=$'\t' read -r _status path; do
     [ -n "${path:-}" ] || continue
     [[ "$path" =~ ^intent/([0-9]+)-[^/]+/(intent|spec|plan)\.md$ ]] || continue
@@ -189,27 +217,70 @@ done <<<"$added"
 
 # --- What the push merged -----------------------------------------------------
 # The implement rung owes no artifact — what it owes is code — so the
-# event that ends it is a merged pull request (D1). Walk the range's
-# first-parent commits OLDEST FIRST, so that when two pull requests in
-# one range resolve to the same issue the later one wins, and ask the
-# API which pull requests each commit belongs to. A commit that belongs
-# to none yields nothing and is not an error: a commit pushed straight
-# to the trunk with no pull request advances nothing, deliberately.
-default_branch="$(gh api "repos/$GITHUB_REPO" 2>/dev/null | jq -r '.default_branch // empty' || true)"
-[ -n "$default_branch" ] || default_branch="main"
-
+# event that ends it is a merged pull request (D1). EVERY commit of the
+# range is walked, not just its first parents: a pull request merged into
+# a landing branch that later lands on the trunk reaches main on a second
+# parent, and #42 — #35's own implementing pull request — is exactly that
+# shape in this repository's history (D1 as amended, Argus F2).
+#
+# The order is `--topo-order --reverse`, which is a TOTAL order on the
+# range containing each commit exactly once. Once the walk stopped being
+# first-parent the range is a graph, so "oldest first" had to be given a
+# definition; this one is deterministic for a given DAG, and the index of
+# a commit in it is the integer D15's second-candidate rule ranks on.
+RANGE_SHAS=()
 while read -r sha; do
     [ -n "$sha" ] || continue
-    if ! prs_raw="$(gh api "repos/$GITHUB_REPO/commits/$sha/pulls" 2>/dev/null)"; then
+    RANGE_SHAS+=("$sha")
+done < <(git rev-list --topo-order --reverse "$BEFORE..$AFTER")
+
+declare -A RANGE_INDEX  # commit sha -> its position in that total order
+range_pos=0
+for sha in ${RANGE_SHAS[@]+"${RANGE_SHAS[@]}"}; do
+    RANGE_INDEX["$sha"]="$range_pos"
+    range_pos=$((range_pos + 1))
+done
+
+# D15 conjunct (3) reads the $AFTER TREE, never the checkout, so a
+# historical range replays the same way on a laptop as it did in CI.
+# One `git ls-tree` per issue number, memoised: a range can report the
+# same pull request on many commits.
+declare -A FOLDER_N     # issue -> how many intent/<issue>-*/ directories
+declare -A FOLDER_SLUG  # issue -> the slug of the one directory, if one
+declare -A FOLDER_LIST  # issue -> all of them, for the failure message
+intent_folders() { # <issue>
+    local n="$1" names
+    [ -z "${FOLDER_N[$n]+set}" ] || return 0
+    names="$(git ls-tree -d --name-only "${AFTER}:intent" 2>/dev/null \
+               | grep -E "^0*${n}-" || true)"
+    if [ -z "$names" ]; then
+        FOLDER_N[$n]=0; FOLDER_SLUG[$n]=""; FOLDER_LIST[$n]=""
+        return 0
+    fi
+    FOLDER_N[$n]="$(grep -c . <<<"$names")"
+    FOLDER_LIST[$n]="$(sed 's|^|intent/|;s|$|/|' <<<"$names" | tr '\n' ' ')"
+    FOLDER_SLUG[$n]="$(sed -E "s/^0*${n}-//" <<<"$names" | head -1)"
+}
+
+for sha in ${RANGE_SHAS[@]+"${RANGE_SHAS[@]}"}; do
+    # `--paginate`: a commit can belong to more than one page of pull
+    # requests and the default page is 30 (#100). jq reads the
+    # concatenated pages as a stream of arrays, so `.[]` still walks
+    # every object.
+    if ! prs_raw="$(gh api --paginate "repos/$GITHUB_REPO/commits/$sha/pulls" 2>/dev/null)"; then
         fail_issue "cannot list pull requests for $sha"
         continue
     fi
-    # Merged only, and merged into the default branch: a pull request
-    # still open, or one merged into some other branch, is not a gate
-    # crossing on the trunk.
-    if ! prs="$(jq -c --arg b "$default_branch" \
-                  '.[] | select(.merged_at != null and .base.ref == $b)
-                       | {number, head: .head.ref, body: (.body // "")}' <<<"$prs_raw")"; then
+    # Merged only. The base branch is deliberately NOT filtered on: the
+    # trunk test is containment of the merge commit in this range, below,
+    # which holds identically for a merge-commit, a squash and a rebase
+    # merge and does not care what branch the pull request merged into
+    # on its way here (D1 as amended).
+    if ! prs="$(jq -c '.[] | select(.merged_at != null)
+                     | {number,
+                        head: .head.ref,
+                        repo: (.head.repo.full_name // ""),
+                        msha: (.merge_commit_sha // "")}' <<<"$prs_raw")"; then
         fail_issue "unreadable pull request list for $sha"
         continue
     fi
@@ -217,64 +288,126 @@ while read -r sha; do
         [ -n "$pr" ] || continue
         pr_number="$(jq -r '.number' <<<"$pr")"
         # One pull request can be reported for several commits of the
-        # range; resolve it once.
+        # range; examine it once.
         [ -z "${SEEN_PR[$pr_number]:-}" ] || continue
         SEEN_PR[$pr_number]=1
         pr_head="$(jq -r '.head' <<<"$pr")"
-        pr_body="$(jq -r '.body' <<<"$pr")"
+        pr_repo="$(jq -r '.repo' <<<"$pr")"
+        pr_msha="$(jq -r '.msha' <<<"$pr")"
 
-        # BRANCH FIRST, keyword second — the reverse of work.sh's order
-        # (D2). An implementing pull request must NOT carry a closing
-        # keyword for its issue (D9), so the branch name is the signal
-        # that is always there and the keyword is the fallback for a
-        # branch that carries no number. Both regexes are work.sh's
-        # (`:136`, `:155`) verbatim, so no new convention appears here.
-        by_branch=""
-        if [[ "$pr_head" =~ ^[a-z][a-z-]*/([0-9]+)- ]]; then
-            by_branch="$((10#${BASH_REMATCH[1]}))"
-        fi
-        by_keyword="$(grep -Eoi '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' \
-                        <<<"$pr_body" | grep -Eo '[0-9]+$' | sort -un || true)"
-        kw_count=0
-        [ -z "$by_keyword" ] || kw_count="$(grep -c . <<<"$by_keyword")"
-
-        resolved=""
-        conflict=""
-        if [ "$kw_count" -gt 1 ]; then
-            conflict="closing keywords naming more than one issue — $(sed 's/^/#/' <<<"$by_keyword" | tr '\n' ' ')"
-        elif [ -n "$by_branch" ] && [ -n "$by_keyword" ] && [ "$by_branch" != "$by_keyword" ]; then
-            conflict="#$by_branch by branch name, #$by_keyword by closing keyword"
-        elif [ -n "$by_branch" ]; then
-            resolved="$by_branch"
-        elif [ -n "$by_keyword" ]; then
-            resolved="$by_keyword"
-        fi
-        if [ -n "$conflict" ]; then
-            fail_issue "pull request #$pr_number resolves to two different issues: $conflict — not guessing"
+        # D16, the fork gate, BEFORE the identity test: on a fork the
+        # head branch is a string authored outside this repository, and
+        # D15 would otherwise read it as a claim about which issue to
+        # label. Quiet, because a merged fork pull request is a
+        # legitimate event this ladder has no rung for — but logged by
+        # number, so the skip is findable from the run.
+        if [ "$pr_repo" != "$GITHUB_REPO" ]; then
+            log "    pull request #$pr_number is from a fork (${pr_repo:-head repository deleted}) — no merge candidate"
             continue
         fi
-        # Neither signal: nothing to advance, and nothing is wrong.
-        [ -n "$resolved" ] || continue
+
+        # D15 conjunct (1). `0*` then `10#` so odyssey/0999- and
+        # odyssey/999- key one issue and no zero-padded string reaches a
+        # comparison (AT-14). No `<actor>` capture: no conjunct reads it.
+        [[ "$pr_head" =~ ^[a-z][a-z-]*/0*([0-9]+)-(.+)$ ]] || {
+            log "    pull request #$pr_number (\`$pr_head\`) is not on an issue dispatch branch — no merge candidate"
+            continue
+        }
+        resolved="$((10#${BASH_REMATCH[1]}))"
+        pr_slug="${BASH_REMATCH[2]}"
+
+        # The trunk test (D1 as amended): the merge is an event of THIS
+        # range when its merge_commit_sha is in the range. A sha the
+        # checkout does not contain is a counted failure naming the pull
+        # request, never a silent drop — `fetch-depth: 0` is this
+        # workflow's stated requirement and a shallow clone is the
+        # likeliest, not the only, cause.
+        if [ -z "$pr_msha" ] || ! git cat-file -e "${pr_msha}^{commit}" 2>/dev/null; then
+            fail_issue "pull request #$pr_number reports merge commit ${pr_msha:-<none>}, which this checkout does not contain — re-run the range from a full clone (fetch-depth: 0)"
+            continue
+        fi
+        pr_msha="$(git rev-parse "${pr_msha}^{commit}")"
+        merge_pos="${RANGE_INDEX[$pr_msha]:-}"
+        if [ -z "$merge_pos" ]; then
+            log "    pull request #$pr_number merged as ${pr_msha:0:12}, which is outside $BEFORE..$AFTER — no merge candidate"
+            continue
+        fi
+
+        # D15 conjunct (3), the cheap local one, before the extra API
+        # read. Zero folders yields no candidate and no near miss: by
+        # D18 the merge rung cannot legitimately reach such an issue.
+        intent_folders "$resolved"
+        if [ "${FOLDER_N[$resolved]}" -eq 0 ]; then
+            log "    pull request #$pr_number names #$resolved, which has no intent/$resolved-*/ directory at ${AFTER:0:12} — no merge candidate"
+            continue
+        fi
+        if [ "${FOLDER_N[$resolved]}" -gt 1 ]; then
+            fail_issue "#$resolved has more than one intent folder at ${AFTER:0:12} — ${FOLDER_LIST[$resolved]}— the slug of pull request #$pr_number cannot be checked against a corrupted state"
+            continue
+        fi
+        if [ "$pr_slug" != "${FOLDER_SLUG[$resolved]}" ]; then
+            # D17, the near miss. NOT a candidate: it must never reach
+            # D5's guard chain (which writes `hold`) or D9's red. It
+            # buys exactly one read-only issue view and at most one
+            # ::warning:: line, after the per-issue loop.
+            if [ -z "${NEAR_PR[$resolved]:-}" ]; then
+                n_near=$((n_near + 1))
+                NEAR_LIST="${NEAR_LIST}${resolved}"$'\n'
+            fi
+            NEAR_PR[$resolved]="$pr_number"
+            NEAR_HEAD[$resolved]="$pr_head"
+            NEAR_EXPECT[$resolved]="${pr_head%%/*}/${resolved}-${FOLDER_SLUG[$resolved]}"
+            log "    pull request #$pr_number (\`$pr_head\`) is not #$resolved's dispatch branch — no merge candidate, near miss recorded"
+            continue
+        fi
+
+        # D15 conjunct (2). The pull request's OWN file list, from the
+        # API — the three-dot diff GitHub computes from its own refs, so
+        # it is the same set of paths under a merge-commit, a squash and
+        # a rebase merge. `git diff <msha>^ <msha>` is not: on a rebase
+        # merge `<msha>^` is the pull request's own second-to-last
+        # commit, and the plan sync AGENTS.md requires would then be the
+        # whole diff (R2-1). At least one path outside `intent/` is what
+        # separates an implementation from a plan or spec amendment.
+        if ! files_raw="$(gh api --paginate "repos/$GITHUB_REPO/pulls/$pr_number/files" 2>/dev/null)"; then
+            fail_issue "cannot list the files of pull request #$pr_number; whether it is #$resolved's implementation is unknown"
+            continue
+        fi
+        outside="$(jq -r '.[].filename' <<<"$files_raw" | grep -vE '^intent/' | head -1 || true)"
+        if [ -z "$outside" ]; then
+            log "    pull request #$pr_number changes nothing outside intent/ — not #$resolved's implementation, no merge candidate"
+            continue
+        fi
 
         if [ -z "${BEST_STAGE[$resolved]:-}${MERGE_PR[$resolved]:-}" ]; then
             n_candidates=$((n_candidates + 1))
             CANDIDATES="${CANDIDATES}${resolved}"$'\n'
         fi
+        # Two accepted pull requests for one issue in one range is a
+        # legitimate landing shape, not a failure: the one whose merge
+        # commit is LATER in the ordered range wins (D15). Discovery
+        # order is not used — a re-created dispatch branch can branch
+        # from an older base and still merge last.
+        if [ -n "${MERGE_PR[$resolved]:-}" ] && [ "$merge_pos" -le "${MERGE_RANK[$resolved]}" ]; then
+            log "    pull request #$pr_number is #$resolved's implementation but merged before #${MERGE_PR[$resolved]} — superseded"
+            continue
+        fi
         # PROVISIONAL. The `advances_on` gate needs the issue's current
         # label, which is only known after the `gh issue view` below;
         # the per-issue loop accepts or discards this candidate.
         MERGE_PR[$resolved]="$pr_number"
-        MERGE_SHA[$resolved]="$sha"
+        MERGE_SHA[$resolved]="$pr_msha"
+        MERGE_RANK[$resolved]="$merge_pos"
     done <<<"$prs"
-done < <(git rev-list --first-parent --reverse "$BEFORE..$AFTER")
+done
 
-# The FAILURES conjunct is load-bearing: a resolution disagreement can be
-# the only event in a range, and an unconditional `exit 0` here would
-# swallow it. With no candidate but a failure recorded, execution falls
-# through an empty loop to the FAILURES check at the end and the run
-# ends red.
-if [ "$n_candidates" -eq 0 ] && [ "$FAILURES" -eq 0 ]; then
-    log "==> nothing to advance in $BEFORE..$AFTER — no intent/<issue>-<slug>/{intent,spec,plan}.md added and no merged pull request found"
+# The FAILURES conjunct is load-bearing: a failed lookup can be the only
+# event in a range, and an unconditional `exit 0` here would swallow it.
+# So can a near miss (D17), whose whole point is that it is announced.
+# With no candidate but one of those recorded, execution falls through an
+# empty loop to the near-miss report and the FAILURES check at the end.
+if [ "$n_candidates" -eq 0 ] && [ "$FAILURES" -eq 0 ] && [ "$n_near" -eq 0 ]; then
+    log "==> nothing to advance in $BEFORE..$AFTER — no intent/<issue>-<slug>/{intent,spec,plan}.md added and no implementing pull request found"
     exit 0
 fi
 
@@ -578,6 +711,34 @@ $marker"
     fi
     edit_labels "$issue" "$target" "$remove" \
         || { fail_issue "could not set $target on #$issue"; continue; }
+done
+
+# --- Near misses (D17) --------------------------------------------------------
+# A merge at the implement rung is never reported by silence alone. This
+# loop runs OUTSIDE the per-issue chain above on purpose: a near miss is
+# not a candidate, so it can neither apply `hold`, nor post a
+# corrupted-state comment, nor turn the trunk red. Its only two outcomes
+# are one `::warning::` line or nothing at all, and the only call it
+# makes is a read.
+merge_rung_label="$(jq -r 'first(.stages[] | select(.advances_on == "merge") | .label) // empty' \
+                      "$LIFECYCLE_JSON")"
+for issue in $(printf '%s\n' "$NEAR_LIST" | grep -E '^[0-9]+$' | sort -nu || true); do
+    # The issue gained a real candidate after all — the rung moved (or
+    # was deliberately not moved) for a reason the loop above already
+    # reported. Nothing to warn about.
+    [ -z "${MERGE_PR[$issue]:-}${BEST_STAGE[$issue]:-}" ] || continue
+    [ -n "$merge_rung_label" ] || continue
+    if ! near_view="$(gh issue view "$issue" --repo "$GITHUB_REPO" \
+                        --json number,labels 2>/dev/null)"; then
+        log "    #$issue had a near miss but is not readable — no warning"
+        continue
+    fi
+    near_labels="$(jq -r '.labels[].name' <<<"$near_view")"
+    if ! grep -Fxq "$merge_rung_label" <<<"$near_labels"; then
+        log "    #$issue had a near miss but is not at $merge_rung_label — no warning"
+        continue
+    fi
+    echo "::warning::lifecycle_advance: #$issue is at $merge_rung_label and pull request #${NEAR_PR[$issue]} merged from \`${NEAR_HEAD[$issue]}\`, which is not its dispatch branch \`${NEAR_EXPECT[$issue]}\` — no stage transition was made. If that pull request is #$issue's implementation, the branch name is wrong and the rung must be advanced by hand."
 done
 
 if [ "$FAILURES" -gt 0 ]; then
