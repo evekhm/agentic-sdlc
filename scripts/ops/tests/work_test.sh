@@ -264,7 +264,7 @@ run() {
   local want="$1" name="$2" rc=0
   shift 3  # drop want, name and the literal --
   set +e
-  OUT="$(DRY_RUN="${DRY:-1}" HEADLESS="${HL:-0}" \
+  OUT="$(DRY_RUN="${DRY:-1}" HEADLESS="${HL:-0}" WORK_COST_FILE="${WORK_COST_FILE:-}" \
     "${TREE:-$REPO}/scripts/ops/work.sh" "$@" 2>&1)"
   rc=$?
   set -e
@@ -906,6 +906,37 @@ printf '%s\n' '{"status":"SUCCESS","response":"WORK-RESULT: blocked #113 first t
 TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_last.json" \
   run 0 "D14: the last result line decides" -- 113
 has "daedalus reported: ok" "D14: the later verdict wins"
+
+banner "#150 Antigravity dispatch writes cost and model to WORK_COST_FILE"
+: > "$LAUNCHES"; : > "$MINTS"
+cost_file="$WORK/cost.txt"
+# 100,000 input, 10,000 output, 5,000 thinking, 20,000 cache read
+# on daedalus (pinned to antigravity, model: gemini-3.1-pro-high).
+# Pro rates: input: 1.25, cache_read: 0.3125, output: 5.00
+# cost = (100000 * 1.25 + 20000 * 0.3125 + (10000 + 5000) * 5.00) / 1000000
+# cost = (125000 + 6250 + 75000) / 1000000 = 206250 / 1000000 = 0.206250
+printf '%s\n' '{"status":"SUCCESS","response":"done\nWORK-RESULT: ok #113 plan committed","usage":{"input_tokens":100000,"output_tokens":10000,"thinking_tokens":5000,"cache_read_tokens":20000,"total_tokens":135000}}' \
+  > "$WORK/agy_cost.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost.json" \
+  WORK_COST_FILE="$cost_file" \
+  run 0 "#150: Antigravity dispatch writes cost and model to WORK_COST_FILE" -- 113
+cost_line1="$(sed -n '1p' "$cost_file")"
+cost_line2="$(sed -n '2p' "$cost_file")"
+[ "$cost_line1" = "0.206250" ] || fail "#150: expected cost 0.206250, got '$cost_line1'"
+pass "#150: Antigravity dispatch calculates list-rate cost from .usage"
+[ "$cost_line2" = "gemini-3.1-pro-high" ] || fail "#150: expected model gemini-3.1-pro-high, got '$cost_line2'"
+pass "#150: Antigravity dispatch writes resolved model to line 2"
+
+# Missing usage truncates WORK_COST_FILE
+unpriced_cost_file="$WORK/unpriced_cost.txt"
+echo "stale" > "$unpriced_cost_file"
+printf '%s\n' '{"status":"SUCCESS","response":"done\nWORK-RESULT: ok #113 plan committed"}' \
+  > "$WORK/agy_no_usage.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_no_usage.json" \
+  WORK_COST_FILE="$unpriced_cost_file" \
+  run 0 "#150: Missing usage truncates WORK_COST_FILE" -- 113
+[ ! -s "$unpriced_cost_file" ] || fail "#150: WORK_COST_FILE should be empty when usage missing"
+pass "#150: Missing usage truncates WORK_COST_FILE"
 
 banner "#43 D16(c)/Acceptance 14 the interactive row refuses when there is no terminal"
 # run() captures stdout through a command substitution, so it is exactly

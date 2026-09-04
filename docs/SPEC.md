@@ -418,7 +418,12 @@ the escalation label.
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
-tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
+tokens-per-message. It prices both Claude and Gemini models against
+official list rates (Anthropic and Google Cloud Vertex AI rates effective
+2026-09-04), ingests Antigravity dispatch JSON envelopes alongside
+Claude transcript logs, and reports unpriced models with explicit
+warnings and non-zero unpriced token counts (PR #161).
+Tests: `scripts/ops/tests/session_spend_test.sh`.
 
 ### ops.dispatch
 `scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]` starts a
@@ -560,14 +565,18 @@ transcripts back, because transcripts are stored per working directory:
 a dispatch inside a worktree records its usage in a tree that a caller
 scanning the main project directory never sees, so a ceiling metered
 that way never trips and the run reads as free. The envelope travels
-with the run and is therefore correct wherever the run happened. It is
+with the run and is therefore correct wherever the run happened. For
+Claude Code sessions the cost is read from `.total_cost_usd`; for
+Antigravity sessions the cost is computed directly from `.usage`
+(`input_tokens`, `output_tokens`, `thinking_tokens`, `cache_read_tokens`)
+at Vertex AI list rates for the resolved model (PR #161). It is
 written before any exit path, because a dispatch that refused, timed
 out or crashed still spent money and a meter that sees only successes
-cannot hold a budget; and when the envelope carries no cost the file is
-emptied rather than set to zero, so a caller must refuse rather than
-record a run it cannot price as free. For the same reason the count of
-permission denials is reported: a run can exit 0 having been stopped
-from doing anything.
+cannot hold a budget; and when the envelope carries no cost or the model
+is unpriced the file is emptied rather than set to zero, so a caller must
+refuse rather than record a run it cannot price as free. For the same reason
+the count of permission denials is reported: a run can exit 0 having been
+stopped from doing anything.
 
 A headless launch is read for a final `WORK-RESULT: <ok|refused|blocked>
 #<n> <reason>` line, taken from the decoded response text (the raw

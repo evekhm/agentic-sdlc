@@ -614,6 +614,7 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
             # --add-dir receives (D1 as amended). A `cd` to anywhere
             # else is what remains forbidden.
             model="$(model_of "$persona")" || exit 1
+            launch_model="$model"
             LAUNCH_ARGV+=( agy -p "$PROMPT" --agent "$persona"
                            --add-dir "$REPO_ROOT" --model "$model"
                            --output-format json --print-timeout "${mins}m" )
@@ -676,6 +677,7 @@ launch_persona=""
 launch_harness=""
 launch_target=""
 launch_missing=0
+launch_model=""
 LAUNCH=()
 while read -r persona; do
     [ -n "$persona" ] || continue
@@ -968,6 +970,52 @@ if [ -n "$WORK_COST_FILE" ]; then
         models="$(printf '%s' "$raw" \
             | jq -r '(.modelUsage // {}) | keys | join(",")' 2>/dev/null)" || models=""
         printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
+    elif [ "$launch_harness" = "antigravity" ]; then
+        models="${launch_model:-$(model_of "$launch_persona" 2>/dev/null)}" || models=""
+        models="${models:-$(printf '%s' "$raw" | jq -r '.model // empty' 2>/dev/null)}"
+        inp="$(printf '%s' "$raw" | jq -r '.usage.input_tokens // empty' 2>/dev/null)" || inp=""
+        out="$(printf '%s' "$raw" | jq -r '((.usage.output_tokens // 0) + (.usage.thinking_tokens // 0))' 2>/dev/null)" || out=""
+        cr="$(printf '%s' "$raw" | jq -r '.usage.cache_read_tokens // 0' 2>/dev/null)" || cr="0"
+        if [ -n "$inp" ] && [ -n "$models" ]; then
+            cost="$(awk -v m="$models" -v inp="$inp" -v cr="$cr" -v out="$out" '
+            function model_family(m) {
+              if (m ~ /gemini/) return "gemini"
+              return ""
+            }
+            function model_version(m, a) {
+              if (match(m, /gemini-([0-9]{1,2})\.([0-9]{1,2})/, a)) return a[1] "." a[2]
+              return ""
+            }
+            function rate_tier(m,   f, v) {
+              f = model_family(m)
+              if (f != "gemini") return ""
+              v = model_version(m)
+              if (m ~ /flash/) {
+                if (v == "1.5" || v == "2.0" || v == "2.5" ||
+                    v == "3.5" || v == "3.6" || v == "3.7" || v == "3.8")
+                  return "0.15 0.0375 0.60"
+                return ""
+              }
+              if (m ~ /pro/) {
+                if (v == "1.5" || v == "2.5" || v == "3.1")
+                  return "1.25 0.3125 5.00"
+                return ""
+              }
+              return ""
+            }
+            BEGIN {
+              r = rate_tier(m)
+              if (r == "") exit 1
+              split(r, p, " ")
+              printf "%.6f\n", (inp*p[1] + cr*p[2] + out*p[3]) / 1e6
+            }')" || cost=""
+        fi
+        if [ -n "$cost" ]; then
+            printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
+        else
+            : > "$WORK_COST_FILE"
+            echo "==> no total_cost_usd or unpriced .usage in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
+        fi
     else
         # Truncate rather than guess. A caller that reads an empty cost
         # must refuse; one that reads a fabricated 0 would keep spending.
