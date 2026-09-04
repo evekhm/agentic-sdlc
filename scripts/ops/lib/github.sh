@@ -18,9 +18,26 @@
 # Every call to GitHub goes through gh_json(), so a test can put a stub
 # `gh` first on PATH and the whole caller becomes hermetic.
 
-# gh_json <api-path>  — the ONE read path to GitHub.
-gh_json() {
-    gh api "$1"
+# The ONE read path to GitHub. Every call goes through it, so a test can
+# put a stub `gh` first on PATH and the whole caller becomes hermetic.
+#
+# `--paginate` is the caller's choice, and for a LIST read it is not
+# optional: the API answers 30 items per page, so a plain `gh api
+# .../comments` returns the OLDEST thirty comments and nothing else. On
+# a thread longer than that the last claim is on a page nobody asked
+# for, the mutex reads a stale holder — or no holder at all — and
+# D5(e) can pass while another session is holding the issue (#51, Atlas
+# AT-2). `gh api --paginate` emits one JSON array per page; `jq -s add`
+# rejoins them into the single array every caller here expects, and
+# `// []` keeps a thread with no comments an empty array rather than
+# null. `per_page=100` is the API's maximum and only reduces the number
+# of round trips — correctness comes from `--paginate`, not from it.
+gh_json() { # <api-path> [--paginate]
+    if [ "${2:-}" = "--paginate" ]; then
+        gh api --paginate "$1?per_page=100" | jq -s 'add // []'
+    else
+        gh api "$1"
+    fi
 }
 
 # closing_refs <pr-body>  — distinct same-repo issue numbers this body
