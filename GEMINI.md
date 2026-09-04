@@ -104,26 +104,28 @@ agy 1.1.25:
 # Model tiers (Gemini / Antigravity)
 
 Bindings for the shared five-tier ladder in AGENTS.md ("Subagent
-model tiers"). Where a workflow pins a model (env var in the workflow
-file), that pin is the source of truth, not this file:
+model tiers"). The exact model ids live in one place —
+`config/model_tiers.yaml`, under `harnesses.antigravity` — and nowhere
+else; a workflow, a script or this file naming its own would be a
+second binding nobody could find (#25, D15). Read the ids there; what
+follows is only which tier does what:
 
-- `FAST_TIER` (sweeps, lookups, routing): flash at reduced effort —
-  `gemini-3.7-flash-medium` or `-low`; `agy models` lists what the
-  runtime serves.
+- `FAST_TIER` (sweeps, lookups, routing): flash at reduced effort
+  (`-medium`, or `-low`); `agy models` lists what the runtime serves.
 - `MECHANICAL_TIER` and `IMPLEMENTATION_TIER` (spec-bound work, no
-  design decisions): the flash tier at full effort,
-  `gemini-3.7-flash-high`. Adjacent tiers sharing one model is fine
-  per AGENTS.md — the tier names the task contract, not the price.
+  design decisions): the same flash generation at full effort
+  (`-high`). Adjacent tiers sharing one model is fine per AGENTS.md —
+  the tier names the task contract, not the price.
 - `REVIEW_TIER` and `FRONTIER_TIER` (evidence-based review; design,
-  grilling, tricky debugging): the pro tier (`gemini-3.1-pro-high`).
+  grilling, tricky debugging): the pro tier.
 
 Interactive sessions follow the same principle, with one runtime
 difference from the Claude harness: Antigravity has no per-sub-agent
 model pin (sub-agents inherit the session model), so the tier is
 chosen at session granularity instead — start mechanical sessions on
-the flash tier (`agy --model gemini-3.7-flash-high`), judgment
-sessions on the pro tier. Long-running executor processes get their
-tier in their profile's `AGENT_MODEL` env, same split.
+the flash tier (`agy --model <MECHANICAL from config/model_tiers.yaml>`),
+judgment sessions on the pro tier. Long-running executor processes get
+their tier in their profile's `AGENT_MODEL` env, same split.
 
 # Context ceiling
 

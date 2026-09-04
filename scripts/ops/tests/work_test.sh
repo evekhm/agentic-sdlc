@@ -584,7 +584,14 @@ has ".agents/agents/daedalus/agent.md" "D3: the compiled target is the file agy 
 has "command:  timeout 2760 agy -p " "D6: the child is wrapped at 45m + a minute"
 has " --agent daedalus " "D1: the persona reaches agy as --agent"
 has " --add-dir $REPO " "D1/D24: --add-dir is the checkout that owns this script"
-has " --model gemini-3.1-pro-high " "D9: the model comes from the compiled sidecar"
+# Read the expected model out of the sidecar itself: this assertion is
+# about where work.sh gets the model, not about which model is pinned,
+# and a literal here would fail every time config/model_tiers.yaml is
+# re-pinned.
+sidecar_model="$(sed -n 's/.*"model": "\([^"]*\)".*/\1/p' \
+                 "$REPO/.agents/agents/daedalus/agent.json")"
+[ -n "$sidecar_model" ] || fail "D9: no model in daedalus's compiled sidecar"
+has " --model $sidecar_model " "D9: the model comes from the compiled sidecar"
 has " --output-format json " "D14: the outcome has to be machine-readable"
 has " --print-timeout 45m" "D6: the timeout comes from personas/daedalus.yaml"
 has "prompt:   Work issue #113 in this repository." "D2: the prompt names the number"
