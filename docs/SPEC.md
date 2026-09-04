@@ -346,9 +346,11 @@ breaker); `in-progress` claimed by another actor; and `--as` naming a
 persona that does not own the stage. When the number given is a pull
 request, those refusals read the UNION of the pull request's own labels
 and the resolved issue's — a `hold` on either side refuses, and the
-message names the side that carries it, because the circuit breaker is
+message names the side that carries it, or both sides when both do,
+because the circuit breaker is
 placed where the operator is looking and resolving to the issue must
-not discard it (#50, Atlas AT-1, PR #95). The stage is not part of that
+not discard it (#50, Atlas AT-1, PR #95; both sides, PR #99). The
+stage is not part of that
 union:
 it is derived from the issue's labels alone, since the state machine
 belongs to the unit of work and a `status:*` label on a pull request
@@ -363,6 +365,14 @@ read — refuses too: the label is the mutex, and one naming nobody is
 still held. A claim by an owner of the current stage is that actor
 resuming and proceeds; when `--as` names one owner, the mutex binds
 against that actor alone, so one reviewer's claim stops the other.
+That thread is the issue's, and the WHOLE of it: the API answers a
+list read thirty items at a time, and a mutex that read only the
+first page would take a claim already handed back for the current
+one and launch a second session onto an issue another actor holds
+(#51, Atlas AT-2, PR #99). So `in-progress` on a pull request refuses
+too, naming the side that carries the label and the issue whose
+thread was read — a claim is only ever posted on the unit of work
+(PR #95, Argus R1-1; PR #99).
 The script never writes to GitHub: the claim belongs to the session it
 launches, not to the launcher. A stage with several owners (review)
 prints both instructions and launches neither unless `--as` names one.
