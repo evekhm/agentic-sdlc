@@ -519,7 +519,7 @@ requires a terminal: with no tty on stdin or stdout the launcher exits
 1 naming `HEADLESS=1`, before minting anything and without starting a
 child — the same class as a missing binary, an environment that cannot
 start the row rather than a decision about the number.
-Three further environment variables exist for the case the MODEs do not
+Four further environment variables exist for the case the MODEs do not
 cover — a launch with no operator watching it — and each is opt-in, so
 an unset variable leaves argv and behaviour exactly as an attended run
 has them. A spend ceiling is passed to the harness itself, so that an
@@ -529,7 +529,19 @@ through, because the default mode denies a persona the file and tracker
 writes its stage exists to make, and an unattended persona that cannot
 act spends its whole prompt preamble to say so. The run's own reported
 cost is written to a caller-named file, which is what lets a driver
-meter a queue.
+meter a queue. And a model may be named for one dispatch, which is how
+a run is re-tiered without a compiler run — a flag on the launch and
+not an environment variable, because the environment variable does not
+override the `model:` line `personas.compiler` writes into the agent
+file, so a dispatch re-tiered that way bills in full to the compiled
+pin while appearing to have moved.
+
+That last failure is why the cost file also names the model the run
+actually billed to, taken from the envelope rather than echoed back
+from what the caller asked for. A ledger that records the request
+cannot show a re-tiering that did not happen, and a cost-control
+mechanism whose own records cannot distinguish an intended saving from
+a real one is not a control.
 
 That cost is taken from the run's result envelope and not by reading
 transcripts back, because transcripts are stored per working directory:
