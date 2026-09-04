@@ -62,6 +62,7 @@ git fetch -q origin
 
 # --- report ------------------------------------------------------------------
 REPORT="$(bash "$SCRIPT")"
+[ -n "$REPORT" ] && pass "the report prints something at all" || fail "empty report"
 verdict() { echo "$REPORT" | awk -v n="$1" '$1==n{print $NF}'; }
 
 [ "$(verdict safe)" = safe ]         && pass "merged clean worktree is safe"       || fail "safe: $(verdict safe)"
@@ -103,6 +104,18 @@ git ls-remote -q --exit-code origin refs/heads/feat/pushed >/dev/null \
   && pass "--prune-remote kept unmerged remote branch" || fail "feat/pushed deleted from origin"
 git ls-remote -q --exit-code origin refs/heads/main >/dev/null \
   && pass "--prune-remote never touches main" || fail "main deleted from origin"
+
+# --- no early exit on the worktree list (#157) --------------------------------
+# `git worktree list | awk '{print; exit}'` kills git with SIGPIPE the moment
+# the list is long enough that git is still writing, and under `pipefail` that
+# is the script's exit status — the whole report vanished on a host with 47
+# worktrees. The race cannot be provoked reliably in a fresh temp repo, so the
+# invariant is asserted on the source: whoever reads that list reads all of it.
+for s in "$SCRIPT" "$REPO/scripts/ops/claim.sh"; do
+  grep -q "git worktree list --porcelain.*awk.*exit}" "$s" \
+    && fail "$(basename "$s") exits awk early on the worktree list" \
+    || pass "$(basename "$s") consumes the whole worktree list"
+done
 
 # --- argument handling -------------------------------------------------------
 bash "$SCRIPT" --bogus >/dev/null 2>&1 && fail "unknown flag accepted" || pass "unknown flag is refused"

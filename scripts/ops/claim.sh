@@ -204,8 +204,11 @@ fi
 
 # Every git write targets the primary checkout: worktrees are registered
 # there whichever worktree this script is invoked from.
-PRIMARY="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')" \
-    || true
+# The awk reads the whole stream on purpose: exiting on the first match
+# leaves git writing into a closed pipe, and that SIGPIPE would fail the
+# assignment for a reason that has nothing to do with the repository.
+PRIMARY="$(git worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree / && !p { print $2; p = 1 }')" || true
 [ -n "$PRIMARY" ] || die "not inside a git repository"
 ROOT="$(git -C "$PRIMARY" rev-parse --show-toplevel)"
 
