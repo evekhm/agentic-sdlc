@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Refuses a commit whose working tree is the PRIMARY checkout, never a
+# linked worktree. AGENTS.md ("Working the tracker"): "Never: commit,
+# stage, stash or checkout in the primary checkout." That rule was
+# prose only and got violated three times in one session on
+# 2026-09-04 (once destroying a peer's uncommitted work, recovered by
+# luck) before ever reaching a commit — this hook is the last line of
+# defense for the one moment that IS interceptable: the commit itself.
+#
+# git worktree list --porcelain's first entry is always the primary
+# checkout (the one whose .git is a real directory, not a linked
+# worktree's gitfile). Read the whole output before parsing it (#123:
+# an awk 'exit' mid-pipe from a live `git worktree list` can SIGPIPE
+# on a checkout with many worktrees).
+set -euo pipefail
+
+toplevel="$(git rev-parse --show-toplevel)"
+list="$(git worktree list --porcelain)"
+primary="$(printf '%s\n' "$list" | awk '/^worktree /{print $2; exit}')"
+
+if [ "$toplevel" = "$primary" ]; then
+    echo "REFUSED: commit attempted in the primary checkout ($primary)." >&2
+    echo "AGENTS.md: the primary checkout is read-only reference (except runs/)." >&2
+    echo "Move this work to a worktree: git worktree add -b <actor>/<n>-<slug> \\" >&2
+    echo "  .claude/worktrees/<actor>-<n>-<slug> origin/main" >&2
+    exit 1
+fi

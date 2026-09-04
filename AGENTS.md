@@ -186,7 +186,14 @@ file names it.
   wherever that is on the machine) is read-only reference and stays
   on a clean `main`: never edit, stash, checkout, commit or stage
   there. If you find it dirty, report it and leave the changes alone —
-  they are a peer's.
+  they are a peer's. Prose is not enough to catch this reliably (it
+  was violated three times in one session on 2026-09-04, once
+  destroying a peer's uncommitted work): run `scripts/ops/hooks/install.sh`
+  once per machine to install a `pre-commit` hook, shared by the
+  primary checkout and every linked worktree, that refuses any commit
+  whose working tree is the primary checkout. It is a last-line check
+  on the one moment that's interceptable — the commit itself — not a
+  substitute for entering a worktree before the first edit.
 - **Enter your own worktree before the first edit**, created from
   `origin/main`:
   `git fetch origin && git worktree add -b <actor>/<n>-<slug>
@@ -450,18 +457,25 @@ Search the tracker first, every time, before creating a new issue:
    "<term>"` and the same query via `gh search prs`).
 3. If the issue concerns specific file(s) — nearly always true for a
    defect you just diagnosed rather than a feature you're proposing —
-   also run a **file-scoped** check: `gh pr list --state open --json
-   number,title,files --repo <owner>/<repo>` filtered to those paths.
-   Every session's writes land under the same handful of shared bot
-   identities, so authorship tells you nothing about who's already
-   working it; a keyword search misses a PR whose title and body don't
-   happen to use your words. The file-scoped check catches it
-   regardless of phrasing. Do this again immediately before `gh pr
-   create`, not only when you filed the issue — minutes are enough for
-   a peer's fix to land (agentic-sdlc #130/PR #132 duplicated #126/PR
-   #127 this way on 2026-09-04: same defect, independently diagnosed,
-   19 minutes apart, because the search ran once at issue-filing time
-   and was never repeated at PR time).
+   also run a **file-scoped** check, identity-agnostic since every
+   session's writes land under the same handful of shared bot
+   identities: `scripts/ops/tracker_search.sh --files <path>...
+   [--terms <term>...]` wraps both this and step 2 in one command
+   (`gh pr list --json number,title,files` filtered to those paths,
+   plus the keyword search) and exits 2 the moment anything matches —
+   read its output before filing anything. A keyword search alone
+   misses a PR whose title and body don't happen to use your words;
+   the file-scoped pass catches it regardless of phrasing. Run it
+   again immediately before `gh pr create`, not only when you filed
+   the issue — minutes are enough for a peer's fix to land
+   (agentic-sdlc #130/PR #132 duplicated #126/PR #127 this way on
+   2026-09-04: same defect, independently diagnosed, 19 minutes apart,
+   because the search ran once at issue-filing time and was never
+   repeated at PR time — and #141 duplicated #129/PR #138 the same
+   way in the same session, even with this rule already written down,
+   because writing the rule down did not make the check run. If the
+   tool reports a match, that is the point of the check working, not
+   an obstacle to route around).
 4. Read the matches — including their comment threads. Agreed findings
    in an existing thread are settled design; do not re-propose what a
    thread has already killed.
