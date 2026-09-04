@@ -73,6 +73,16 @@ set -euo pipefail
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
 HEADLESS="${HEADLESS:-0}"
+# Unattended-run controls (#108). All three are opt-in and claude-code
+# headless only: unset, this script behaves exactly as it did before.
+#   WORK_MAX_USD          hard per-run spend ceiling, enforced by the harness
+#   WORK_PERMISSION_MODE  passed to --permission-mode; without it an
+#                         unattended persona is denied Edit/git/gh
+#   WORK_COST_FILE        path the observed cost of this run is written to,
+#                         so a caller can meter without scanning transcripts
+WORK_MAX_USD="${WORK_MAX_USD:-}"
+WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
+WORK_COST_FILE="${WORK_COST_FILE:-}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GITHUB_LIB="$REPO_ROOT/scripts/ops/lib/github.sh"
@@ -96,6 +106,19 @@ Modes are environment variables, never flags:
   HEADLESS=1  run the session non-interactively and map its
               WORK-RESULT line to an exit code. Antigravity personas
               are always headless; there is no interactive row.
+
+Unattended-run controls, claude-code headless only, all opt-in (#108):
+  WORK_MAX_USD=<amount>       hard per-run spend ceiling held by the
+                              harness, not merely declared in config.
+  WORK_PERMISSION_MODE=<mode> passed to --permission-mode. Without it
+                              the default mode denies Edit, git and gh,
+                              and the persona spends its preamble to
+                              report that it could not act.
+  WORK_COST_FILE=<path>       write this run's observed cost there, so a
+                              caller can meter a dispatch without
+                              scanning transcripts — which is wrong for
+                              worktrees anyway, since each working
+                              directory gets its own transcript tree.
 USAGE
 }
 
@@ -534,6 +557,18 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
             if [ "$headless" = "1" ]; then
                 LAUNCH_ARGV+=( claude -p "$PROMPT" --agent "$persona"
                                --output-format json )
+                # An unattended dispatch needs a spend ceiling the machine
+                # holds, not one a config file merely declares (#108). Both
+                # flags are print-mode only and both are opt-in: unset, the
+                # argv is byte-for-byte what it was before.
+                [ -z "$WORK_MAX_USD" ] \
+                    || LAUNCH_ARGV+=( --max-budget-usd "$WORK_MAX_USD" )
+                # Without this the default mode denies Edit, git and gh, and
+                # the persona burns its ~35k-token preamble to report that it
+                # could not act. The denials are counted in the envelope's
+                # permission_denials field; see WORK_COST_FILE below.
+                [ -z "$WORK_PERMISSION_MODE" ] \
+                    || LAUNCH_ARGV+=( --permission-mode "$WORK_PERMISSION_MODE" )
             else
                 LAUNCH_ARGV+=( claude --agent "$persona" "$PROMPT" )
             fi
@@ -884,6 +919,29 @@ tok=""
 # Echoed first, always: nothing a session said is swallowed by the
 # mapping that follows.
 printf '%s\n' "$raw"
+
+# What the run cost, recorded BEFORE any exit path below: a dispatch that
+# refused or timed out still spent money, and a guard that only sees the
+# successes cannot hold a budget (#108). The envelope is the right source
+# because it travels with the run — a transcript lands in a per-working-
+# directory tree, so a dispatch inside a worktree writes its usage
+# somewhere a caller scanning the main tree will never look, and the
+# ceiling silently never trips.
+if [ -n "$WORK_COST_FILE" ]; then
+    cost="$(printf '%s' "$raw" | jq -r '.total_cost_usd // empty' 2>/dev/null)" || cost=""
+    case "$cost" in ''|*[!0-9.]*) cost="" ;; esac
+    if [ -n "$cost" ]; then
+        printf '%s\n' "$cost" > "$WORK_COST_FILE"
+    else
+        # Truncate rather than guess. A caller that reads an empty cost
+        # must refuse; one that reads a fabricated 0 would keep spending.
+        : > "$WORK_COST_FILE"
+        echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
+    fi
+    denials="$(printf '%s' "$raw" | jq -r '(.permission_denials // []) | length' 2>/dev/null)" || denials=0
+    [ "${denials:-0}" = "0" ] \
+        || echo "==> $launch_persona hit $denials permission denial(s); set WORK_PERMISSION_MODE if it needs to act." >&2
+fi
 
 status="$(printf '%s' "$raw" | process_status "$launch_harness" 2>/dev/null)" || status=""
 [ -n "$status" ] || status="ERROR"
