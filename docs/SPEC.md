@@ -519,6 +519,32 @@ requires a terminal: with no tty on stdin or stdout the launcher exits
 1 naming `HEADLESS=1`, before minting anything and without starting a
 child — the same class as a missing binary, an environment that cannot
 start the row rather than a decision about the number.
+Three further environment variables exist for the case the MODEs do not
+cover — a launch with no operator watching it — and each is opt-in, so
+an unset variable leaves argv and behaviour exactly as an attended run
+has them. A spend ceiling is passed to the harness itself, so that an
+unattended run is bounded by the thing spending the money rather than
+by a number a config file merely declares. A permission mode is passed
+through, because the default mode denies a persona the file and tracker
+writes its stage exists to make, and an unattended persona that cannot
+act spends its whole prompt preamble to say so. The run's own reported
+cost is written to a caller-named file, which is what lets a driver
+meter a queue.
+
+That cost is taken from the run's result envelope and not by reading
+transcripts back, because transcripts are stored per working directory:
+a dispatch inside a worktree records its usage in a tree that a caller
+scanning the main project directory never sees, so a ceiling metered
+that way never trips and the run reads as free. The envelope travels
+with the run and is therefore correct wherever the run happened. It is
+written before any exit path, because a dispatch that refused, timed
+out or crashed still spent money and a meter that sees only successes
+cannot hold a budget; and when the envelope carries no cost the file is
+emptied rather than set to zero, so a caller must refuse rather than
+record a run it cannot price as free. For the same reason the count of
+permission denials is reported: a run can exit 0 having been stopped
+from doing anything.
+
 A headless launch is read for a final `WORK-RESULT: <ok|refused|blocked>
 #<n> <reason>` line, taken from the decoded response text (the raw
 JSON escapes the newline) with the last such line winning: `ok` exits
@@ -612,9 +638,13 @@ load-bearing: the gate checks it is a positive number and the adapter
 prints it in its report line, so the intended budget is stated in one
 place and visible in every run log — but nothing meters spend against
 it or stops a run that passes it. The enforcement half of #25's D8
-("exceeding a cap is a green exit with a comment naming the cap") needs
-a spend reading the harness does not yet expose, and until it exists
-the value is a declared budget, not a ceiling. v1 binds five personas —
+("exceeding a cap is a green exit with a comment naming the cap") was
+blocked on a spend reading the harness did not expose. That premise no
+longer holds: a harness that accepts a spend ceiling and reports what a
+run cost is what `ops.dispatch` now passes and reads, so the remaining
+gap is that nothing yet carries `max_cost_usd` from this file into that
+ceiling. Until something does, the value here is still a declared
+budget rather than a ceiling. v1 binds five personas —
 argus and atlas on `pull_request` at `gh-actions`, athena, daedalus and
 odyssey `manual` at `vm-local`; cassandra carries no binding, because
 her cadence is #11's.
