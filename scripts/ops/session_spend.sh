@@ -205,7 +205,12 @@ function rate_tier(m,   f, v) {
   f = model_family(m)
   if (f == "") return ""
   v = model_version(m)
-  if (f == "fable")  return (v == "5.0" || v == "5.1") ? "10 12.5 20 1 50" : ""
+  # Fable 5.1 keeps the 5.0 base/write/output rates but cache reads drop to 0.25 (Anthropic reference, 2026-06-24).
+  if (f == "fable") {
+    if (v == "5.0") return "10 12.5 20 1 50"
+    if (v == "5.1") return "10 12.5 20 0.25 50"
+    return ""
+  }
   if (f == "mythos") return (v == "5.0" || m ~ /mythos-preview/) ? "10 12.5 20 1 50" : ""
   if (f == "opus") {
     if (v == "3.0" || v == "4.0" || v == "4.1")   return "15 18.75 30 1.5 75"

@@ -169,7 +169,8 @@ has "$rates" "$(printf '%14d %12.2f' 2000000 18.00)" "R1-4: 3.5-Sonnet still pri
 T3b="$WORK/rates2"; mkdir -p "$T3b"
 for m in claude-opus-4-20250514 claude-opus-4-0 claude-opus-4-1-20250805 \
          claude-opus-4-5-20251101 claude-opus-4-8 claude-opus-5 \
-         claude-sonnet-4-5-20250929 claude-sonnet-5 claude-fable-5 opus; do
+         claude-sonnet-4-5-20250929 claude-sonnet-5 claude-fable-5 \
+         claude-fable-5-1 opus; do
   msg "$T3b/$m.jsonl" 2026-08-20T10:00:00.000Z "$m" 1000000 0 0 0 1000000
 done
 r2=$("$SCRIPT" "$T3b" --out "$WORK/o4b")
@@ -188,6 +189,7 @@ is_usd "$r2" claude-sonnet-4-5-20250929 18.00 "R5-1: Sonnet 4.5 still prices at 
 is_usd "$r2" claude-sonnet-5            12.00 "R5-1: Sonnet 5 still prices at 2/10"
 # 10 + 50 = 60.
 is_usd "$r2" claude-fable-5             60.00 "R5-1: Fable 5 still prices at 10/50"
+is_usd "$r2" claude-fable-5-1           60.00 "#105: Fable 5.1 prices at 10/50"
 # AT-6, the point of the class fix: an ID with no version in it — the bare
 # alias, whose tier changes underneath you as new models ship — is not priced
 # at whatever the family's newest tier happens to be. It is reported.
@@ -195,11 +197,23 @@ is_usd "$r2" opus 0.00 "AT-6: a bare family alias is not silently priced at a fa
 has "$r2" "no rate for model opus — 2000000 tokens" "AT-6: the bare alias is reported as unpriced"
 # And a version this table has never seen, which is the same failure in the
 # future tense: claude-opus-9 must warn rather than inherit the Opus 5 rate.
-T3c="$WORK/rates3"; mkdir -p "$T3c"
-msg "$T3c/future.jsonl" 2026-08-20T10:00:00.000Z claude-opus-9 1000000 0 0 0 1000000
-r3=$("$SCRIPT" "$T3c" --out "$WORK/o4c")
+T3x="$WORK/rates3"; mkdir -p "$T3x"
+msg "$T3x/future.jsonl" 2026-08-20T10:00:00.000Z claude-opus-9 1000000 0 0 0 1000000
+r3=$("$SCRIPT" "$T3x" --out "$WORK/o4c")
 is_usd "$r3" claude-opus-9 0.00 "R5-1: an unknown Opus version is unpriced, not given a neighbouring tier"
 has "$r3" "no rate for model claude-opus-9 — 2000000 tokens" "R5-1: the unknown version is reported"
+
+# ---------------------------------------------------------------------------
+# 3c. #105 — Fable 5.1 keeps 5.0's base/write/output rates but its cache-read
+#    rate drops from 1.00 to 0.25 per MTok. 1 MTok of cache-read tokens only,
+#    so the USD column equals the cache-read rate exactly.
+# ---------------------------------------------------------------------------
+T3c="$WORK/rates_fable_cr"; mkdir -p "$T3c"
+msg "$T3c/f5.jsonl"  2026-08-20T10:00:00.000Z claude-fable-5   0 1000000 0 0 0
+msg "$T3c/f51.jsonl" 2026-08-20T10:00:00.000Z claude-fable-5-1 0 1000000 0 0 0
+r2c=$("$SCRIPT" "$T3c" --out "$WORK/o4d")
+is_usd "$r2c" claude-fable-5   1.00 "#105: Fable 5 still prices cache reads at 1.00/MTok"
+is_usd "$r2c" claude-fable-5-1 0.25 "#105: Fable 5.1 prices cache reads at 0.25/MTok"
 
 # ---------------------------------------------------------------------------
 # 4. Legacy payloads: a cache-write total with no 5m/1h breakdown is priced as
