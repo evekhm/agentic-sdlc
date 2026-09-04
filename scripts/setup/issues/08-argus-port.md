@@ -13,7 +13,7 @@ One difference from the predecessor: Argus's instructions arrive
 workflow.
 
 **Done when:** a real PR in this repo receives a protocol-v2 review
-posted by `evekhm-argus` through the trusted step, with severity
+posted by `evekhm-argus-app[bot]` through the trusted step, with severity
 tiers and finding IDs.
 
 **Depends on:** {{compiler}}, {{review-policy}}, {{label-taxonomy}}.

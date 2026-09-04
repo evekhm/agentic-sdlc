@@ -26,11 +26,11 @@ has exactly one target.
 
 ## The two reviewers
 
-- **Argus** (`evekhm-argus`) — the event-driven reviewer. Reviews on
+- **Argus** (`evekhm-argus-app[bot]`) — the event-driven reviewer. Reviews on
   PR open, on pushes to a PR branch, and on mention. Owns the
   findings ledger and, once the automation lands, the recorder that
   writes it.
-- **Atlas** (`evekhm-atlas-bot`) — the independent second opinion,
+- **Atlas** (`evekhm-atlas-app[bot]`) — the independent second opinion,
   the reviewer that makes consensus mean something. Runs round 1 in
   full and afterwards only where the protocol requires it.
 - Both are **comment-only**. Neither ever approves, requests changes,
