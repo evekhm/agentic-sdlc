@@ -495,6 +495,72 @@ too, so the whole T4 proof set is one non-mutating command per case.
 Argv stays closed: the trailing-argument override remains the only
 thing `smoke_launch.sh` reads from argv besides the issue number.
 
+**Deviation 2026-09-04 (odyssey, implementing) — two further behaviours
+this plan did not describe.** Both are in the shipped diff and neither
+is in T4's site table or its notes, so they are recorded here rather
+than left for a later reader to find by diffing the code against the
+plan.
+
+1. **A fourth selection clause: the branch surface.** T4 names three
+   inputs to the arm rule — the pin, the App permission, the labelled
+   rung. The implementation adds a fourth: the persona's own
+   `authority.github_write` must declare a branch surface, and the arm's
+   push branch is derived from that glob rather than from a name of the
+   gate's invention. Grounds: the live run proved an App grant is not
+   sufficient. The old branch, `smoke/<issue>-<persona>`, is outside
+   every persona's declared glob, so an arm that read its contract and
+   refused to push was recorded as a persona that did not load — the
+   exact misattribution D14's *"the arm selection rejects such a persona
+   up front"* exists to prevent. D14 is the authority for adding a
+   selection input; whether the Approved D7's enumeration ("a rule over
+   config facts only") should name a `personas/**` fact is a spec
+   question raised on #44 for the product owner, not settled here.
+2. **`clear_claim`.** New; the base script had no such function. It
+   removes `in-progress` between arms and verifies the removal. Grounds:
+   the errand tells every arm that claiming is not part of it, but an
+   arm that claims anyway — or dies between the claim and the handoff —
+   leaves the mutex set, and `work.sh` then refuses the NEXT arm on a
+   claim this very run produced (refusal (e), exit 2), reporting one
+   arm's accident as another harness's failure.
+
+**Deviation 2026-09-04 (odyssey, review round 2).** Answering the round-1
+findings changed five more things in the same file, plus one new file.
+None changes what the gate proves; each removes a way it could prove it
+wrongly.
+
+1. **One reader for `config/deployments.yaml`** (Atlas AT-2, AT-3). The
+   first `pins()` read `harness:` only on the persona key's own line, so
+   a block-form pin — valid YAML that `sync_agents.py` and
+   `work.sh harness_of` both accept — vanished and the gate ran one arm
+   while printing "every pinned harness launched". It now reads both
+   forms, treats no comment line as a pin, keys on indentation, and a
+   persona key whose harness it cannot read is exit 1 naming that
+   persona instead of a shorter arm list.
+2. **The branch glob must be `<prefix>*`** (Argus R1-1, Atlas AT-5).
+   Stripping a *trailing* `*` only meant `branch:release` asked an arm
+   to push `releasesmoke-<issue>`, outside its declared surface. The
+   shape is now its own named disqualification reason, which is also
+   what makes the gate's derivation and the errand's wording one rule.
+3. **A scratch-issue guard** (Argus R1-4). The three destructive writes
+   — body overwrite, `in-progress` deletion, `status:*` rewrite — all
+   landed before any launch, for any run of digits. The gate now refuses
+   any issue that is neither marked by a previous run of itself nor
+   fresh and unlabelled, before writing.
+4. **No repo-wide `git worktree prune`** (Argus R1-5), and the pre-run
+   ref reset covers every pinned persona's `<persona>/smoke-<issue>`
+   rather than only the current arms' (Argus R1-9).
+5. **`relabel()` derives its label list from `lifecycle.json`** (Atlas
+   AT-7), and each verified push ref is re-read after the run: a ref
+   that moved is a failure, because evidence a session the gate did not
+   launch has overwritten is not evidence (Atlas AT-1's in-file half;
+   the launcher-side re-entrancy refusal is a `work.sh` change, out of
+   this plan's file set and tracked on **#134**).
+6. **New file: `scripts/ops/tests/smoke_launch_test.sh`.** T4's proof
+   set was a list of commands run by hand. Each round-1 finding above
+   has a hermetic scenario there instead — no network, no mint, no
+   launch — so the next reader re-runs the proof rather than trusting
+   this note.
+
 **Amended r1.** The old T4 was an arm *swap*: a before/after table
 naming two personas, two relabel labels, two artifact paths and two bot
 logins, five numbered notes about the swap, and an instruction to keep
