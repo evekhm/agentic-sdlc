@@ -205,7 +205,7 @@ function rate_tier(m,   f, v) {
   f = model_family(m)
   if (f == "") return ""
   v = model_version(m)
-  if (f == "fable")  return (v == "5.0") ? "10 12.5 20 1 50" : ""
+  if (f == "fable")  return (v == "5.0" || v == "5.1") ? "10 12.5 20 1 50" : ""
   if (f == "mythos") return (v == "5.0" || m ~ /mythos-preview/) ? "10 12.5 20 1 50" : ""
   if (f == "opus") {
     if (v == "3.0" || v == "4.0" || v == "4.1")   return "15 18.75 30 1.5 75"
