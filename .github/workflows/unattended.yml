@@ -51,9 +51,11 @@ on:
         default: true
         type: boolean
 
-# No write grant at all. Every GitHub write an unattended run makes is a
-# persona App's, through scripts/ops/post.sh with that App's own token —
-# never this workflow's GITHUB_TOKEN.
+# No GitHub write grant at all. Every GitHub write an unattended run
+# makes is a persona App's, through scripts/ops/post.sh with that App's
+# own token — never this workflow's GITHUB_TOKEN. (The dispatch job adds
+# `id-token: write`, which is an OIDC token for cloud federation, not a
+# GitHub write; see the comment there.)
 permissions:
   contents: read
   pull-requests: read
@@ -134,6 +136,12 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
+      # The ONE grant beyond read: an OIDC token for this job, which the
+      # auth step below exchanges for short-lived cloud credentials
+      # (workload identity federation — no cloud key at rest, spec
+      # `execution.placement`). It is not a GitHub write; the job still
+      # cannot post, and every GitHub write remains a persona App's.
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -170,9 +178,109 @@ jobs:
           echo "::notice::$line"
           echo "$line" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Dispatch
+      # ----- model access and the harness toolchain (#146) -----------------
+      # A hosted runner starts with neither harness binary nor any cloud
+      # credential. Everything from here to Dispatch gives it both, the
+      # same way for every persona, so that this workflow never has to
+      # know which harness a persona is pinned to: both binaries are
+      # installed, both harnesses' credential environment is set, and
+      # work.sh picks at dispatch as it does on the presenter's machine.
+      #
+      # Model access is provisioned ONCE per repository by
+      # scripts/setup/wif_setup.sh, which creates the federation pool,
+      # provider, service account and role and writes the four repository
+      # variables read below. Until that has been run, the variables are
+      # empty and this job SAYS SO and stops green — the same "not
+      # configured yet, not broken" treatment the missing App key already
+      # gets (Argus R1-1) — rather than failing at the auth step on every
+      # pull request. The gate reads one variable, WIF_PROVIDER, because
+      # the setup script writes all four together and a partial set is
+      # its bug to report, not this file's to diagnose.
+      - name: Gate on provisioned model access
+        id: gate
         if: matrix.placement == 'gh-actions'
         env:
+          PERSONA: ${{ matrix.persona }}
+          WIF_PROVIDER: ${{ vars.WIF_PROVIDER }}
+        run: |
+          set -euo pipefail
+          if [ -z "$WIF_PROVIDER" ]; then
+            line="skipped: $PERSONA — the repository variable WIF_PROVIDER is not set, so this runner has no model access; run scripts/setup/wif_setup.sh (#146) to enable unattended runs. Nothing was dispatched."
+            echo "::notice::$line"
+            echo "$line" >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate to Google Cloud (workload identity federation)
+        if: steps.gate.outputs.ready == 'true'
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      # The auth action writes the live credential file INTO the checkout,
+      # and a launched persona can read any workspace path. Move it out,
+      # and point every consumer at the new location: the two harness
+      # SDKs read GOOGLE_APPLICATION_CREDENTIALS, gcloud reads the
+      # override, and the action's own post-job cleanup follows
+      # GOOGLE_GHA_CREDS_PATH so the file is still deleted at the end.
+      - name: Move the credential out of the workspace
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          DEST="$RUNNER_TEMP/gcp-wif-creds.json"
+          mv "$GOOGLE_GHA_CREDS_PATH" "$DEST"
+          {
+            echo "GOOGLE_GHA_CREDS_PATH=$DEST"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$DEST"
+            echo "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=$DEST"
+          } >> "$GITHUB_ENV"
+
+      # Three calls into one script, so the toolchain a runner gets is the
+      # one scripts/ops/tests/placement_test.sh checks and an operator can
+      # reproduce by hand. `resolve` runs first because the cache key must
+      # name the versions before anything is downloaded.
+      - name: Resolve harness versions
+        id: harness
+        if: steps.gate.outputs.ready == 'true'
+        run: bash scripts/ci/install_harness.sh resolve >> "$GITHUB_OUTPUT"
+
+      - name: Restore the harness binaries from cache
+        id: harness-cache
+        if: steps.gate.outputs.ready == 'true'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.local/bin/agy
+            ~/.local/bin/claude
+            ~/.local/share/claude
+          key: harness-${{ runner.os }}-agy-${{ steps.harness.outputs.agy }}-claude-${{ steps.harness.outputs.claude }}
+
+      - name: Install the harness binaries (cache miss)
+        if: steps.gate.outputs.ready == 'true' && steps.harness-cache.outputs.cache-hit != 'true'
+        run: bash scripts/ci/install_harness.sh install
+
+      - name: Put the harness binaries on PATH and check them
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bash scripts/ci/install_harness.sh check
+
+      - name: Dispatch
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          # Model access for BOTH harnesses, so this file stays blind to
+          # which one work.sh will launch. The credential itself is the
+          # file GOOGLE_APPLICATION_CREDENTIALS names (set above); these
+          # only tell each SDK to use it and which project to bill.
+          CLAUDE_CODE_USE_VERTEX: '1'
+          ANTHROPIC_VERTEX_PROJECT_ID: ${{ vars.CLAUDE_VERTEX_PROJECT_ID }}
+          CLOUD_ML_REGION: global
+          AGY_ADC_AUTH: 'true'
+          ANTIGRAVITY_PROJECT_ID: ${{ vars.ANTIGRAVITY_PROJECT_ID }}
           # BY NAME (D3). The value is an Actions secret whose name is
           # the persona's authority.token; it reaches the adapter as the
           # variable of that name, set in the shell below, and is never
