@@ -1,0 +1,190 @@
+# Event capture for unattended personas (#25, D7, D11, D16, D18).
+#
+# THIS IS THE TRIGGER, NOT THE RUNTIME. It notices an event, asks
+# scripts/ops/execution.py which personas subscribe to it, and hands
+# each one to its placement adapter. Moving a persona between
+# placements changes config/execution.yaml and NOT this file — that is
+# what D18 prices at one line, and a workflow that knew where a persona
+# runs would be the second place to edit.
+#
+# Nothing here names a model, a tier, a dollar cap, a stage, a folder, a
+# branch or a prompt (D8, D15, D16). The persona names and their
+# placements are read from config/execution.yaml at run time; the only
+# thing this file states about a persona is the CONVENTION for its
+# secret's name, and the adapter checks that against the name in the
+# persona source rather than trusting it.
+#
+# THE FORK-SECRETS TRIGGER IS FORBIDDEN (D7) — the `..._target` variant
+# of the pull-request event, which runs a fork's code against this
+# repository's secrets. That is precisely the exposure the public-repo
+# constraint is about. Its name is deliberately not spelled anywhere in
+# `.github/workflows/`, because D7's testable is a grep for the literal
+# across that directory: a comment saying "never X" and a workflow using
+# X are indistinguishable to it. A fork pull request gets human review
+# only, and the `if:` guard on the resolve job below says so out loud
+# rather than failing somewhere confusing.
+
+name: Unattended personas
+
+# The `on:` list repeats the `events` values in config/execution.yaml
+# because GitHub requires a static trigger list — a workflow cannot ask
+# a file what to wake on. `execution.py --check` (the fourth CI gate)
+# therefore holds this block TO that file: the gate fails if any
+# repo-event binding subscribes to an event this list omits. The
+# duplication is a checked derivation, not a second source of truth.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      number:
+        description: 'Issue or pull-request number to work'
+        required: true
+        type: string
+      persona:
+        description: 'Persona to dispatch (must have a binding in config/execution.yaml)'
+        required: true
+        type: string
+      dry_run:
+        description: 'DRY_RUN=1 — resolve, print, write nothing'
+        required: false
+        default: true
+        type: boolean
+
+# No write grant at all. Every GitHub write an unattended run makes is a
+# persona App's, through scripts/ops/post.sh with that App's own token —
+# never this workflow's GITHUB_TOKEN.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: unattended-${{ github.event.pull_request.number || inputs.number }}
+  cancel-in-progress: false
+
+jobs:
+  # Deterministic, no secrets, no model call: turn one event into the
+  # list of (persona, placement) pairs that subscribe to it. Split from
+  # the dispatch job below for two reasons, both load-bearing:
+  # `secrets[...]` is evaluated before a step runs and so can only be
+  # indexed by a MATRIX value, not by something a shell computed; and
+  # D11's Observable asks for one run log per reviewer that the room can
+  # open, which a single job posting both reviews cannot produce.
+  resolve:
+    name: resolve — which personas subscribe to this event
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A fork pull request gets human review only (D7). Checked here so
+    # the whole matrix is empty rather than each adapter refusing.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    outputs:
+      matrix: ${{ steps.subscribers.outputs.matrix }}
+      any: ${{ steps.subscribers.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: python3 -m pip install --disable-pip-version-check pyyaml
+
+      - name: Resolve subscribers
+        id: subscribers
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PERSONA: ${{ inputs.persona }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # One named persona, its placement read from the same file.
+            binding="$(python3 scripts/ops/execution.py --binding "$INPUT_PERSONA")"
+            printf '%s\t%s\n' "$INPUT_PERSONA" "$(awk '{print $2}' <<<"$binding")" \
+              > subscribers.tsv
+          else
+            python3 scripts/ops/execution.py --subscribers "$EVENT_NAME" > subscribers.tsv
+          fi
+          echo "subscribers for $EVENT_NAME:"
+          cat subscribers.tsv
+          # `upper` carries the persona name in the case the secret is
+          # stored under; the adapter validates it against the persona
+          # source's own authority.token and fails by name if they ever
+          # diverge. jq builds the JSON so a persona name with an odd
+          # character cannot break out of the matrix.
+          matrix="$(jq -rn --rawfile tsv subscribers.tsv '
+            [ $tsv | split("\n")[] | select(length > 0) | split("\t")
+              | {persona: .[0], placement: .[1], upper: (.[0] | ascii_upcase)} ]
+            | tojson')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          if [ "$(jq -r 'length' <<<"$matrix")" -gt 0 ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  dispatch:
+    name: ${{ matrix.persona }} via ${{ matrix.placement }}
+    needs: resolve
+    if: needs.resolve.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: python3 -m pip install --disable-pip-version-check pyyaml pyjwt
+
+      # A subscriber whose placement this runner cannot host is one
+      # NAMED skip line, never a silent drop: a persona that quietly
+      # stopped being dispatched is the failure mode nobody notices.
+      - name: Skip a placement this runner cannot host
+        if: matrix.placement != 'gh-actions'
+        run: |
+          echo "skipped: ${{ matrix.persona }} is placed on ${{ matrix.placement }}, which a GitHub-hosted runner does not host; its own adapter dispatches it."
+
+      - name: Dispatch
+        if: matrix.placement == 'gh-actions'
+        env:
+          # BY NAME (D3). The value is an Actions secret whose name is
+          # the persona's authority.token; it reaches the adapter as the
+          # variable of that name, set in the shell below, and is never
+          # printed, written to a file or passed in an argument.
+          PERSONA_APP_PRIVATE_KEY: ${{ secrets[format('{0}_APP_PRIVATE_KEY', matrix.upper)] }}
+          PERSONA: ${{ matrix.persona }}
+          KEY_VAR_NAME: ${{ matrix.upper }}_APP_PRIVATE_KEY
+          NUMBER: ${{ github.event.pull_request.number || inputs.number }}
+          GITHUB_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          # `export NAME=value` as a builtin, never `env NAME=value cmd`:
+          # argv is world-readable and D3 forbids the value appearing
+          # there. xtrace is off for this line for the same reason.
+          set +x
+          export "$KEY_VAR_NAME=$PERSONA_APP_PRIVATE_KEY"
+          unset PERSONA_APP_PRIVATE_KEY
+          set +e
+          bash scripts/placement/gh-actions/run.sh "$NUMBER" --as "$PERSONA"
+          rc=$?
+          set -e
+          # Exit 2 is a REFUSAL, not a failure: the number was not
+          # worked, by design (#36, D8). Recording it and staying green
+          # is the whole point — a red X on every held or closed issue
+          # trains the room to ignore the signal.
+          if [ "$rc" -eq 2 ]; then
+            echo "::notice::$PERSONA refused #$NUMBER (exit 2) — not worked, by design"
+            exit 0
+          fi
+          exit "$rc"

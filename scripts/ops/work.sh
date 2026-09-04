@@ -75,6 +75,7 @@ DRY_RUN="${DRY_RUN:-0}"
 HEADLESS="${HEADLESS:-0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GITHUB_LIB="$REPO_ROOT/scripts/ops/lib/github.sh"
 LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
 DEPLOYMENTS="$REPO_ROOT/config/deployments.yaml"
 PERSONA_DIR="$REPO_ROOT/personas"
@@ -130,75 +131,29 @@ esac
 for cmd in gh jq; do
     command -v "$cmd" >/dev/null || die "$cmd is not installed"
 done
+[ -r "$GITHUB_LIB" ] || die "cannot read $GITHUB_LIB"
+# The pull-request resolver and has_label live here rather than in this
+# file so that D14's "the same way work.sh resolves it" is ONE
+# implementation: scripts/ops/post.sh gates its writes on the issues a
+# pull request closes, and two resolvers is two answers (#25, T7).
+# shellcheck source=lib/github.sh
+. "$GITHUB_LIB"
 [ -r "$LIFECYCLE_JSON" ] || die "cannot read $LIFECYCLE_JSON"
 jq -e '.stages | type == "array" and length > 0' "$LIFECYCLE_JSON" >/dev/null 2>&1 \
     || die "$LIFECYCLE_JSON has no usable 'stages' array"
 [ -r "$DEPLOYMENTS" ] || die "cannot read $DEPLOYMENTS"
 [ -d "$PERSONA_DIR" ] || die "cannot read $PERSONA_DIR"
 
-# The ONE read path to GitHub. Every call goes through it, so a test can
-# put a stub `gh` first on PATH and the whole script becomes hermetic.
-gh_json() { # <api-path>
-    gh api "$1"
-}
-
 # --- Resolve the number (D9) ---------------------------------------------------
-# A pull request is not the unit of work; the issue is. A closing keyword
-# and `#<n>` in the body first, then the <actor>/<n>-<slug> branch name,
-# then give up:
-# guessing which issue a PR belongs to is how two sessions end up on one
-# issue.
-view=""
-if ! view="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER")"; then
-    die "cannot read #$NUMBER from $GITHUB_REPO"
-fi
-
-ISSUE="$NUMBER"
-RESOLVED_VIA=""
-if [ "$(jq -r 'if .pull_request then "pr" else "issue" end' <<<"$view")" = "pr" ]; then
-    pr_body="$(jq -r '.body // ""' <<<"$view")"
-    # Every closing keyword GitHub honours, case-insensitively, same-repo
-    # `#n` only: `Fixes #205` closes #205 on merge whether or not this
-    # script reads the word, and a dispatcher that only knows `closes`
-    # sends the session to the PR instead of the unit of work. Cross-repo
-    # `owner/repo#9` and URL forms deliberately do not match — they close
-    # an issue that is not in this tracker.
-    closes="$(grep -Eoi '\b(close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' \
-        <<<"$pr_body" | grep -Eo '[0-9]+$' | sort -un || true)"
-    closes_count=0
-    [ -z "$closes" ] || closes_count="$(grep -c . <<<"$closes")"
-    if [ "$closes_count" -gt 1 ]; then
-        # Two closing references is two units of work. D5(d)'s never-guess
-        # rule applies: report them and stop rather than take the first.
-        die "PR #$NUMBER closes more than one issue: $(sed 's/^/#/' <<<"$closes" \
-            | tr '\n' ' ')— dispatch one of them by its own number"
-    fi
-    if [ "$closes_count" -eq 1 ]; then
-        ISSUE="$closes"
-        RESOLVED_VIA="Closes #$ISSUE in the body"
-    else
-        pr_view=""
-        if ! pr_view="$(gh_json "repos/$GITHUB_REPO/pulls/$NUMBER")"; then
-            die "cannot resolve PR #$NUMBER to an issue"
-        fi
-        head_ref="$(jq -r '.head.ref // ""' <<<"$pr_view")"
-        if [[ "$head_ref" =~ ^[a-z][a-z-]*/([0-9]+)- ]]; then
-            ISSUE="${BASH_REMATCH[1]}"
-            RESOLVED_VIA="the branch name $head_ref"
-        else
-            die "cannot resolve PR #$NUMBER to an issue"
-        fi
-    fi
-    if ! view="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE")"; then
-        die "PR #$NUMBER resolves to #$ISSUE, which cannot be read"
-    fi
-fi
+# gh_json, resolve_issue and has_label come from scripts/ops/lib/github.sh,
+# sourced in the preflight above. resolve_issue sets ISSUE, RESOLVED_VIA
+# and ISSUE_JSON, and reports through this file's own die().
+resolve_issue "$NUMBER"
+view="$ISSUE_JSON"
 
 state="$(jq -r '.state' <<<"$view")"
 title="$(jq -r '.title // ""' <<<"$view")"
 labels="$(jq -r '.labels[].name' <<<"$view")"
-
-has_label() { grep -Fxq "$1" <<<"$labels"; }
 
 # --- Refusals, in D5's order, before anything else -----------------------------
 # A refusal is a report, never a partial claim.

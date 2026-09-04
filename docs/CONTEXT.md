@@ -22,6 +22,17 @@ signature convention), the living `docs/SPEC.md` discipline with CI
 enforcement (`scripts/ci/spec_check.sh`), the measured cost lessons
 (already ported into AGENTS.md/CLAUDE.md here), and the
 Atlas sidecar + Odyssey watcher runtimes.
+
+**Not adopted, as of #25:** the Atlas polling sidecar and the Odyssey
+mention watcher as RUNTIMES. This repository triggers on repository
+events instead — `.github/workflows/unattended.yml` notices the event
+and hands the persona to its placement adapter — so a poll loop that
+pays for a wake-up whether or not anything happened is replaced by one
+run per event, and where a persona runs is one line in
+`config/execution.yaml` (`execution.placement`). The predecessor's
+options writeup (`docs/ATLAS_DEPLOYMENT_OPTIONS.md` there) is the
+record of what was weighed; the paragraph above describes that repo's
+architecture, not ours.
 **Avoid:** hand-maintained per-harness prompts (its Atlas
 instructions, Claude agents, and AGENTS.md sections drifted and
 duplicated — the exact problem persona compilation solves).

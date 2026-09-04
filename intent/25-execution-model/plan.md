@@ -342,3 +342,67 @@ to invent a commitment the Decisions table does not carry.
    binding subscribes to. If the product owner reads D8 more strictly,
    the alternative is a single `repository_dispatch` type and an
    external forwarder, which trades the duplication for a component.
+
+## Deviations recorded during implementation
+
+Written while implementing, not afterwards. Each is a place the merged
+diff differs from the plan above; the plan text stays as it was drafted
+so the difference is readable.
+
+1. **T9 is two jobs, not one.** The plan's "one job" cannot work:
+   `secrets[...]` is evaluated before a step runs and can therefore be
+   indexed only by a MATRIX value, never by a persona name a shell
+   computed from `--subscribers`. The workflow is now a deterministic
+   `resolve` job that turns one event into a JSON matrix of
+   `{persona, placement, upper}`, and a `dispatch` job running that
+   matrix. D11's Observable independently wants this: two reviewers
+   posting from one job produce one run log, and "the room can open the
+   run" needs one per reviewer. Nothing else in T9 changed — still no
+   write grant, still the fork guard, still exit 2 green.
+2. **Env KEYS cannot be expressions, so the key travels under a fixed
+   name.** `${{ secrets[format(...)] }}` is set as `PERSONA_APP_PRIVATE_KEY`
+   and the step re-`export`s it under `$KEY_VAR_NAME` (built from
+   `matrix.upper`) before calling the adapter, which validates that name
+   against the persona source's own `authority.token` and refuses by
+   name if the two ever diverge. D3 is satisfied by construction: the
+   value is never an argument and never printed.
+3. **T4's "until #43 merges" note is obsolete.** #43 merged before this
+   plan was dispatched, so `scripts/ops/work.sh` already mints the
+   launched persona's token between the last refusal and the launch
+   (`ops.identity`). The adapters therefore mint nothing and export
+   nothing; the preflight's own token is discarded by `--quiet`.
+4. **T7 extracted a shared library the plan did not name.**
+   `scripts/ops/lib/github.sh` is sourced by both `work.sh` and
+   `post.sh`. D14 says post.sh resolves a pull request to its issue "the
+   same way work.sh resolves it", and two implementations of that
+   sentence is two answers, the wrong one being the one that leaks past
+   the circuit breaker. The extraction is behaviour-preserving —
+   every `die` message is unchanged and `work_test.sh` passes untouched.
+5. **The `execution` gate runs all three test files**, not only
+   `execution_test.sh` as sketched in T8's YAML. `placement_test.sh` and
+   `post_test.sh` are hermetic and need no secrets, so leaving them out
+   of CI would have made D13's race a test only a human ever runs.
+6. **The pull-request body carries no closing keyword.** The plan said
+   `Closes #25`; the implement rung is not the last rung of this issue
+   (review follows), and `lifecycle.labels` treats an implementing pull
+   request that closes its issue as a counted failure. The body says
+   "Implements the plan of #25" instead.
+
+### Manual steps pending — not doable from this VM
+
+- **#7 must load `ARGUS_APP_PRIVATE_KEY` and `ATLAS_APP_PRIVATE_KEY` as
+  repository Actions secrets** (Settings → Secrets and variables →
+  Actions → New repository secret, one per name, value = that App's
+  `.private-key.pem`). Until then the `gh-actions` adapter refuses by
+  name — which is the designed behaviour, not a defect — and no
+  unattended review can run. A persona App cannot write repository
+  settings, so this is a human action.
+- **The T9 live smoke run** (`workflow_dispatch` with `dry_run: true` on
+  a scratch issue) can only happen once this pull request's workflow
+  file is on a branch GitHub will run, and its `gh-actions` leg needs
+  the secret above. The hermetic equivalent is green:
+  `placement_test.sh` runs the same adapter with the key variable set to
+  a dummy value and `DRY_RUN=1`, asserting the report and zero writes.
+- **D11's Observable — two reviews on an attendee's pull request** —
+  needs #8 and #9 to wire the review duty. This plan delivers the
+  substrate only, as T9 already stated.
