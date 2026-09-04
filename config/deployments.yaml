@@ -12,6 +12,25 @@ personas:
   atlas:     { harness: antigravity }
   cassandra: { harness: claude-code }
 
+# WHAT THE PINS ABOVE ALREADY RESOLVE TO, for the one constraint below
+# that a one-line pin edit can violate (#2 D4, #44 D2/D3). Resolved by
+# joining each name in `distinct_model_families` with its `harness:`
+# above and with `harnesses.<that harness>.REVIEW` in model_tiers.yaml —
+# the REVIEW tier and only REVIEW, because the list holds personas and a
+# persona's `escalation_tier` is not one:
+#
+#   argus  -> claude-code -> opus                -> Anthropic (Claude)
+#   atlas  -> antigravity -> gemini-3.1-pro-high -> Google (Gemini)
+#
+# Two families, pairwise distinct: the constraint holds.
+#
+# THE RULE: repinning one of those names without repinning the other in
+# the SAME edit is a violation of the constraint below. It collapses two
+# independent reviewers onto one model family and makes their consensus
+# meaningless — and until #6's check lands it produces NO error at all,
+# so this comment is the only thing that stops it. Re-run the resolution
+# after any edit to this file or to model_tiers.yaml, and update the
+# rows above in the same commit.
 constraints:
   # The two reviewers must resolve to DIFFERENT model families
   # (INTENT.md non-negotiable). Checked by CI (#6) against

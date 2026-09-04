@@ -594,11 +594,54 @@ session's working directory and a session sitting in a worktree gets
 that worktree's copy; an operator who wants their terminal to *be* the
 session runs `scripts/ops/work.sh <n>` from a terminal, which is not a
 thing a slash command can be.
-Tests: `scripts/ops/tests/work_test.sh` against stubs, and
+Tests: `scripts/ops/tests/work_test.sh` and
+`scripts/ops/tests/smoke_launch_test.sh` against stubs, and
 `scripts/ops/smoke_launch.sh <scratch-issue>` for one real launch per
-harness — three named observables each, with the claim half of the
-Antigravity run reported as `BLOCKED ON #47` until that App's
-`issues: write` permission is granted, rather than asserted to fail.
+harness present in `config/deployments.yaml` — three named observables
+each. Which persona runs an arm is not written in the script: it is
+selected by a rule over config facts, the first persona in that file's
+own declaration order pinned to that harness whose App in
+`scripts/auth/app_manifests.yaml` grants every permission the
+observables need, which owns a stage some rung of
+`personas/lifecycle.json` labels, and whose own contract in `personas/`
+declares a branch surface of the form `branch:<prefix>*` to push — with
+that rung's label as the arm's relabel target and that surface's glob,
+not a name of the gate's invention, as the branch it is asked to push,
+so a persona reading its contract and refusing is never recorded as a
+persona that failed to load. The glob's shape is part of the rule
+because the gate and the errand each derive the branch from it: only
+`<prefix>*` makes the two derivations agree, and any other shape yields
+a ref outside the declared surface (or an invalid one), whose push
+failure would be misreported as a persona that did not load. A harness
+for which the rule yields no persona fails the run, naming the harness
+and what is missing, rather than being skipped or covered twice — an arm
+silently dropped is a gate reporting coverage it does not have. That
+extends to the pin list itself: the gate reads
+`config/deployments.yaml` in one place, agreeing with the file's other
+readers on both the inline and the block form and treating no comment
+line as a pin, and a persona key whose harness it cannot read fails the
+run naming that persona instead of shortening the arm list. Trailing
+arguments override an arm with another persona, each binding to the
+harness its own pin names, and are held to the same rule.
+The gate's first writes are destructive — it overwrites the issue body
+with the errand, deletes `in-progress`, and rewrites the stage label —
+so the number has to earn them, and exactly one fact does: the body
+already carries the errand's own marker, written either by a previous
+run of the gate or by the operator opening the fixture issue. The
+opt-in is a line on the issue rather than a flag in the invoking shell,
+so the tracker itself records which numbers the gate may destroy.
+Absence of labels is not an opt-in: an untriaged issue carries none and
+is somebody's unit of work from the moment it is filed. A pull-request
+number is refused first and on its own, before the marker is looked at,
+because the issues endpoint serves pull requests, `gh issue edit`
+resolves one silently, and a pull request's body is exactly where the
+marker gets quoted. Nothing is written before either refusal. After the
+arms run the gate re-reads each ref whose push it verified: a ref that
+moved is a failure, because evidence a session the gate did not launch
+has since overwritten is not evidence — and a re-read that could not be
+performed after three attempts is reported as a failed read rather than
+as a moved ref, so a transient API error is not misreported as an
+overwrite.
 
 ### ops.identity
 A dispatched session runs as its own persona, never as the operator
