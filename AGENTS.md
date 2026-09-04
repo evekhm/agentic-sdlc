@@ -265,6 +265,30 @@ comment of step 2 declares it on its first line, naming the persona and
 the reason. An undeclared bootstrap is indistinguishable from a session
 working out of turn.
 
+### GitHub writes from a bot identity go through REST
+
+A persona's App installation token and the operator bot's PAT carry
+repository permissions only — no organization read (`read:org` on a
+PAT, organization Members on an App). Some `gh` porcelain commands run
+a GraphQL query over organization fields *before* they write, so they
+fail on scope even though the write itself is permitted and every
+persona already holds the repository permission it needs
+(`scripts/auth/app_manifests.yaml`). Known on 2026-09-04: `gh pr edit`
+(team `login`/`name`/`slug` fields, PR #106) and `gh issue view`
+(projectCards). The rule (#112):
+
+- A scope error on a `gh` porcelain command is never grounds to widen
+  a token or an App grant. Use the REST endpoint through `gh api`,
+  which asks for exactly the permission the write needs.
+- Edit a pull request body:
+  `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@<file>`.
+- Read an issue or a pull request:
+  `gh api repos/<owner>/<repo>/issues/<n>` (a pull request is an
+  issue for reads), never `gh issue view`.
+- `gh pr create`, `gh issue create`, `gh issue comment`,
+  `gh issue edit --add-label` are verified on these tokens and stay
+  in use; personas comment through `scripts/ops/post.sh`.
+
 **There is no STATUS.md.** Status in a committed file goes stale the
 moment two sessions run in parallel, and every update costs a
 commit/PR that can conflict. The pinned tracker issue plus per-issue
