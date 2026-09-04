@@ -734,6 +734,27 @@ not_invoked '^gh api repos/[^ ]+/commits/' \
 invoked '^gh api --paginate repos/[^ ]+/pulls/4272/files$' \
   "S23: the file-list read is paginated too"
 
+banner "S23 · R1-7 · --paginate answers in concatenated arrays, and both reads parse them"
+reset_fixtures
+pulls_fixture "$CM" 4281 odyssey/999-test "The implementation."
+# What `gh --paginate` actually emits for an answer past the 30-item
+# default page: one JSON array per page, concatenated. Page 1 here is
+# 30 paths under intent/, page 2 the single path outside it, so
+# conjunct (2) is decided only if the SECOND array is parsed at all.
+# The flag is pinned by the invocation log above; this pins the parse.
+{ seq 1 30 | sed 's|.*|intent/999-test/notes-&.md|' | jq -Rc '{filename: .}' | jq -sc '.'
+  jq -nc '[{filename: "scripts/ci/lifecycle_advance.sh"}]'; } > "$FIXTURES/files-4281.json"
+# The same shape on the sibling read: an empty first page, then the
+# page that carries the pull request.
+{ jq -nc '[]'; cat "$FIXTURES/pulls-$CM.json"; } > "$WORK/two-page.json"
+cp "$WORK/two-page.json" "$FIXTURES/pulls-$CM.json"
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S23: the two-page range exits 0"
+has "--add-label $(lrow status:implementing advances_to)" \
+  "S23: a 31-path answer split across two pages still resolves conjunct (2)"
+has "Trigger: pull request #4281 merged in" \
+  "S23: and a pull request on the second page of commits/pulls is still found"
+
 banner "S23 · item 20 · D2 · AT-14: a zero-padded number in the BODY is not a disagreement"
 reset_fixtures
 pulls_fixture "$CM" 4273 odyssey/999-test "Closes #0999"
@@ -771,6 +792,29 @@ issue_fixture 999 OPEN status:implementing
 run "$ML" "$R2" "S24: the rebase-shaped range exits 0"
 has "--add-label $(lrow status:implementing advances_to)" \
   "S24: a rebase merge whose last commit is only a plan sync still advances"
+
+banner "S24 · R1-3 AT-2 · an unreadable file list is red, never a quiet intent-only skip"
+reset_fixtures
+pulls_fixture "$CM" 4279 odyssey/999-test "The implementation."
+printf 'not json at all\n' > "$FIXTURES/files-4279.json"
+issue_fixture 999 OPEN status:implementing
+run_fail "$C4" "$CM" "S24: the malformed file list ends red"
+has "::error::" "S24: it is a counted failure"
+has "pull request #4279" "S24: the failure names the pull request"
+hasnt "changes nothing outside intent/" \
+  "S24: an unreadable answer is not reported as a spec amendment"
+hasnt "--add-label" "S24: nothing is written"
+
+banner "S24 · R1-2 · D17(a) · an intent-only merge on a mismatched slug is not a near miss"
+reset_fixtures
+pulls_fixture "$CM" 4280 athena/999-spec-amend "A spec amendment landing while #999 implements."
+files_fixture 4280 intent/999-test/spec.md
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S24: the mismatched intent-only range exits 0"
+hasnt "::warning::lifecycle_advance:" \
+  "S24: ordinary plan and spec traffic draws no warning, whatever its slug (D17(a))"
+hasnt "--add-label" "S24: and advances nothing"
+has "ordinary intent traffic" "S24: the reason is logged instead"
 
 banner "S25 · item 23 · D15 conjunct (3) · no intent folder in the AFTER tree, and none is a warning"
 reset_fixtures
@@ -842,9 +886,13 @@ not_invoked 'issue view 50' "S28: #50 is still never fetched"
 banner "S29 · item 27 · D12 D14 · the repair's living-spec upsert is observable"
 LIFECYCLE_ENTRY="$(awk '/^### lifecycle\.labels$/{f=1;next} /^### /{f=0} f' "$REPO/docs/SPEC.md")"
 [ -n "$LIFECYCLE_ENTRY" ] || fail "S29: docs/SPEC.md has no lifecycle.labels entry"
+# The entry is hard-wrapped at ~70 columns, so a sentence that spans a
+# line break matches no one-line literal and the assertion below would
+# be vacuous for it (R1-4). Flatten first: one line, single spaces.
+LIFECYCLE_FLAT="$(printf '%s\n' "$LIFECYCLE_ENTRY" | tr '\n' ' ' | tr -s ' ')"
 while IFS= read -r dead; do
   [ -n "$dead" ] || continue
-  if printf '%s\n' "$LIFECYCLE_ENTRY" | grep -qF -- "$dead"; then
+  if printf '%s\n' "$LIFECYCLE_FLAT" | grep -qF -- "$dead"; then
     fail "S29: lifecycle.labels still says '$dead'"
   fi
 done <<'DEAD'
@@ -863,9 +911,24 @@ pass "S29: lifecycle.labels describes the identity test, the fork gate and the n
 printf '%s\n' "$LIFECYCLE_ENTRY" | grep -qE '\(PR #[0-9]+\)' \
   || fail "S29: lifecycle.labels carries no (PR #<n>) citation"
 pass "S29: lifecycle.labels cites the pull request that changed it"
-[ "$(grep -c '^### ' "$REPO/docs/SPEC.md")" -eq 14 ] \
-  || fail "S29: the section count of docs/SPEC.md changed"
-pass "S29: the section count of docs/SPEC.md is unchanged"
+# Acceptance 27 asks that the section SET be unchanged — that this
+# repair added and removed none. A literal count is not that property:
+# it is the count at whatever commit the assertion was written against,
+# and it goes red the moment an unrelated entry lands on main (R1-1).
+# The property is expressed against this branch's merge base instead,
+# so it survives any merge of main and still catches an entry this
+# pull request adds, deletes or renames.
+SPEC_BASE="$(git -C "$REPO" merge-base HEAD origin/main 2>/dev/null || true)"
+if [ -z "$SPEC_BASE" ]; then
+  echo "NOTE: S29: no origin/main in this checkout — the section-set check is skipped" >&2
+else
+  spec_before="$(git -C "$REPO" show "$SPEC_BASE:docs/SPEC.md" | grep '^### ' | sort)"
+  spec_now="$(grep '^### ' "$REPO/docs/SPEC.md" | sort)"
+  [ "$spec_before" = "$spec_now" ] \
+    || { diff <(printf '%s\n' "$spec_before") <(printf '%s\n' "$spec_now") >&2 || true
+         fail "S29: this pull request added, removed or renamed a docs/SPEC.md section"; }
+  pass "S29: the section set of docs/SPEC.md is unchanged by this pull request"
+fi
 
 reset_fixtures
 

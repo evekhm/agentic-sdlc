@@ -62,8 +62,11 @@
 #
 # Invariants (#4, intent/4-labels/spec.md):
 #   hold is absolute      an issue carrying `hold` is skipped, always,
-#                         before any other check. The circuit breaker is
-#                         worth nothing if automation gets a vote on it.
+#                         first among the guards that act on an OPEN
+#                         issue — D9's closed-at-merge red is checked
+#                         ahead of it and is #73's to settle (R1-5).
+#                         The circuit breaker is worth nothing if
+#                         automation gets a vote on it.
 #   one status:*          more than one status:* label is a corrupted
 #                         state machine: the script says so, applies
 #                         `hold`, and stops touching that issue.
@@ -262,6 +265,32 @@ intent_folders() { # <issue>
     FOLDER_SLUG[$n]="$(sed -E "s/^0*${n}-//" <<<"$names" | head -1)"
 }
 
+# D15 conjunct (2). The pull request's OWN file list, from the API —
+# the three-dot diff GitHub computes from its own refs, so it is the
+# same set of paths under a merge-commit, a squash and a rebase merge.
+# `git diff <msha>^ <msha>` is not: on a rebase merge `<msha>^` is the
+# pull request's own second-to-last commit, and the plan sync AGENTS.md
+# requires would then be the whole diff (R2-1). At least one path
+# outside `intent/` is what separates an implementation from a plan or
+# spec amendment. `--paginate` for the same reason the commits read
+# carries it (#100).
+#
+# Sets PR_OUTSIDE to the first such path. 0 = there is one; 1 = the
+# list never leaves `intent/`; 2 = the answer is UNREADABLE, which the
+# caller makes red — an unparseable payload is not a fact about the
+# pull request, and the sibling commits/pulls read is already red on
+# it (R1-3, AT-2). It is a function because the near-miss path must
+# consult it too, before recording (R1-2).
+PR_OUTSIDE=""
+pr_outside_intent() { # <pull-request-number>
+    local raw list
+    PR_OUTSIDE=""
+    raw="$(gh api --paginate "repos/$GITHUB_REPO/pulls/$1/files" 2>/dev/null)" || return 2
+    list="$(jq -r '.[].filename' <<<"$raw" 2>/dev/null)" || return 2
+    PR_OUTSIDE="$(printf '%s\n' "$list" | grep -vE '^intent/' | grep -v '^$' | head -1 || true)"
+    [ -n "$PR_OUTSIDE" ]
+}
+
 for sha in ${RANGE_SHAS[@]+"${RANGE_SHAS[@]}"}; do
     # `--paginate`: a commit can belong to more than one page of pull
     # requests and the default page is 30 (#100). jq reads the
@@ -346,6 +375,21 @@ for sha in ${RANGE_SHAS[@]+"${RANGE_SHAS[@]}"}; do
             continue
         fi
         if [ "$pr_slug" != "${FOLDER_SLUG[$resolved]}" ]; then
+            # D17(a) excludes "a merge whose file list never leaves
+            # `intent/` — a plan or spec amendment landing while the
+            # issue waits at status:implementing". That exclusion is
+            # only real if the file list is consulted before the near
+            # miss is recorded, so the slug-mismatch path pays for the
+            # conjunct-(2) read here (R1-2). No other path does.
+            conj2=0; pr_outside_intent "$pr_number" || conj2=$?
+            if [ "$conj2" -eq 2 ]; then
+                fail_issue "cannot read the file list of pull request #$pr_number; whether it is #$resolved's implementation is unknown"
+                continue
+            fi
+            if [ "$conj2" -eq 1 ]; then
+                log "    pull request #$pr_number (\`$pr_head\`) changes nothing outside intent/ — ordinary intent traffic for #$resolved, no merge candidate and no near miss"
+                continue
+            fi
             # D17, the near miss. NOT a candidate: it must never reach
             # D5's guard chain (which writes `hold`) or D9's red. It
             # buys exactly one read-only issue view and at most one
@@ -361,20 +405,13 @@ for sha in ${RANGE_SHAS[@]+"${RANGE_SHAS[@]}"}; do
             continue
         fi
 
-        # D15 conjunct (2). The pull request's OWN file list, from the
-        # API — the three-dot diff GitHub computes from its own refs, so
-        # it is the same set of paths under a merge-commit, a squash and
-        # a rebase merge. `git diff <msha>^ <msha>` is not: on a rebase
-        # merge `<msha>^` is the pull request's own second-to-last
-        # commit, and the plan sync AGENTS.md requires would then be the
-        # whole diff (R2-1). At least one path outside `intent/` is what
-        # separates an implementation from a plan or spec amendment.
-        if ! files_raw="$(gh api --paginate "repos/$GITHUB_REPO/pulls/$pr_number/files" 2>/dev/null)"; then
-            fail_issue "cannot list the files of pull request #$pr_number; whether it is #$resolved's implementation is unknown"
+        # D15 conjunct (2), the last test and the only remote one.
+        conj2=0; pr_outside_intent "$pr_number" || conj2=$?
+        if [ "$conj2" -eq 2 ]; then
+            fail_issue "cannot read the file list of pull request #$pr_number; whether it is #$resolved's implementation is unknown"
             continue
         fi
-        outside="$(jq -r '.[].filename' <<<"$files_raw" | grep -vE '^intent/' | head -1 || true)"
-        if [ -z "$outside" ]; then
+        if [ "$conj2" -eq 1 ]; then
             log "    pull request #$pr_number changes nothing outside intent/ — not #$resolved's implementation, no merge candidate"
             continue
         fi

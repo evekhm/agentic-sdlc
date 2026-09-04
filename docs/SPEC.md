@@ -265,7 +265,10 @@ only when three conjuncts hold (PR #102): its head branch parses as
 computes from the pull request's own refs, hence the same set under
 a merge-commit, a squash and a rebase merge — changes at least one
 path outside `intent/`; and exactly one `intent/<n>-*/` directory
-exists in the after-tree with `<slug>` as its slug. Two folders is a
+exists in the after-tree with `<slug>` as its slug. An answer to
+either API read that cannot be read — a non-zero exit or a payload
+that will not parse — is a counted failure naming the pull request,
+never a quiet skip. Two folders is a
 counted failure, zero yields no candidate, and there is no
 closing-keyword fallback at all: the implementing pull request is
 precisely the one that must not carry a closing keyword for its
@@ -278,7 +281,10 @@ branch's slug is not the intent folder's, is announced with exactly
 one `::warning::lifecycle_advance:` line naming the issue, the
 rejected pull request, its branch and the dispatch branch expected
 instead (PR #102) — never silence, and never a red, which stays
-reserved for a ladder that is provably broken. A near miss is not a
+reserved for a ladder that is provably broken. A slug mismatch whose
+file list never leaves `intent/` is an ordinary plan or spec
+amendment landing while the issue waits, and draws no warning at all.
+A near miss is not a
 candidate: it never applies `hold`, never comments and never fails
 the run. When one range carries two implementing pull requests for
 one issue — a shape a re-created dispatch branch produces — the one
@@ -286,10 +292,10 @@ whose `merge_commit_sha` is later in that total order is the one
 applied and named. A commit belonging to no pull request advances
 nothing. An issue with both an artifact and a merged pull request in
 one range takes the furthest rung of the two, ranked by position in
-the ladder file. WHICH label a rung advances to, and the line posted when it
-does, are likewise not written in the script but read from the same
-row — one comment per transition naming what the next stage owes. A
-row with no `advances_to` writes no label and a row with no
+the ladder file. WHICH label a rung advances to, and the line posted
+when it does, are likewise not written in the script but read from the
+same row — one comment per transition naming what the next stage owes.
+A row with no `advances_to` writes no label and a row with no
 `advance_message` posts no comment, so the last rung is inert by
 data rather than by a special case. The first `status:*` this
 workflow writes also removes `intent:new` on the same edit: an item
