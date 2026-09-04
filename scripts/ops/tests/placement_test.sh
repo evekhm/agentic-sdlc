@@ -230,11 +230,20 @@ set -e
 grep -q 'claude' <<<"$OUT" && grep -q 'agy' <<<"$OUT" \
   || fail "#146: install_harness.sh check does not name the missing binaries: $OUT"
 pass "#146: install_harness.sh check refuses by name when a harness is missing (exit $rc)"
-# With the stubs on PATH both are "usable" and check is green: the same
-# command the workflow's last pre-dispatch step runs.
-bash "$INSTALLER" check >/dev/null \
-  || fail "#146: install_harness.sh check fails with both binaries on PATH"
-pass "#146: install_harness.sh check passes with both binaries present"
+# With two binaries that answer `--version` the check is green: the same
+# command the workflow's last pre-dispatch step runs. These are NOT the
+# launch-forbidding stubs above (which refuse every call, `--version`
+# included) — they live in a bin dir of their own, and HOME is the empty
+# one so nothing under a real ~/.local/bin can shadow them.
+mkdir -p "$WORK/versioned"
+printf '#!/usr/bin/env bash\necho "9.9.9 (Claude Code)"\n' > "$WORK/versioned/claude"
+printf '#!/usr/bin/env bash\necho "9.9.9"\n' > "$WORK/versioned/agy"
+chmod +x "$WORK/versioned/claude" "$WORK/versioned/agy"
+OUT="$(HOME="$WORK/emptyhome" PATH="$WORK/versioned:/usr/bin:/bin" bash "$INSTALLER" check 2>&1)" \
+  || fail "#146: install_harness.sh check fails with both binaries on PATH: $OUT"
+grep -q '^claude 9.9.9 ' <<<"$OUT" && grep -q '^agy 9.9.9 ' <<<"$OUT" \
+  || fail "#146: install_harness.sh check does not report each binary's version: $OUT"
+pass "#146: install_harness.sh check passes with both binaries present and reports their versions"
 # Order in the workflow: install, then check, then the adapter. Greped
 # off the file so a reorder is caught; line numbers are the order.
 install_at="$(grep -n 'install_harness.sh install' "$WORKFLOW" | head -1 | cut -d: -f1)"
