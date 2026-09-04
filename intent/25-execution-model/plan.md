@@ -388,6 +388,42 @@ so the difference is readable.
    request that closes its issue as a counted failure. The body says
    "Implements the plan of #25" instead.
 
+7. **`UNSET_CREDENTIAL_IS_SKIP` — the missing secret is a refusal, not
+   an error, when the caller says so** (round 2, Argus R1-1). The manual
+   step below means this workflow merges before the keys exist, and the
+   plan's strict exit 1 would have put two red checks on every pull
+   request in the repository until a human loaded them — the failure
+   mode `hold` and exit 2 exist to avoid. The adapter now downgrades
+   exactly that branch to a stated exit-2 refusal naming the variable,
+   and only when the caller opts in; `unattended.yml` opts in and copies
+   the refusal into the run summary. The guard lives in the adapter, not
+   the workflow, because the adapter is the only place that knows the
+   variable's NAME — it reads it from the persona source — and because
+   shell is testable, which a workflow `if:` is not. Deleting the one
+   line in `unattended.yml` restores strictness after #7.
+8. **`gh_json` moved into the shared library** when #99 merged. #51 gave
+   it a `--paginate` mode in `work.sh` while T7 was extracting the
+   resolver that calls it; keeping both would have been the same
+   function in two files, which is what T7 exists to prevent. One
+   definition, in `scripts/ops/lib/github.sh`, with #51's comment intact.
+9. **`post.sh` checks who the API says wrote the comment** (round 2,
+   Argus R1-3). `--as` names the persona and `GH_TOKEN` decides the
+   author; nothing in the script can make the second follow the first,
+   but a run log claiming "posted as argus" over another App's comment
+   is a false attribution of the review record. The check reads
+   `.user.login` off the POST response and compares it with the persona
+   source's `authority.identity`; a mismatch is exit 1 naming both and
+   the URL to delete. It is post-hoc by necessity: an App installation
+   token is not a user, so there is no pre-write read that answers "who
+   am I?".
+10. **`max_cost_usd` is documented as declared, not enforced** (round 2,
+    Argus R1-4). D8 says exceeding a cap is a green exit with a comment
+    naming the cap; this plan delivers the declaration and the report
+    line, and no meter. Rather than let `docs/SPEC.md` describe a
+    ceiling nothing holds, both it and `config/execution.yaml` now say
+    so in as many words. The enforcement half needs a spend reading the
+    harness does not expose and is left to the duty issues (#8/#9/#10).
+
 ### Manual steps pending — not doable from this VM
 
 - **#7 must load `ARGUS_APP_PRIVATE_KEY` and `ATLAS_APP_PRIVATE_KEY` as
@@ -395,8 +431,13 @@ so the difference is readable.
   Actions → New repository secret, one per name, value = that App's
   `.private-key.pem`). Until then the `gh-actions` adapter refuses by
   name — which is the designed behaviour, not a defect — and no
-  unattended review can run. A persona App cannot write repository
-  settings, so this is a human action.
+  unattended review can run; with `UNSET_CREDENTIAL_IS_SKIP=1` set by
+  the workflow (deviation 7) that refusal is a green job carrying the
+  missing secret's name in its run summary, so the pending step is
+  visible on every pull request without being a red check. Removing
+  that line from `unattended.yml` is the second half of this step. A
+  persona App cannot write repository settings, so this is a human
+  action.
 - **The T9 live smoke run** (`workflow_dispatch` with `dry_run: true` on
   a scratch issue) can only happen once this pull request's workflow
   file is on a branch GitHub will run, and its `gh-actions` leg needs

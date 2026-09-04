@@ -151,8 +151,20 @@ jobs:
       # stopped being dispatched is the failure mode nobody notices.
       - name: Skip a placement this runner cannot host
         if: matrix.placement != 'gh-actions'
+        # Both values travel by env rather than through `${{ }}` in the
+        # run body: ci-gates.yml states the rule and every other step
+        # here already honours it, so this one did not get to be the
+        # exception (Argus R1-2). Neither value is attacker-controlled
+        # today — they are keys of an in-tree file — but a run body
+        # assembled by interpolation is the shape, not the value.
+        env:
+          PERSONA: ${{ matrix.persona }}
+          PLACEMENT: ${{ matrix.placement }}
         run: |
-          echo "skipped: ${{ matrix.persona }} is placed on ${{ matrix.placement }}, which a GitHub-hosted runner does not host; its own adapter dispatches it."
+          set -euo pipefail
+          line="skipped: $PERSONA is placed on $PLACEMENT, which a GitHub-hosted runner does not host; its own adapter dispatches it."
+          echo "::notice::$line"
+          echo "$line" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dispatch
         if: matrix.placement == 'gh-actions'
@@ -167,6 +179,18 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number || inputs.number }}
           GITHUB_REPO: ${{ github.repository }}
           DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+          # The Apps' private keys are loaded as repository secrets by a
+          # human, once, in #7 — and this workflow merges before that
+          # happens. Without this flag, every pull request in the
+          # repository would carry one red check per reviewer until then,
+          # for a condition that is "not configured yet", not "broken".
+          # The adapter turns the missing secret into a NAMED refusal
+          # (exit 2) instead of an error, and the exit-2 arm below writes
+          # it to the step summary: green, but never silent. Deleting
+          # this line restores the strict behaviour — the missing
+          # credential becomes a red job again — and that is the right
+          # edit once the secrets are loaded (Argus R1-1).
+          UNSET_CREDENTIAL_IS_SKIP: '1'
         run: |
           set -euo pipefail
           # `export NAME=value` as a builtin, never `env NAME=value cmd`:
@@ -176,15 +200,23 @@ jobs:
           export "$KEY_VAR_NAME=$PERSONA_APP_PRIVATE_KEY"
           unset PERSONA_APP_PRIVATE_KEY
           set +e
-          bash scripts/placement/gh-actions/run.sh "$NUMBER" --as "$PERSONA"
-          rc=$?
+          bash scripts/placement/gh-actions/run.sh "$NUMBER" --as "$PERSONA" 2>&1 \
+            | tee dispatch.log
+          rc="${PIPESTATUS[0]}"
           set -e
           # Exit 2 is a REFUSAL, not a failure: the number was not
           # worked, by design (#36, D8). Recording it and staying green
           # is the whole point — a red X on every held or closed issue
-          # trains the room to ignore the signal.
+          # trains the room to ignore the signal. What makes that
+          # defensible rather than a silent pass is the next three lines:
+          # the refusal's own sentence — which names the label, the state
+          # or the missing secret that caused it — is copied into the run
+          # summary, where a reader sees it without opening the log.
           if [ "$rc" -eq 2 ]; then
-            echo "::notice::$PERSONA refused #$NUMBER (exit 2) — not worked, by design"
+            reason="$(tail -n 1 dispatch.log)"
+            echo "::notice::$PERSONA refused #$NUMBER (exit 2) — not worked, by design: $reason"
+            echo "**$PERSONA did not work #$NUMBER** (refusal, exit 2): $reason" \
+              >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           exit "$rc"

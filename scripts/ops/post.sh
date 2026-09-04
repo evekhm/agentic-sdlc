@@ -32,7 +32,9 @@
 # Exit codes:
 #   0  posted, or deliberately did not post because `hold` was present
 #   1  unusable input (a number that does not resolve, a missing body
-#      file, a persona that does not exist) or a failed write
+#      file, a persona that does not exist), a failed write, or a write
+#      the API attributed to an identity other than the one
+#      personas/<persona>.yaml names (see "Who actually posted" below)
 
 set -euo pipefail
 
@@ -142,7 +144,38 @@ done
 # `-F body=@<path>` hands gh the file: the body never becomes an
 # argument, a shell variable or a log line. GH_TOKEN is read by gh from
 # the environment and is not referenced here at all.
-gh api -X POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" \
-    -F "body=@$BODY_FILE" --jq '.html_url' \
+response=""
+response="$(gh api -X POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" \
+    -F "body=@$BODY_FILE")" \
     || die "the comment on #$NUMBER was not posted"
-echo "posted: #$NUMBER as $AS"
+
+# --- Who actually posted (Argus R1-3) --------------------------------------------
+# `--as` names the persona; GH_TOKEN decides the author. Nothing in this
+# script can make the second follow the first, so the least it can do is
+# refuse to CLAIM the first when the second disagrees: a run log reading
+# "posted: #97 as argus" over a comment written by some other App is a
+# false attribution, and the review record is exactly the thing that
+# must not lie about who said what.
+#
+# The check is after the write, not before it, because there is no read
+# that answers "who am I?" for the credential this script runs on: an
+# App INSTALLATION token is not a user, `GET /user` answers 403 for it,
+# and `GET /app` answers about the App the JWT signed for, not about the
+# installation token in GH_TOKEN — a pre-write check would either be a
+# different question or a second minting path. The POST response's
+# `.user.login` is the authoritative answer, and it costs no extra call.
+#
+# A mismatch is a 1, not a refusal: the comment exists, under the wrong
+# name, and someone has to delete it. The URL is printed for exactly
+# that. When personas/<persona>.yaml names no identity the check is
+# skipped rather than guessed — the convention is not a fact.
+expected="$(sed -n '/^authority:/,/^[^[:space:]#]/p' "$PERSONA_DIR/$AS.yaml" \
+    | sed -n 's/^[[:space:]][[:space:]]*identity:[[:space:]]*//p' \
+    | head -1 | tr -d '"' | sed 's/[[:space:]]*$//')"
+actual="$(jq -r '.user.login // ""' <<<"$response")"
+url="$(jq -r '.html_url // ""' <<<"$response")"
+echo "$url"
+if [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
+    die "the comment on #$NUMBER was posted by '$actual', but --as says '$AS', whose personas/$AS.yaml names '$expected'; GH_TOKEN does not belong to that persona. Delete $url and re-run with the right credential"
+fi
+echo "posted: #$NUMBER as $AS${actual:+ ($actual)}"

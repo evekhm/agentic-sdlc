@@ -39,6 +39,7 @@ Any finding prints `execution.yaml: <sentence>` and exits 1.
 import argparse
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 import yaml
 
@@ -52,7 +53,14 @@ TRIGGERS = ("repo-event", "scheduled", "manual")
 BINDING_KEYS = {"trigger", "events", "placement", "max_cost_usd"}
 
 
-def fail(message: str) -> "None":
+def fail(message: str) -> NoReturn:
+    """Every finding leaves through here, and nothing returns from it.
+
+    NoReturn rather than None is load-bearing for a reader as well as a
+    type checker: `load()` calls this instead of raising, so a checker
+    told the call can return flags every value guarded by it as
+    possibly unbound (#25, Argus R1-6 / Atlas AT-1).
+    """
     sys.exit(f"execution.yaml: {message}")
 
 
@@ -157,9 +165,15 @@ def check(bindings: dict) -> None:
                 "only repo-event subscribes to an event"
             )
 
-        cap = binding.get("max_cost_usd")
-        if isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap <= 0:
-            fail(f"persona '{name}' has max_cost_usd {cap!r}, which is not a positive number")
+        # Declared, not enforced (Argus R1-4): this gate checks the
+        # number is sane and the adapter prints it, so the budget is
+        # stated once and legible in the run log. Nothing meters spend
+        # against it yet — D8's enforcement half needs a spend reading
+        # the harness does not expose. `budget`, not `cap`, so the name
+        # does not promise what the code does not do.
+        budget = binding.get("max_cost_usd")
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)) or budget <= 0:
+            fail(f"persona '{name}' has max_cost_usd {budget!r}, which is not a positive number")
 
         placement = binding.get("placement")
         if not isinstance(placement, str) or not placement:

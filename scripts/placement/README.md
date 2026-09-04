@@ -45,6 +45,18 @@ directory which is not here.
   (trusted-posting, rule 2). The token the launched session posts with
   is minted by `work.sh` at launch (`ops.identity`), not by the
   adapter.
+- **`UNSET_CREDENTIAL_IS_SKIP=1` downgrades a missing credential from a
+  `1` to a `2`**, and nothing else. A caller sets it when the run is
+  optional in that environment — the canonical case is a trigger
+  workflow merged before a human has loaded the Apps' private keys
+  (#7), where the strict `1` puts a red check on every pull request in
+  the repository for a condition that is "not configured yet". The
+  refusal is still a stated one: the adapter prints a line NAMING the
+  variable it looked for and dispatches nothing, so the skip can be
+  read off the log and the run summary. Unset — the default — a
+  missing credential remains a `1`. It is not a general "keep going"
+  flag: it covers exactly the missing-credential branch, and the
+  variable is never consulted anywhere else.
 
 ## v1 adapters
 

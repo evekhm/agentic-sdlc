@@ -71,7 +71,13 @@ done
 key="${path//\//_}"
 if [ "$method" = "POST" ]; then
   printf '%s\t%s\n' "$path" "$(cat "$body_file")" >> "$WRITES"
-  echo "https://github.com/$path/1"
+  # The real API answers a created comment with the comment, including
+  # the account that wrote it — which is the only place the identity
+  # behind GH_TOKEN is observable to post.sh (R1-3). STUB_POST_LOGIN
+  # lets a scenario hand back the WRONG author.
+  jq -n --arg url "https://github.com/$path/1" \
+        --arg login "${STUB_POST_LOGIN:-evekhm-argus-app[bot]}" \
+    '{html_url: $url, user: {login: $login}}'
   exit 0
 fi
 echo "$path" >> "$READS"
@@ -274,6 +280,39 @@ last_read="$(tail -1 "$READS")"
 [ "$last_read" = "repos/test/repo/issues/28" ] \
   || { cat "$READS" >&2; fail "the last read before the POST was '$last_read'"; }
 pass "the final read before the write is the target's labels"
+
+banner "R1-3 --as is checked against the identity the API attributes the write to"
+# `--as` names the persona; GH_TOKEN decides the author. post.sh cannot
+# make the second follow the first, but it must not print a line
+# claiming it did: a review record that misattributes who spoke is worse
+# than a failed post.
+reset
+issue 29 "status:in-review"
+run 0 "the matching identity posts and says so" -- 29 --as argus --body-file "$BODY"
+has "posted: #29 as argus (evekhm-argus-app[bot])" \
+  "R1-3: the report line names the account the API says wrote it"
+
+reset
+issue 29 "status:in-review"
+export STUB_POST_LOGIN="evekhm-odyssey-app[bot]"
+run 1 "a write attributed to another identity is an error" -- 29 --as argus --body-file "$BODY"
+has "was posted by 'evekhm-odyssey-app[bot]'" "R1-3: the mismatch names who actually wrote it"
+has "personas/argus.yaml names 'evekhm-argus-app[bot]'" \
+  "R1-3: it names the identity the persona source declares"
+has "Delete https://github.com/repos/test/repo/issues/29/comments/1" \
+  "R1-3: the comment that must be removed is named by URL"
+[ "$(posts)" = "1" ] || fail "R1-3: the scenario did not actually post"
+pass "R1-3: the check is post-hoc — the comment exists, and the run is red about it"
+
+# The comparison reads the persona source, so it is not one hardcoded
+# name: the same token is right for argus and wrong for atlas.
+reset
+issue 29 "status:in-review"
+export STUB_POST_LOGIN="evekhm-argus-app[bot]"
+run 1 "the same token is refused for a different persona" -- 29 --as atlas --body-file "$BODY"
+has "personas/atlas.yaml names 'evekhm-atlas-app[bot]'" \
+  "R1-3: each persona is checked against its own authority.identity"
+unset STUB_POST_LOGIN
 
 echo
 echo "post_test.sh: all scenarios passed"

@@ -11,8 +11,14 @@
 #   events        the GitHub event names, for repo-event only
 #   placement     an adapter directory name under scripts/placement/
 #                 (D17 — a name with no adapter fails --check)
-#   max_cost_usd  the dollar cap for one run (D8; turn and time caps
-#                 stay in personas/<name>.yaml limits)
+#   max_cost_usd  the declared dollar budget for one run (D8; turn and
+#                 time caps stay in personas/<name>.yaml limits).
+#                 DECLARED, NOT ENFORCED: --check requires a positive
+#                 number and the adapter prints it, so the number is
+#                 stated once and visible in the run log — but nothing
+#                 meters spend against it yet, and a run that passes it
+#                 is not stopped. Read it as the budget this duty is
+#                 expected to fit in, not as a ceiling the machine holds.
 
 personas:
   argus:

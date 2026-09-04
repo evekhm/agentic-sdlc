@@ -302,6 +302,79 @@ grep -qF "==> #25" <<<"$OUT" && fail "T5: work.sh ran behind a missing credentia
 pass "T5: nothing was dispatched"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "T5: something was written or launched"; }
 
+banner "R1-1 UNSET_CREDENTIAL_IS_SKIP turns a missing secret into a NAMED skip"
+# The Apps' keys are loaded by a human in #7, and this workflow merges
+# before that. Strict, that is a red check on every pull request in the
+# repository; skipped silently, it is a reviewer that quietly stopped
+# reviewing. The flag buys the third thing: green, and impossible to
+# miss.
+: > "$WRITES"
+set +e
+OUT="$(env -u ARGUS_APP_PRIVATE_KEY UNSET_CREDENTIAL_IS_SKIP=1 \
+  STUB_REPOS="evekhm/agentic-sdlc" DRY_RUN=1 \
+  "$T/scripts/placement/gh-actions/run.sh" 25 --as argus 2>&1)"
+rc=$?
+set -e
+[ "$rc" -eq 2 ] \
+  || { printf '%s\n' "$OUT" >&2; fail "R1-1: the flagged skip exited $rc, not 2"; }
+pass "R1-1: with the flag, a missing secret is a refusal (2), not an error (1)"
+grep -qF "ARGUS_APP_PRIVATE_KEY is not set" <<<"$OUT" \
+  || { printf '%s\n' "$OUT" >&2; fail "R1-1: the skip does not name the missing secret"; }
+pass "R1-1: the skip line names the secret a human has to load"
+grep -qF "skipped #25 as argus" <<<"$OUT" \
+  || { printf '%s\n' "$OUT" >&2; fail "R1-1: the skip does not name the number and the persona"; }
+pass "R1-1: it names what was not worked, so the skip cannot be silent"
+grep -qF "==> #25" <<<"$OUT" && fail "R1-1: work.sh ran behind a missing credential"
+pass "R1-1: nothing was dispatched"
+[ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "R1-1: something was written or launched"; }
+pass "R1-1: no GitHub write and no launch"
+# The flag is opt-in and covers exactly this branch: unset, and every
+# other value, the strict exit 1 above is what happens.
+for value in "" "0" "true" "yes"; do
+  set +e
+  OUT="$(env -u ARGUS_APP_PRIVATE_KEY "UNSET_CREDENTIAL_IS_SKIP=$value" \
+    STUB_REPOS="evekhm/agentic-sdlc" DRY_RUN=1 \
+    "$T/scripts/placement/gh-actions/run.sh" 25 --as argus 2>&1)"
+  rc=$?
+  set -e
+  [ "$rc" -eq 1 ] \
+    || fail "R1-1: UNSET_CREDENTIAL_IS_SKIP='$value' exited $rc; only '1' downgrades"
+done
+pass "R1-1: only the literal 1 downgrades — '', 0, true and yes stay strict"
+
+banner "R1-1/R1-2 the trigger workflow sets the flag and interpolates nothing into a run body"
+WF="$REPO/.github/workflows/unattended.yml"
+grep -q "UNSET_CREDENTIAL_IS_SKIP: '1'" "$WF" \
+  || fail "R1-1: unattended.yml does not set UNSET_CREDENTIAL_IS_SKIP, so a missing secret is red"
+pass "R1-1: unattended.yml sets the flag for the dispatch step"
+grep -q 'GITHUB_STEP_SUMMARY' "$WF" \
+  || fail "R1-1: a refusal is not written to the run summary, so the skip is only in the log"
+pass "R1-1: a refusal is copied into the run summary"
+# R1-2: every matrix value reaches a shell as an env var. A `${{ }}` in
+# a run: body is a template substitution into source text, and the
+# habit is the vulnerability whether or not today's values are safe.
+#
+# The extraction is by INDENTATION, not by a line range: a block scalar
+# ends where the indentation returns to the key's own level, and a range
+# ending at the next `- name:` would run off the end of the last step
+# and swallow the job headers below it.
+run_bodies() {
+  awk '
+    /^[[:space:]]*run: \|/ { match($0, /[^ ]/); key = RSTART; inbody = 1; next }
+    inbody {
+      if ($0 ~ /^[[:space:]]*$/) next
+      match($0, /[^ ]/)
+      if (RSTART <= key) { inbody = 0; next }
+      print
+    }
+  ' "$1"
+}
+if run_bodies "$WF" | grep -q '\${{ matrix\.'; then
+  run_bodies "$WF" | grep -n '\${{ matrix\.' >&2
+  fail "R1-2: a run: body interpolates a matrix value instead of taking it through env:"
+fi
+pass "R1-2: no run: body in unattended.yml interpolates a matrix value"
+
 banner "T5/D16 gh-actions with the key set: DRY_RUN=1 reports and writes nothing"
 : > "$WRITES"
 issue 30 open "status:in-review" "A pull request to review"

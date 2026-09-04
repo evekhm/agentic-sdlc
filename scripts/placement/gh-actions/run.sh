@@ -67,7 +67,28 @@ key_var="$(sed -n '/^authority:/,/^[^[:space:]#]/p' \
     || die "personas/$PERSONA.yaml names no authority.token, so this runner cannot be told which secret to carry"
 # Indirect expansion, so the VALUE is only ever tested for emptiness and
 # never assigned to anything this script can print.
-[ -n "${!key_var:-}" ] || die "$key_var is not set in this environment"
+#
+# A missing key is normally a 1: the environment cannot start the run
+# (README, "the contract"). UNSET_CREDENTIAL_IS_SKIP=1 says the caller
+# has decided otherwise for this environment, and it exists for exactly
+# one situation: the trigger workflow ships before a human has loaded
+# the Apps' private keys as repository Actions secrets (#7). Without it,
+# every pull request in the repository carries two red checks for as
+# long as that step is pending, which is the failure mode `hold` and
+# exit 2 already exist to avoid — a red X the room learns to ignore
+# (Argus R1-1). The exit is 2, the code that already means "not worked,
+# by design", so the workflow's existing map turns it into one notice
+# and a green job; the line names the secret, so the skip can never be
+# silent. The DECISION lives with the caller and the NAME lives here,
+# where it is read from the persona source rather than assumed from a
+# convention.
+if [ -z "${!key_var:-}" ]; then
+    if [ "${UNSET_CREDENTIAL_IS_SKIP:-0}" = "1" ]; then
+        echo "$PLACEMENT: skipped #$NUMBER as $PERSONA — the repository secret $key_var is not set; load it (#7) to enable unattended runs. Nothing was dispatched."
+        exit 2
+    fi
+    die "$key_var is not set in this environment"
+fi
 
 python3 "$REPO_ROOT/scripts/auth/mint_app_token.py" "$PERSONA" --require-repo --quiet \
     || die "preflight failed for $PERSONA; nothing was dispatched"
