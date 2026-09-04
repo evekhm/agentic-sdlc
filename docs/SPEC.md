@@ -36,10 +36,12 @@ points an agent at it. It explains and never duplicates, so every
 rule it mentions that is normative elsewhere is at most one sentence
 plus a link to its owner, it is normative for nothing itself, and
 wherever it and a document it links disagree the other one wins. It
-is bounded by construction: exactly nine `##` sections in a fixed
-order, at most 150 lines, at most one diagram, and exactly one
-command shown as an instruction (`scripts/ops/work.sh <n>`) — a tenth
-topic is a link from its last section, never a tenth section.
+is bounded by construction: a fixed, ordered section list that grows
+only by a deliberate edit to that list, at most one diagram, and
+exactly one command shown as an instruction (`scripts/ops/work.sh
+<n>`). There is no line or section-count cap (the 150-line, nine-
+section ceiling of #35 D2/D4 was lifted by the product owner on
+2026-09-03).
 Reference docs live in `docs/` (BLOG.md, CONTEXT.md, this file),
 uppercase names throughout.
 
@@ -101,7 +103,11 @@ Manifest flow, skipping any persona that already has an `app_id`;
 `scripts/auth/mint_app_token.py <persona>` signs a JWT with the
 persona's private key and exchanges it for a ~1-hour installation
 token, usable directly as `GH_TOKEN`. The private key is the only
-secret — an Actions secret or a local
+secret, and WHERE it lives follows the persona's placement
+(`execution.placement`, #25): a persona placed at `gh-actions` needs
+its key as a repository Actions secret named `<PERSONA>_APP_PRIVATE_KEY`
+— in v1 that is argus and atlas and no others — and a persona placed at
+`vm-local` reads a local
 `~/.keys/<slug>.<date>.private-key.pem` file. Nothing is hardcoded to
 one owner: `_github_app.py:get_repo_info()` derives `(owner, repo)`
 from the checkout's `origin` remote, so forking the repo and
@@ -114,7 +120,10 @@ on all three. `contents` and `pull_requests` still vary per persona —
 argus and atlas are comment-only and hold `contents: read`. Editing the
 manifest changes only Apps registered afterwards; an already-registered
 App's permissions are changed on github.com and re-accepted on its
-installation.
+installation. A dispatched session never carries the operator's
+credentials: `scripts/ops/work.sh` mints the launched persona's token
+in the one step between the last refusal and the launch and hands it
+to the child alone (`ops.identity`).
 
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
@@ -125,14 +134,34 @@ inherit their dispatcher's harness — and carries the machine-checked
 constraint that the two reviewers resolve to different model
 families; `tools.yaml` maps abstract capabilities to concrete tools
 per harness, with declared fallback text for optional capabilities a
-harness cannot map. Swapping a vendor is an edit to these files,
-never to a persona source.
+harness cannot map; `execution.yaml` pins each persona's trigger and
+placement (`execution.placement`, #25). Harness and placement are two
+axes and two files: WHICH runtime interprets a persona is
+`deployments.yaml`, WHERE that runtime runs is `execution.yaml`, and
+neither file carries the other's key — so moving a persona between a
+laptop and a hosted runner cannot silently change its model. Swapping a
+vendor is an edit to these files, never to a persona source.
+Re-pinning a persona to another harness, or re-binding a tier to
+another model, is that same edit plus the compiler rebuild committed
+with it — no persona source changes for a repin — and the gates are
+written to prove whatever configuration is present rather than one
+particular assignment: the drift gate recompiles the pins as they
+stand, the sanitize gate holds because no vendor string moves into
+`personas/`, and the reviewer constraint is resolved against the pins
+at the commit that changes them (#44, PR #93).
 
 ### personas.compiler
 `scripts/sync_agents.py` compiles `personas/` + `config/` into every
 harness target (#5, `intent/5-compiler/`): `.claude/agents/<name>.md`
-for Claude Code and `.agents/agents/<name>/{agent.json,config.yaml,
-instructions.md}` for Antigravity, all committed. The build is pure
+for Claude Code and `.agents/agents/<name>/{agent.md,agent.json}` for
+Antigravity, all committed. Antigravity reads only `agent.md`: YAML
+frontmatter carrying `name`, `description` and `tools` (mapped to that
+harness's own tool names) above the assembled body, with the
+generated-file marker as a frontmatter comment. A `model:` key there
+voids the agent — the harness silently falls back to its stock agent —
+so the resolved model and the sub-agent flag ride in the sidecar
+`agent.json`, which the harness ignores and `scripts/ops/work.sh` reads
+(#43, `ops.dispatch`). The build is pure
 and deterministic — no timestamps, no machine state — so the drift
 gate is a plain rebuild-and-diff. Five stages: validate every source
 against `personas/schema.json`; resolve tier→model, persona→harness
@@ -187,10 +216,10 @@ refuses in six stated conditions rather than guessing. Tests:
 `scripts/ci/tests/lifecycle_advance_test.sh`.
 
 ### ci.gates
-`.github/workflows/ci-gates.yml` runs three deterministic gates on
-every pull request — and the first two also on pushes to `main` — as
-three independent jobs, so one push returns all three verdicts (#6,
-`intent/6-ci-gates/`). **Drift:** `python3 scripts/sync_agents.py
+`.github/workflows/ci-gates.yml` runs four deterministic gates on
+every pull request — and all but spec-check also on pushes to `main` —
+as four independent jobs, so one push returns all four verdicts (#6,
+`intent/6-ci-gates/`; the fourth added by #25). **Drift:** `python3 scripts/sync_agents.py
 --check` plus `scripts/ci/compiler_roundtrip.sh`; a hand-edited or
 stale compiled target under `.claude/agents/` or `.agents/` fails.
 **Sanitization:** `scripts/ci/sanitize_check.sh` scans every tracked
@@ -209,9 +238,14 @@ paths (`scripts/**`, `personas/**`, `config/**`,
 excluded, the drift gate owns those) unless the same diff touches this
 file or the PR body carries `Spec-impact: none — <reason>`; it checks
 that the choice was made, never whether the entry or the reason is
-good. All three are scripts runnable locally by the same command CI
-runs; the workflow needs no secrets and grants only
-`contents: read`.
+good. **Execution:** `python3 scripts/ops/execution.py --check` plus
+`scripts/ops/tests/{execution,placement,post}_test.sh`; a binding on a
+placement with no adapter directory, on an event
+`.github/workflows/unattended.yml` does not trigger on, or on a persona
+with no source fails here rather than at 03:00 in a run nobody is
+watching (`execution.placement`, #25). All four are scripts runnable
+locally by the same command CI runs; the workflow needs no secrets and
+grants only `contents: read`.
 
 ### lifecycle.labels
 Lifecycle state lives in GitHub issue labels (#4,
@@ -237,20 +271,64 @@ reads the pushed range for ADDED files matching
 gate into the label — intent.md → `status:spec`, spec.md →
 `status:build`, plan.md → `status:implementing`. The implement rung
 owes no file, because what it owes is code, so it advances on a
-merged PULL REQUEST: the range's first-parent commits are walked
-oldest first, `gh api repos/<repo>/commits/<sha>/pulls` says which
-pull requests each belongs to, those merged into the default branch
-are kept, and each resolves to at most one issue by its BRANCH NAME
-first and a closing keyword second — the reverse of `ops.dispatch`'s
-order, because an implementing pull request must not carry a closing
-keyword at all. The two signals disagreeing is a counted failure, not
-a guess, and a commit belonging to no pull request advances nothing.
-An issue with both an artifact and a merged pull request in one range
-takes the furthest rung of the two, ranked by position in the ladder
-file. WHICH label a rung advances to, and the line posted when it
-does, are likewise not written in the script but read from the same
-row — one comment per transition naming what the next stage owes. A
-row with no `advances_to` writes no label and a row with no
+merged PULL REQUEST — and specifically on **the implementing** one
+(PR #102). Every commit of the range is walked in `git rev-list
+--topo-order --reverse`, a total order that contains each commit
+exactly once, and `gh api --paginate
+repos/<repo>/commits/<sha>/pulls` says which pull requests each
+belongs to. A merged pull request is kept when its
+`merge_commit_sha` is contained in that range; the base branch is
+not filtered on, because containment is the trunk test and a pull
+request merged into a landing branch that later lands reaches `main`
+on a second parent. A `merge_commit_sha` this checkout does not hold
+is a counted failure naming the pull request, never a silent drop.
+A surviving pull request is #`<n>`'s **implementing** pull request
+only when three conjuncts hold (PR #102): its head branch parses as
+`<actor>/<n>-<slug>`; its own file list, read from
+`gh api --paginate repos/<repo>/pulls/<n>/files` — the diff GitHub
+computes from the pull request's own refs, hence the same set under
+a merge-commit, a squash and a rebase merge — changes at least one
+path outside `intent/`; and exactly one `intent/<n>-*/` directory
+exists in the after-tree with `<slug>` as its slug. Every read this
+script makes fails closed, never open (#73): `gh api
+--paginate repos/<repo>/commits/<sha>/pulls` failing — a non-zero
+exit or a payload that will not parse — is a counted failure naming
+the COMMIT, because no pull request is identified yet to name; the
+pull request's own file list at `.../pulls/<n>/files` is trusted
+only from a payload that parses as a JSON array — a non-zero exit,
+an empty body, unparseable text and a payload that parses as
+something other than an array (`{}`) are all the same counted
+failure naming the PULL REQUEST, and only a well-formed `[]` is the
+silent "changes nothing outside intent/" answer, because a pull
+request that changes nothing changes nothing outside `intent/`
+either. Two folders is a
+counted failure, zero yields no candidate, and there is no
+closing-keyword fallback at all: the implementing pull request is
+precisely the one that must not carry a closing keyword for its
+issue, so a branch that does not parse resolves to nothing whatever
+the body says. A pull request whose head repository is not this one
+is skipped, logged by number and never read as an identity claim —
+the fork gate (PR #102). A merge that names an issue sitting at the
+merge rung but is **not** its implementing pull request, because the
+branch's slug is not the intent folder's, is announced with exactly
+one `::warning::lifecycle_advance:` line naming the issue, the
+rejected pull request, its branch and the dispatch branch expected
+instead (PR #102) — never silence, and never a red, which stays
+reserved for a ladder that is provably broken. A slug mismatch whose
+file list never leaves `intent/` is an ordinary plan or spec
+amendment landing while the issue waits, and draws no warning at all.
+A near miss is not a
+candidate: it never applies `hold`, never comments and never fails
+the run. When one range carries two implementing pull requests for
+one issue — a shape a re-created dispatch branch produces — the one
+whose `merge_commit_sha` is later in that total order is the one
+applied and named. A commit belonging to no pull request advances
+nothing. An issue with both an artifact and a merged pull request in
+one range takes the furthest rung of the two, ranked by position in
+the ladder file. WHICH label a rung advances to, and the line posted
+when it does, are likewise not written in the script but read from the
+same row — one comment per transition naming what the next stage owes.
+A row with no `advances_to` writes no label and a row with no
 `advance_message` posts no comment, so the last rung is inert by
 data rather than by a special case. The first `status:*` this
 workflow writes also removes `intent:new` on the same edit: an item
@@ -270,9 +348,43 @@ not re-posted), so re-running a range is a no-op; the merge rung needs
 no marker of its own for this, because once the label has advanced no
 row matches it again. A missing issue is logged and skipped, and so is
 a closed one — with one exception: a CLOSED issue still carrying the
-merge rung's label, whose pull request merged in the range, is a red
-counted failure that writes nothing at all, because the implementing
-pull request carried a closing keyword it must not carry (PR #67). The
+merge rung's label, whose implementing pull request merged in the
+range, is a red counted failure that writes nothing at all: the ladder
+cannot advance a closed issue, and the human is told to reopen it and
+re-run the range (PR #67, PR #102). A transition never walks the
+ladder backward (D19): rank is the row's position in
+`personas/lifecycle.json`'s own label order, the same list the merge
+rung's guards already read, so nothing here keeps a second ordering.
+An issue with no `status:*` label ranks below every rung and any
+first transition is forward; a `status:*` label the ladder does not
+name at all (`status:review-stuck` is one) has no rank either. A
+trigger that would move the issue below its current rank, or a
+current label that cannot be ranked, is a no-op with exactly one
+`::warning::` line naming the issue, its current status and the rung
+the trigger would otherwise have written — never a counted failure,
+because a folder rename or a revert-and-reland is an ordinary event
+on a healthy ladder, not evidence of a broken one. A trigger that
+would leave the issue at its current rank writes no label and posts
+no comment, but still clears a stray `intent:new` in its own edit.
+`blocked` is advisory only: this script never reads it and never
+writes it, and it neither halts a transition nor taints one — the
+refusal it signals belongs to the actors at dispatch, not to the
+ladder (D20; only `hold` halts this script, checked first as
+always). Every read this script makes fails closed end to end
+(D21): the merge-candidate reads above were already this way; the
+per-issue `gh issue view` that decides whether an issue advances is
+now the same — a non-zero exit is a counted failure naming the
+issue, with no `DRY_RUN` substitution of a fabricated open,
+unlabelled issue (that default now lives only in the test harness,
+never in this script, so a dry run and a real run answer a bad read
+identically); and the range walk itself, `git rev-list --topo-order
+--reverse before..after`, is checked before any candidate is
+discovered or any issue is read — its failure is a counted,
+run-ending error naming the range walk, before a single `gh` call is
+made. The one deliberate exception is the near-miss report's own
+read (D17): it is not a candidate and buys at most one warning, so a
+failed read there stays quiet rather than turning the run red over a
+line that was never going to write anything (#73, PR #111). The
 workflow uses the default `GITHUB_TOKEN` and posts as
 `github-actions[bot]` — infrastructure, not a persona — with
 `issues: write, contents: read, pull-requests: read` and no secrets.
@@ -311,7 +423,7 @@ tokens-per-message. Tests: `scripts/ops/tests/session_spend_test.sh`.
 ### ops.dispatch
 `scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]` starts a
 session from a number (#36, `intent/36-dispatch/`). Deterministic
-bash + `gh` + `jq`, no model call: the issue's labels, the merged
+bash + `gh` + `jq`, no model call: the tracker's labels, the merged
 folder layout and three committed data files are the whole input, so
 the same number always resolves the same way. It resolves a pull
 request to its issue by a closing keyword and a same-repo `#<n>` in
@@ -333,7 +445,18 @@ with the condition named: `hold`; closed, or `status:review-stuck`;
 `blocked`; more than one `status:*` (reported, never guessed, and
 never `hold`-ed — the advancer is the single writer of the circuit
 breaker); `in-progress` claimed by another actor; and `--as` naming a
-persona that does not own the stage. The claim's holder is the
+persona that does not own the stage. When the number given is a pull
+request, those refusals read the UNION of the pull request's own labels
+and the resolved issue's — a `hold` on either side refuses, and the
+message names the side that carries it, or both sides when both do,
+because the circuit breaker is
+placed where the operator is looking and resolving to the issue must
+not discard it (#50, Atlas AT-1, PR #95; both sides, PR #99). The
+stage is not part of that
+union:
+it is derived from the issue's labels alone, since the state machine
+belongs to the unit of work and a `status:*` label on a pull request
+must not decide which rung the issue is on. The claim's holder is the
 *author* of the last comment that opens with `Claim` (AGENTS.md,
 "Working the tracker", step 2), mapped through the persona identity
 table — never a name read out of a comment body, which is an
@@ -344,22 +467,278 @@ read — refuses too: the label is the mutex, and one naming nobody is
 still held. A claim by an owner of the current stage is that actor
 resuming and proceeds; when `--as` names one owner, the mutex binds
 against that actor alone, so one reviewer's claim stops the other.
-Exit 1 is unusable input, exit 0 is launched or printed. The script
-never writes to GitHub: the claim belongs to the session it
+That thread is the issue's, and the WHOLE of it: the API answers a
+list read thirty items at a time, and a mutex that read only the
+first page would take a claim already handed back for the current
+one and launch a second session onto an issue another actor holds
+(#51, Atlas AT-2, PR #99). So `in-progress` on a pull request refuses
+too, naming the side that carries the label and the issue whose
+thread was read — a claim is only ever posted on the unit of work
+(PR #95, Argus R1-1; PR #99).
+The script never writes to GitHub: the claim belongs to the session it
 launches, not to the launcher. A stage with several owners (review)
-prints both instructions and launches neither unless `--as` names
-one, and a
-harness this script cannot start prints and exits 0. `DRY_RUN=1`
-prints the resolved launch command instead of executing it; the reads
-and every guard still run. Tests: `scripts/ops/tests/work_test.sh`.
+prints both instructions and launches neither unless `--as` names one.
+
+Both harnesses launch (#43, `intent/43-harness-agnostic-launch/`).
+Claude Code is started `claude --agent <persona>`; Antigravity is
+started `agy -p … --agent <persona> --add-dir <repo root> --model
+<the sidecar's model> --output-format json --print-timeout <n>m`, and
+`--add-dir` is not optional because print mode ignores the working
+directory. Claude Code has no such flag and takes its working
+directory as the project, so the launcher `cd`s to the repository root
+it resolved before starting either child: without that, `work.sh`
+invoked by absolute path from another clone reads one checkout's
+labels and personas and hands the session a different one — measured,
+and the session reports success having edited the wrong tree.
+Both are given one prompt literal, and both are wrapped in
+`timeout` at the persona's own `limits.timeout_mins` plus a minute. The
+extra minute is for `agy`, which is also given `--print-timeout <n>m`
+and so reports its own timeout before the wrapper kills it; Claude Code
+takes no such flag, and for it the wrapper is the only cap. A persona
+whose compiled target is missing is exit 1 before anything is minted —
+a launch against a target that is not there is a session running as the
+harness's stock agent under a persona's name — and so is a harness
+binary, or `timeout` itself, that is not on `PATH`.
+
+Every MODE is an environment variable, for the same reason argv is
+closed: `DRY_RUN=1` prints the resolved launch command instead of
+executing it (the reads and every guard still run, and nothing is
+minted), and `HEADLESS=1` captures the session's JSON instead of
+handing over the terminal. Antigravity is always headless. The
+interactive row is not `exec`'d: the child runs in the foreground and
+inherits stdin, stdout, stderr and the terminal, and the launcher waits
+and maps, so *every* exit of `work.sh` is 0, 1 or 2. Its wrapper is
+`timeout --foreground`, which is load-bearing rather than cosmetic:
+`timeout` otherwise calls `setpgid(0,0)` and the harness lands in a
+process group that is not the terminal's, where reading the terminal
+raises SIGTTIN and setting raw mode — the first thing an interactive
+TUI does — raises SIGTTOU, stopping the session with a live token
+already minted until the cap fires. The headless rows keep the plain
+wrapper: they touch no terminal, and group-wide signalling is what
+should end a runaway non-interactive harness and its children. That map
+is
+two-valued — child 0 → 0, anything non-zero → 1 with the raw status
+named on stderr, and 124 also naming the cap — because `exec timeout …`
+would otherwise hand a caller 124, 125, 126 or 127, codes outside the
+contract, and would let a harness that exits 2 for a reason of its own
+read as a designed refusal. Interactive 0 means the session ran to
+completion, not that the work was done. The interactive row also
+requires a terminal: with no tty on stdin or stdout the launcher exits
+1 naming `HEADLESS=1`, before minting anything and without starting a
+child — the same class as a missing binary, an environment that cannot
+start the row rather than a decision about the number.
+Four further environment variables exist for the case the MODEs do not
+cover — a launch with no operator watching it — and each is opt-in, so
+an unset variable leaves argv and behaviour exactly as an attended run
+has them. A spend ceiling is passed to the harness itself, so that an
+unattended run is bounded by the thing spending the money rather than
+by a number a config file merely declares. A permission mode is passed
+through, because the default mode denies a persona the file and tracker
+writes its stage exists to make, and an unattended persona that cannot
+act spends its whole prompt preamble to say so. The run's own reported
+cost is written to a caller-named file, which is what lets a driver
+meter a queue. And a model may be named for one dispatch, which is how
+a run is re-tiered without a compiler run — a flag on the launch and
+not an environment variable, because the environment variable does not
+override the `model:` line `personas.compiler` writes into the agent
+file, so a dispatch re-tiered that way bills in full to the compiled
+pin while appearing to have moved.
+
+That last failure is why the cost file also names the model the run
+actually billed to, taken from the envelope rather than echoed back
+from what the caller asked for. A ledger that records the request
+cannot show a re-tiering that did not happen, and a cost-control
+mechanism whose own records cannot distinguish an intended saving from
+a real one is not a control.
+
+That cost is taken from the run's result envelope and not by reading
+transcripts back, because transcripts are stored per working directory:
+a dispatch inside a worktree records its usage in a tree that a caller
+scanning the main project directory never sees, so a ceiling metered
+that way never trips and the run reads as free. The envelope travels
+with the run and is therefore correct wherever the run happened. It is
+written before any exit path, because a dispatch that refused, timed
+out or crashed still spent money and a meter that sees only successes
+cannot hold a budget; and when the envelope carries no cost the file is
+emptied rather than set to zero, so a caller must refuse rather than
+record a run it cannot price as free. For the same reason the count of
+permission denials is reported: a run can exit 0 having been stopped
+from doing anything.
+
+A headless launch is read for a final `WORK-RESULT: <ok|refused|blocked>
+#<n> <reason>` line, taken from the decoded response text (the raw
+JSON escapes the newline) with the last such line winning: `ok` exits
+0, `refused` and `blocked` exit 2, and a session that crashed, timed
+out or exited cleanly without the line exits 1 — an outcome nobody
+observed is not a success. Exit 2 therefore now covers both a launcher
+refusal and a launched persona's refusal: one code, because a caller
+asks whether the number was worked, not which layer declined. Exit 2 is
+produced, never forwarded — a child's own status of 2 maps to 1 like
+any other non-zero. Exit 1 is unusable input, an environment that
+cannot start the row, or an unobservable outcome; exit 0 is
+launched-and-ok or printed. The `/work` door is a hand-authored
+`.claude/commands/work.md` whose body is exactly
+`` !`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
+$?]"` ``, in the `` !`…` `` form that runs it rather than describing
+it, with `allowed-tools` widened to match the mode-prefixed line so it
+runs without a prompt: a command body is otherwise injected as a prompt
+and whether the script runs at all is the model's discretion. The door
+names the mode because its body runs in the harness's own non-TTY bash
+before the turn, where the interactive row cannot start; the trailing
+`echo` makes the body exit 0 whatever the script returned, so a
+designed exit 2 prints its own refusal text and its code instead of
+surfacing as a failed tool call. `.claude/commands/` is outside the
+compiler's target directories, so this is not a drift-gate bypass. The
+door invokes a relative path by design, so `/work` resolves against the
+session's working directory and a session sitting in a worktree gets
+that worktree's copy; an operator who wants their terminal to *be* the
+session runs `scripts/ops/work.sh <n>` from a terminal, which is not a
+thing a slash command can be.
+Tests: `scripts/ops/tests/work_test.sh` against stubs, and
+`scripts/ops/smoke_launch.sh <scratch-issue>` for one real launch per
+harness — three named observables each, with the claim half of the
+Antigravity run reported as `BLOCKED ON #47` until that App's
+`issues: write` permission is granted, rather than asserted to fail.
+
+### ops.identity
+A dispatched session runs as its own persona, never as the operator
+(#43). `scripts/ops/work.sh` mints the launched persona's App token in
+the one step between the last refusal and the launch, for that persona
+only, and a run that launches nothing — a dry run, a multi-owner
+stage, a harness with no row — mints nothing. A mint that fails is
+fatal: the launcher refuses rather than falling back to whatever
+credentials the shell carries. The token reaches the child through the
+environment of a subshell that `export`s it and then `exec`s — never an
+argument (`env VAR=… ` would put it in a world-readable argv), never a
+file, never a log line — and it overwrites `GH_TOKEN`/`GITHUB_TOKEN`
+rather than inheriting them. Bash's own xtrace is the one log that
+would otherwise catch it: `set -x` expands both the mint's command
+substitution and every assignment of the value, so `bash -x
+scripts/ops/work.sh <n>` used to write the live installation token to
+stderr, and a Claude Code session captures tool stderr verbatim into an
+on-disk transcript. The launcher therefore suppresses xtrace for the
+window between the mint and the launch and restores the caller's
+setting the moment the child returns; the suppression is a no-op when
+xtrace is off, and a hermetic scenario runs the fixture launch under
+`bash -x` on both rows and fails if the stub token appears.
+`git` cannot read those variables at all, so it is pointed at
+`scripts/auth/git-credential-persona <persona>`, a credential helper
+that mints afresh on every `get` — a snapshot taken at launch expires
+before a ninety-minute cap, at the one moment the work is finished and
+about to be lost. The helper is installed through
+`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` in the
+child's environment only, so a crashed session leaves no credential
+configuration behind and the operator's own config is untouched. The
+four entries are appended at whatever `GIT_CONFIG_COUNT` the caller
+already carries rather than written at index 0, so a caller that
+installs `http.proxy` or `safe.directory` that way keeps its own
+entries; with none inherited the offset is 0. Two of those entries are
+empty resets. Git collects every matching
+`credential.helper` and `credential.<url>.helper` into one ordered
+list and tries them in turn; an empty value clears whatever has
+accumulated, and a later entry appends to it, so without a reset an
+operator's global helper answers the push first. Both keys are reset
+rather than one as belt and braces — the resets are idempotent, and
+they make the persona's helper the only one in the list however the
+operator configured theirs. A fourth entry rewrites
+`git@github.com:` to `https://github.com/`, because an SSH remote
+never consults a credential helper at all.
+
+### execution.placement
+WHERE a persona runs is a second axis, orthogonal to which harness runs
+it (#25, `intent/25-execution-model/`). `config/deployments.yaml` pins
+persona→harness and `config/execution.yaml` pins persona→trigger and
+persona→placement; neither file carries the other's key, so a move
+between machines never edits a harness pin and never touches a persona
+source. A binding is four keys and no others: `trigger`
+(`repo-event`, `scheduled` or `manual`), `events` (required for
+`repo-event`, forbidden otherwise), `placement`, and `max_cost_usd`.
+That last key is **declared, not enforced**, and the distinction is
+load-bearing: the gate checks it is a positive number and the adapter
+prints it in its report line, so the intended budget is stated in one
+place and visible in every run log — but nothing meters spend against
+it or stops a run that passes it. The enforcement half of #25's D8
+("exceeding a cap is a green exit with a comment naming the cap") was
+blocked on a spend reading the harness did not expose. That premise no
+longer holds: a harness that accepts a spend ceiling and reports what a
+run cost is what `ops.dispatch` now passes and reads, so the remaining
+gap is that nothing yet carries `max_cost_usd` from this file into that
+ceiling. Until something does, the value here is still a declared
+budget rather than a ceiling. v1 binds five personas —
+argus and atlas on `pull_request` at `gh-actions`, athena, daedalus and
+odyssey `manual` at `vm-local`; cassandra carries no binding, because
+her cadence is #11's.
+
+`scripts/ops/execution.py` is the only reader of that file, in every
+context that needs it: `--check` is the gate, `--subscribers <event>`
+prints the `persona<TAB>placement` pairs an event wakes, and
+`--binding <persona>` prints one `trigger placement max_cost_usd` line
+an adapter reports. A placement is legal exactly when
+`scripts/placement/<name>/run.sh` exists — the directory name IS the
+value, so reserving a name is merging a directory and nothing else, and
+a binding on an unbuilt placement fails the gate naming the missing
+directory rather than failing at run time. v1 ships `vm-local` and
+`gh-actions`; `cloud-run-worker`, `cloud-run-instance` and
+`agent-engine` are reserved by name only.
+
+Every adapter has the same shape and is checked against it: it takes
+`<number> --as <persona>` and no other flag, reads its binding from
+`execution.py`, runs the D4 preflight, prints one report line, and
+dispatches through the single `exec scripts/ops/work.sh <number> --as
+<persona>` line — so a placement changes where a session runs and
+nothing about what it does. The preflight is
+`scripts/auth/mint_app_token.py <persona> --require-repo --quiet`,
+which asserts the App's installation covers this checkout's repository
+before any model is reached; the read is paginated, because an
+installation on dozens of repositories answers its first page without
+the one being asked about, and `--quiet` keeps the preflight's own
+token out of every shell variable. The `gh-actions` adapter additionally
+requires the private key to be present under the NAME the persona's
+`authority.token` gives, and refuses by that name when it is not.
+
+`.github/workflows/unattended.yml` is the trigger and never the
+runtime. It notices an event, asks `--subscribers` who wants it, and
+hands each pair to its adapter through a matrix — a matrix rather than
+a loop because `secrets[format('{0}_APP_PRIVATE_KEY', matrix.upper)]`
+can only be indexed by a matrix value, and because one openable run log
+per reviewer is what makes an unattended review observable. A subscriber
+placed somewhere a GitHub-hosted runner cannot host is one named skip
+line, never a silent drop; the workflow's whole grant is
+`contents: read, pull-requests: read`, every GitHub write being a
+persona App's own; a fork pull request is excluded at the resolve job
+and gets human review only; and the fork-secrets variant of the
+pull-request trigger appears nowhere under `.github/workflows/`. The
+`on:` list necessarily repeats the `events` values because GitHub
+requires a static trigger list, so the `execution` gate holds the
+workflow TO the config — a subscribed event the list omits fails the
+gate, which makes the duplication a checked derivation rather than a
+second source of truth.
+
+`scripts/ops/post.sh <number> --as <persona> --body-file <path>` is the
+one write path an unattended run has. The body is always a file and
+there is deliberately no `--body` flag. `hold` is re-read IMMEDIATELY
+BEFORE the write, not only at dispatch: a review that starts against an
+unheld pull request and finishes four minutes after a human held it is
+computed, paid for, and posts nothing. For a pull request the hold set
+is the pull request AND every issue it closes, resolved by the same
+code `ops.dispatch` resolves on (`scripts/ops/lib/github.sh`, sourced by
+both, so the two cannot disagree) — every closing reference, not the
+first, because suppressing a post is never the ambiguous half of that
+rule. A suppressed post is GREEN: exit 0 and one line naming the held
+number, since a red X on every held pull request trains the room to
+ignore the signal. Tests: `scripts/ops/tests/execution_test.sh`,
+`placement_test.sh` and `post_test.sh`, all three run by the
+`execution` gate (`ci.gates`).
 
 ## Agreed, not yet built
 
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **review.automation** — Argus workflow, Atlas sidecar, consensus
-  (#8, #9).
+- **review.automation** — the review duty itself and the
+  `status:in-review` writer (#8, #9); the argus and atlas bindings in
+  `config/execution.yaml` are inert until then, which is what #25's
+  staged rollout intends.
 - **intake.automation** — headless Athena on `intent:new` (#10).
 - **maintain.watchers** — Cassandra, control bands, seeded incident
   (#11).

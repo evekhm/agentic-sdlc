@@ -2,8 +2,11 @@
 # config/ files) where vendor names appear; persona sources never name
 # models (personas/schema.json, D3). Adjacent tiers may share a model:
 # the tier names the task contract, not the price (AGENTS.md).
-# Where a workflow pins a model in an env var, that pin wins over this
-# file until the compiler (#5) starts generating the workflows.
+# This file is the only place a model is chosen. A workflow that pinned
+# one in its environment would be a second binding nobody could find;
+# the grant that once allowed that to win over this file is retired
+# (#25, D15), and .github/workflows/unattended.yml names no model, no
+# tier and no cost at all.
 
 harnesses:
   claude-code:

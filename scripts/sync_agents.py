@@ -605,32 +605,57 @@ class ClaudeEmitter:
 
 
 class AntigravityEmitter:
-    """.agents/agents/<name>/{agent.json,config.yaml,instructions.md}."""
+    """.agents/agents/<name>/{agent.md,agent.json}.
+
+    agy reads ONLY agent.md: YAML frontmatter plus the markdown body,
+    exactly as `.claude/agents/<name>.md` is shaped for Claude Code.
+    Two keys are load-bearing by measurement (#43, findings Q1b and
+    this issue's probes P1/P1a/P2):
+
+    * `model:` in the frontmatter VOIDS the agent — agy silently falls
+      back to its stock agent and still exits 0. So the resolved model
+      never appears here; it rides in the sidecar (D9) and reaches the
+      CLI as `--model`.
+    * an unrecognised name in `tools:` is a HARD error (exit 1), which
+      is why the list is the harness-mapped one from config/tools.yaml
+      and never the Claude spelling.
+
+    agent.json is a machine-readable sidecar that agy ignores (P2:
+    discovery is unaffected by its presence). It carries the two facts
+    agent.md cannot: the resolved model and the sub-agent flag. Limits
+    are NOT copied here — they live in personas/<name>.yaml and
+    scripts/ops/work.sh reads them there, so each fact has one home.
+    """
 
     harness = ANTIGRAVITY
 
     def emit(self, persona: dict, model: str, tools: list[str], body: str) -> dict[str, str]:
         name = persona["name"]
         base = f".agents/agents/{name}"
+        # The marker is the first line INSIDE the frontmatter, as in
+        # ClaudeEmitter: agy wants the `---` at byte 0 too, and probe P1
+        # measured that a YAML comment there does not void the agent.
+        frontmatter = [
+            "---",
+            f"# {MARKER}",
+            f"name: {name}",
+            f"description: {yaml_scalar(describe(persona['role']))}",
+            "tools:",
+        ]
+        frontmatter += [f"  - {tool}" for tool in tools]
+        frontmatter += ["---", ""]
         agent = {
             "_generated": MARKER,
-            "name": name,
-            "description": describe(persona["role"]),
             "model": model,
-            "limits": persona.get("limits", {}),
+            "name": name,
+            "subagent": persona["kind"] == "subagent",
         }
-        config_lines = [f"# {MARKER}"]
-        if persona["kind"] == "subagent":
-            config_lines.append("subagent: true")
-        config_lines.append("tools:")
-        config_lines += [f"  - {tool}" for tool in tools]
         return {
+            f"{base}/agent.md": "\n".join(frontmatter) + body,
             f"{base}/agent.json": json.dumps(
                 agent, indent=2, sort_keys=True, ensure_ascii=False
             )
             + "\n",
-            f"{base}/config.yaml": "\n".join(config_lines) + "\n",
-            f"{base}/instructions.md": f"<!-- {MARKER} -->\n\n" + body,
         }
 
 
@@ -774,7 +799,11 @@ def check(files: dict[str, str], out: Path) -> int:
 
 
 def read_frontmatter(path: Path) -> tuple[dict, str]:
-    """Split a Claude agent file into (parsed frontmatter, body)."""
+    """Split a compiled agent markdown file into (frontmatter, body).
+
+    Generic across harnesses: `.claude/agents/<name>.md` and
+    `.agents/agents/<name>/agent.md` share the layout.
+    """
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise BuildError(f"{path}: no YAML frontmatter at the start of the file.")
@@ -830,9 +859,9 @@ def verify(records: list[dict], out: Path) -> int:
             )
         else:
             base = out / f".agents/agents/{name}"
-            for leaf in ("agent.json", "config.yaml", "instructions.md"):
+            for leaf in ("agent.md", "agent.json"):
                 require((base / leaf).is_file(), f"{tag}: {base / leaf} not emitted")
-            if not (base / "agent.json").is_file():
+            if not ((base / "agent.md").is_file() and (base / "agent.json").is_file()):
                 continue
             agent = json.loads((base / "agent.json").read_text(encoding="utf-8"))
             require(agent.get("name") == name, f"{tag}: agent.json name is wrong")
@@ -842,19 +871,24 @@ def verify(records: list[dict], out: Path) -> int:
                 f"{record['model']!r}",
             )
             require(
-                agent.get("limits") == persona.get("limits", {}),
-                f"{tag}: agent.json limits do not match the source",
+                agent.get("subagent") == (persona["kind"] == "subagent"),
+                f"{tag}: agent.json subagent flag does not match kind",
             )
-            config = yaml.safe_load((base / "config.yaml").read_text(encoding="utf-8"))
+            front, body = read_frontmatter(base / "agent.md")
+            require(front.get("name") == name, f"{tag}: agent.md name is wrong")
+            # A `model:` key here voids the agent for agy and it falls
+            # back silently, exit 0 (#43 D8, findings Q1b). The compiler
+            # is the only writer of this file, so this assertion is what
+            # keeps that failure impossible rather than merely unlikely.
+            require("model" not in front, f"{tag}: agent.md must carry no model key")
             require(
-                config.get("tools") == record["tools"],
-                f"{tag}: tools are {config.get('tools')}, expected {record['tools']}",
+                front.get("tools") == record["tools"],
+                f"{tag}: tools are {front.get('tools')}, expected {record['tools']}",
             )
             require(
-                config.get("subagent", False) == (persona["kind"] == "subagent"),
-                f"{tag}: config.yaml subagent flag does not match kind",
+                bool(str(front.get("description", "")).strip()),
+                f"{tag}: agent.md carries no description",
             )
-            body = (base / "instructions.md").read_text(encoding="utf-8")
 
         for skill, text in record["skills"].items():
             require(

@@ -18,6 +18,37 @@ authority levels) are NOT in this file: they belong to the canonical
 persona definitions under `personas/` and are compiled per harness.
 This file carries only what binds every agent equally.
 
+## Session checklist
+
+The tracker loop (detailed under "Working the tracker" below), in the
+order it happens. Every session, every harness, before the first
+edit. The never-list at the end is absolute.
+
+1. **Issue open and claimable.** Verify the issue is *open*, has no
+   `in-progress`, no `hold`, and closed dependencies. Pointed at a
+   closed issue? It is not a work item: file a follow-up ("Before
+   filing an issue" below) and work that. Never reuse a closed
+   issue's number for a branch, a PR or a handoff.
+2. **Claim.** Add `in-progress` and post the one-line claim comment:
+   who, which session, which stage, which worktree path.
+3. **Your own worktree.** Create it from `origin/main` on
+   `<actor>/<issue>-<slug>` and do every edit and commit there. The
+   primary checkout is read-only reference — except its `runs/`,
+   which is the one shared run root for every session ("Outputs go
+   in timestamped run folders" below); never write `runs/` inside a
+   worktree.
+4. **Read the chain.** AGENTS.md → INTENT.md → docs/SPEC.md → the
+   issue thread bottom-up.
+5. **Produce the stage's artifact, commit by path, open a PR.** A
+   bare push is not a delivery; a human merges.
+6. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
+   pausing, drop `in-progress`; after the merge, remove your worktree.
+
+Never: commit, stage, stash or checkout in the primary checkout; work
+an issue that is closed or that you have not claimed; push a branch
+without opening a PR; document a runtime mechanism (a flag, a tool, a
+workspace mode) you have not verified against that runtime.
+
 ## Document map and reading order
 
 Every session starts by walking the same chain, in this order. Each
@@ -104,18 +135,24 @@ resumable cold.
 
 1. **Pick.** Open the pinned **tracker issue** — the index of all
    work, grouped by bootstrap rung, one checklist line per issue. An
-   issue is *claimable* when: it has no `in-progress` label, every
-   issue named in its "Depends on" line is closed, and no `hold`
-   label is present anywhere it points.
+   issue is *claimable* when: it is open, it has no `in-progress`
+   label, every issue named in its "Depends on" line is closed, and
+   no `hold` label is present anywhere it points. A closed issue is
+   never a work item, whoever or whatever pointed you at it: search
+   the tracker ("Before filing an issue"), file the follow-up naming
+   the closed issue as the one it extends, and work the follow-up.
 2. **Claim.** Add `in-progress` and comment one line: who (persona or
-   human+harness) and what stage is being worked. The claim is the
-   mutex: **the issue is the unit of parallelism** — two sessions
-   never work the same issue, and any number of sessions may work
-   different claimable issues concurrently. Scope issues to disjoint
-   paths so parallel PRs don't collide.
+   human+harness, with the session name where the harness has one),
+   what stage is being worked, and the worktree path you are about to
+   create. The claim is the mutex: **the issue is the unit of
+   parallelism** — two sessions never work the same issue, and any
+   number of sessions may work different claimable issues
+   concurrently. Scope issues to disjoint paths so parallel PRs don't
+   collide.
 3. **Read.** Walk the document chain (above), then the issue thread
    bottom-up: the last handoff comment says exactly where to resume.
-4. **Work.** On a branch named `<actor>/<issue>-<slug>`, produce the
+4. **Work.** In your own worktree (below), on a branch named
+   `<actor>/<issue>-<slug>`, produce the
    artifact the current lifecycle stage owes (see INTENT.md's
    lifecycle: intent.md → spec.md → plan.md → code+tests). Everything
    reaches `main` by PR; the PR body carries `Closes #<n>` only when
@@ -131,6 +168,63 @@ resumable cold.
 6. **Gate.** A human merges. The merge *is* the state transition that
    makes the next stage claimable — state advances only through the
    tracker and `main`, never through anyone's memory.
+
+**One session, one worktree, one issue.** The claim is the mutex at
+the tracker; the filesystem must match it, or sessions that honor the
+claim still collide in one working tree: uncommitted edits from one
+session appear in another's reads, and branch switches clobber work.
+Several sessions, on more than one harness, run against this repo on
+one machine at the same time. Git worktrees are the mechanism on
+every harness; only the tooling around them differs, and the harness
+file names it.
+
+- **Look before claiming.** Run `git worktree list` (a locked or dirty
+  worktree is someone's live work) and read the issue's last claim
+  comment; the harness file adds its own peer check. If a peer already
+  holds the issue, stand down and report instead of duplicating.
+- **The primary checkout** (the directory the repo was cloned into,
+  wherever that is on the machine) is read-only reference and stays
+  on a clean `main`: never edit, stash, checkout, commit or stage
+  there. If you find it dirty, report it and leave the changes alone —
+  they are a peer's.
+- **Enter your own worktree before the first edit**, created from
+  `origin/main`:
+  `git fetch origin && git worktree add -b <actor>/<n>-<slug>
+  .claude/worktrees/<actor>-<n>-<slug> origin/main`.
+  The `.claude/worktrees/` location is shared by every harness so one
+  report covers them all.
+- **Work only there.** All reads for editing, all commits, and the
+  push, PR and merge for the issue happen from your worktree and
+  touch only files your issue owns. Commit by path, never `git add .`
+  or `commit -a`, so a stray file can't ride along. Fetching is always
+  allowed anywhere.
+- **Finish the circle.** After the PR merges: post the handoff
+  comment, `git worktree remove <path>` for your own worktree, delete
+  the local branch, and confirm with `git worktree list` that it is
+  gone. Never remove a worktree you did not create; a dirty one is a
+  peer's live work and only the human prunes stale ones.
+
+**Worktree hygiene cadence.** `scripts/ops/worktrees.sh` is the one
+tool for this: it lists every worktree with lock (and whether the
+lock's pid is alive), dirty count, unpushed commits, merged state and a
+verdict (`safe`, `dirty`, `unpushed`, `locked`); `--prune` removes only
+`safe` worktrees and local branches merged into `origin/main`;
+`--prune-remote` also deletes merged remote branches; `DRY_RUN=1`
+previews. The cadence:
+
+- **Every session, at start:** run the report (read-only). If it shows
+  `safe` entries, or a `locked:pid-dead` one, tell the user in the
+  first message; do not prune on your own.
+- **The human, or a session the human explicitly asks:** run
+  `--prune-remote` at the end of each working day and right after a PR
+  stack lands (deleting merged head branches is also what retargets
+  stacked children). Preview with `DRY_RUN=1` first when peers are
+  busy.
+- **`dirty`, `unpushed`, `locked` are never pruned by the script.**
+  Each is resolved by its owner: resume it, land it, or discard it by
+  hand. A `locked:pid-dead` entry is a crashed session or subagent;
+  its owner unlocks it (`git worktree unlock <path>`) after checking
+  the diff.
 
 **The labels are the state machine** (#4, `intent/4-labels/`). Five
 are human-facing and filed by people: `intent:new` (intake),
@@ -151,6 +245,26 @@ ladder (intent.md merged → `status:spec`, an *Approved* spec.md →
 and with no model call, because the merge is still the transition and
 the label is only its shadow.
 
+### Dispatch has one door
+
+`scripts/ops/work.sh <issue>` is how a stage starts. It reads the
+issue, derives the stage and its owner from the labels above, and
+either prints the dispatch or launches that persona's session with its
+own identity — so the choice of who works an issue is made by the
+table, once, in front of the operator, and not by whoever happens to be
+at a keyboard.
+
+No session acts as a persona it is not. A sub-agent spawned inside a
+session is the acting persona's own helper, drawn from its
+`delegates_to` list, and it works under that persona's name and
+credentials; it never becomes a second persona at a stage.
+
+A bootstrap dispatch — a persona launched by hand because the door is
+what is being built or repaired — is allowed only when the claim
+comment of step 2 declares it on its first line, naming the persona and
+the reason. An undeclared bootstrap is indistinguishable from a session
+working out of turn.
+
 **There is no STATUS.md.** Status in a committed file goes stale the
 moment two sessions run in parallel, and every update costs a
 commit/PR that can conflict. The pinned tracker issue plus per-issue
@@ -168,6 +282,22 @@ handoff comment.
 - `runs/` is local scratch and is gitignored. Anything worth keeping
   graduates from a run folder into a real, reviewed location (`docs/`,
   a script, a PR) — sanitized first.
+- **One `runs/` per machine: the primary checkout's.** Worktrees are
+  for code; artifacts are shared across sessions and read by the human
+  from the primary checkout (the one open in their IDE). Because
+  `runs/` is gitignored, a run folder written inside a worktree never
+  travels with the branch and is deleted with the worktree. So every
+  session, in every harness and worktree, resolves the run root to
+  the primary checkout before writing:
+
+  ```bash
+  RUNS_ROOT="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)/runs"
+  ```
+
+  From the primary checkout this is `./runs`; from any worktree it is
+  the same directory. A `runs/` that appears inside a worktree is a
+  bug: move its contents to the shared root before the worktree is
+  removed.
 - **Bookkeeping: every run artifact records its disposition.** By the
   time a session ends, every artifact the session produced carries a
   disposition naming what became of it: the issue or PR it turned
