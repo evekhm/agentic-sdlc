@@ -155,8 +155,14 @@ fi
 
 ISSUE="$NUMBER"
 RESOLVED_VIA=""
+PR_LABELS=""
 if [ "$(jq -r 'if .pull_request then "pr" else "issue" end' <<<"$view")" = "pr" ]; then
     pr_body="$(jq -r '.body // ""' <<<"$view")"
+    # Kept before `view` is replaced by the issue's. The PR is not the
+    # unit of work, but it IS a place an operator puts a label, and a
+    # `hold` written there must stop the dispatch rather than be thrown
+    # away with the rest of this response (#50, Atlas AT-1).
+    PR_LABELS="$(jq -r '.labels[].name' <<<"$view")"
     # Every closing keyword GitHub honours, case-insensitively, same-repo
     # `#n` only: `Fixes #205` closes #205 on merge whether or not this
     # script reads the word, and a dispatcher that only knows `closes`
@@ -196,16 +202,35 @@ fi
 
 state="$(jq -r '.state' <<<"$view")"
 title="$(jq -r '.title // ""' <<<"$view")"
-labels="$(jq -r '.labels[].name' <<<"$view")"
+issue_labels="$(jq -r '.labels[].name' <<<"$view")"
+
+# The refusals below read the UNION of the resolved issue's labels and,
+# when a pull-request number was given, the pull request's own — a
+# circuit breaker on either side stops the dispatch (#50, Atlas AT-1).
+# For a plain issue number PR_LABELS is empty and this is the issue's
+# set unchanged. The STAGE is deliberately not part of the union: it is
+# derived from `issue_labels` below, because the state machine belongs
+# to the unit of work and a status:* label on a pull request must not
+# decide which rung the issue is on (D9).
+labels="$(printf '%s\n%s\n' "$issue_labels" "$PR_LABELS" | grep -v '^$' | sort -u || true)"
 
 has_label() { grep -Fxq "$1" <<<"$labels"; }
+# Which side carries a label, so a refusal sends the operator to the
+# number they have to clear rather than to the other one.
+label_side() { # <label> -> "#<issue>" | "#<pr> (the pull request)"
+    if grep -Fxq "$1" <<<"$issue_labels"; then
+        printf '#%s' "$ISSUE"
+    else
+        printf '#%s (the pull request)' "$NUMBER"
+    fi
+}
 
 # --- Refusals, in D5's order, before anything else -----------------------------
 # A refusal is a report, never a partial claim.
 
 # (a) hold is absolute — not even a look further down the list.
 if has_label "hold"; then
-    refuse "#$ISSUE carries hold"
+    refuse "$(label_side hold) carries hold"
 fi
 
 # (b) humans have taken over.
@@ -213,19 +238,19 @@ if [ "$state" != "open" ]; then
     refuse "#$ISSUE is closed"
 fi
 if has_label "status:review-stuck"; then
-    refuse "#$ISSUE carries status:review-stuck"
+    refuse "$(label_side status:review-stuck) carries status:review-stuck"
 fi
 
 # (c) blocked is a report-and-stop, not a wait.
 if has_label "blocked"; then
-    refuse "#$ISSUE carries blocked"
+    refuse "$(label_side blocked) carries blocked"
 fi
 
 # (d) more than one status:* is a corrupted state machine. Report the
 #     labels and stop: never guess which is true, and never apply `hold`
 #     either — the stage advancer is the single writer of the circuit
 #     breaker, and two writers is two circuit breakers (#4, D1).
-status_labels="$(grep '^status:' <<<"$labels" || true)"
+status_labels="$(grep '^status:' <<<"$issue_labels" || true)"
 status_count=0
 [ -z "$status_labels" ] || status_count="$(grep -c . <<<"$status_labels")"
 if [ "$status_count" -gt 1 ]; then
@@ -238,7 +263,7 @@ if [ "$status_count" -eq 1 ]; then
         '.stages[] | select(.label == $l) | .stage' "$LIFECYCLE_JSON")"
     [ -n "$stage" ] \
         || die "#$ISSUE carries '$status_labels', which is not a rung in $LIFECYCLE_JSON"
-elif has_label "intent:new"; then
+elif grep -Fxq "intent:new" <<<"$issue_labels"; then
     # Filed but not yet on the ladder: the first rung is where work starts.
     stage="$(jq -r '.stages[0].stage' "$LIFECYCLE_JSON")"
 else
