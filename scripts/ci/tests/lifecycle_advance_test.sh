@@ -42,6 +42,10 @@ FIXTURES="$WORK/fixtures"
 TESTREPO="evekhm/agentic-sdlc"
 export WRITES INVOKES FIXTURES
 export GITHUB_REPO="$TESTREPO"
+# Captured before $WORK/bin goes on PATH below, so this resolves the
+# real binary structurally — not merely because the stub file does not
+# exist yet on the next line (#73 Argus R1-6).
+REAL_GIT="$(command -v git)"
 export PATH="$WORK/bin:$PATH"
 
 pass() { echo "PASS: $*"; }
@@ -127,9 +131,7 @@ chmod +x "$WORK/bin/gh"
 # D21(b)'s range-walk failure is reachable hermetically — the
 # advancer's own `git cat-file -e` preflight rejects every bad sha a
 # fixture could supply, so the walk cannot be made to fail through its
-# inputs. Captured before this stub exists on PATH, so it resolves the
-# real binary and never itself.
-REAL_GIT="$(command -v git)"
+# inputs. $REAL_GIT is resolved above, before $WORK/bin joined PATH.
 cat > "$WORK/bin/git" <<GITSTUB
 #!/usr/bin/env bash
 if [ "\${1:-}" = "rev-list" ] && [ "\${LIFECYCLE_TEST_GIT_REV_LIST_FAIL:-0}" = "1" ]; then
@@ -1009,6 +1011,7 @@ has "::warning::lifecycle_advance: #999 is at status:in-review" \
   "S30: the warning names the issue and its current rung"
 has "would move it to status:implementing" \
   "S30: and names the rung the trigger would otherwise have written"
+has "plan.md\` added in" "S30: and names the trigger that would have moved it (Acceptance 28's fourth thing)"
 has "does not advance the ladder" "S30: and states why nothing happened (D19)"
 hasnt "--add-label" "S30: no label is written for a backward transition"
 hasnt "--remove-label" "S30: and nothing is removed either"
@@ -1046,6 +1049,25 @@ run "$C2" "$C3" "S30: the plan.md range against an unranked status exits 0"
 has "::warning::lifecycle_advance: #999 is at status:review-stuck" \
   "S30: the warning names the issue and its unranked status"
 hasnt "--add-label" "S30: no label is written when the current status cannot be ranked"
+
+banner "S30 · item 28 · Argus R1-1 · D19 · already at an UNRANKED target label writes nothing at all"
+# The same patch the "ladder file is the source" test above makes: an
+# advances_to the ladder's own five labels do not list, reachable only
+# by hand-editing or typo'ing personas/lifecycle.json. #999 already
+# carries that exact label, so this is the equal case — but on a target
+# D19's rank gate cannot rank. Base's unconditional same-label
+# short-circuit covered this; gating D19 entirely on a RANKED target
+# without restoring it let this case fall through to a self-cancelling
+# `--add-label status:elsewhere --remove-label status:elsewhere`.
+jq '(.stages[] | select(.artifact == "plan.md") | .advances_to) = "status:elsewhere"' \
+  "$SANDBOX/personas/lifecycle.json" > "$WORK/patched.json"
+cp "$WORK/patched.json" "$SANDBOX/personas/lifecycle.json"
+reset_fixtures
+issue_fixture 999 OPEN status:elsewhere
+run "$C2" "$C3" "S30: the patched-ladder range against an issue already at the unranked target exits 0"
+hasnt "gh issue edit 999" "S30: no edit at all is attempted — not even a self-cancelling add-and-remove of the same label"
+hasnt "::warning::lifecycle_advance:" "S30: and this is not shown as a refusal either — it is already there"
+cp "$LADDER" "$SANDBOX/personas/lifecycle.json"
 
 banner "S31 · item 29 · AT-7 · D20 · blocked is advisory: it never stops or taints a legitimate transition"
 reset_fixtures
@@ -1101,6 +1123,7 @@ run_fail "$C4" "$CM" "S33: the non-JSON file-list body ends red"
 has "::error::" "S33: it is a counted failure"
 has "pull request #4300" "S33: the failure names the pull request"
 hasnt "--add-label" "S33: nothing is written"
+hasnt "::warning::lifecycle_advance:" "S33: and it is not mistaken for a near miss either"
 
 banner "S33 · item 31 · D15 conjunct (2) · a file-list body that parses as an object, not an array, is the same counted failure"
 reset_fixtures
@@ -1111,6 +1134,7 @@ run_fail "$C4" "$CM" "S33: the {} file-list body ends red"
 has "::error::" "S33: it is a counted failure"
 has "pull request #4301" "S33: the failure names the pull request"
 hasnt "--add-label" "S33: nothing is written"
+hasnt "::warning::lifecycle_advance:" "S33: and it is not mistaken for a near miss either"
 
 banner "S33 · item 31 · D15 conjunct (2) · a well-formed empty array is still the silent negative answer"
 reset_fixtures
@@ -1141,6 +1165,7 @@ pulls_fixture "$CM" 4304 odyssey/999-998-land "Landing #998's work."
 issue_fixture 999 OPEN status:implementing
 issue_unreadable 999
 run "$C4" "$CM" "S34: the near-miss range with #999 unreadable still exits 0"
+invoked "issue view 999" "S34: the excepted read did happen — this pins a quiet failure, not a skipped read"
 hasnt "::error::" "S34: the near-miss read failing is not a counted failure (#57, D21)"
 hasnt "::warning::lifecycle_advance:" "S34: and draws no warning — an unreadable issue cannot be shown to be at the merge rung"
 

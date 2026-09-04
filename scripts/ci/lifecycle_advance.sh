@@ -729,6 +729,27 @@ $marker"
         fi
     fi
 
+    # --- D19: an issue already at the target label is not an event -------------
+    # Checked BEFORE any rank is read, and independent of whether the
+    # ladder can rank $target at all: index() is a bijection over the
+    # ladder's own label list, so two DIFFERENT labels can never share a
+    # rank — the only way the block below could ever see "equal" is for
+    # $current_status to already equal $target, which is exactly this
+    # case. Base's unconditional `[ "$current_status" = "$target" ]`
+    # short-circuit lived here; deleting it without a rank-independent
+    # replacement was #73's own regression (Argus R1-1): an issue already
+    # carrying a label the ladder cannot rank (a hand-edited or typo'd
+    # personas/lifecycle.json) fell through to a self-cancelling
+    # `--add-label X --remove-label X` instead of a no-op.
+    if [ -n "$target" ] && [ "$current_status" = "$target" ]; then
+        log "    #$issue is already at $target for $trigger_desc — no stage transition (D19)"
+        if grep -Fxq "intent:new" <<<"$labels"; then
+            edit_labels "$issue" "" "intent:new" \
+                || { fail_issue "could not clear intent:new on #$issue"; continue; }
+        fi
+        continue
+    fi
+
     # --- D19: a transition never walks down the ladder -------------------------
     # Rank is the row's 1-based position in `[.stages[].label]` — the
     # same list D5's contest already ranks on, so no second ordering is
@@ -740,41 +761,44 @@ $marker"
     # rename or a revert-and-reland is an ordinary act on a healthy
     # ladder, not a broken one (#57, D19). Skipped when target is empty:
     # the Draft override and the last, inert rung are not transitions to
-    # rank at all.
+    # rank at all. The equal-rank case cannot occur below: it is the
+    # same-label case the short-circuit above already caught.
+    #
     # tgt_idx="null" — the row's own advances_to is not one of the
     # ladder's five labels at all (reachable only by hand-editing
     # personas/lifecycle.json, as the "ladder file is the source" test
     # below does) — is outside what D19 ranks; such a target is neither
     # shown backward nor forward, so it is let through unranked rather
-    # than refused on data D19 was never told how to order.
-    if [ -n "$target" ] && tgt_idx="$(jq -r --arg l "$target" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON")" \
-        && [ "$tgt_idx" != "null" ]; then
-        target_rank=$((tgt_idx + 1))
-        current_rank=0
-        current_unranked=0
-        if [ -n "$current_status" ]; then
-            cur_idx="$(jq -r --arg l "$current_status" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON")"
-            if [ "$cur_idx" = "null" ]; then
-                current_unranked=1
-            else
-                current_rank=$((cur_idx + 1))
-            fi
+    # than refused on data D19 was never told how to order. A `jq`
+    # failure while reading either rank is its own counted failure
+    # (Argus R1-2): this row's thesis is that no read here fails open,
+    # and silently treating an unreadable rank as "unranked" would be
+    # exactly that.
+    if [ -n "$target" ]; then
+        if ! tgt_idx="$(jq -r --arg l "$target" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON")"; then
+            fail_issue "could not rank $target on the ladder for #$issue"
+            continue
         fi
+        if [ "$tgt_idx" != "null" ]; then
+            target_rank=$((tgt_idx + 1))
+            current_rank=0
+            current_unranked=0
+            if [ -n "$current_status" ]; then
+                if ! cur_idx="$(jq -r --arg l "$current_status" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON")"; then
+                    fail_issue "could not rank $current_status on the ladder for #$issue"
+                    continue
+                fi
+                if [ "$cur_idx" = "null" ]; then
+                    current_unranked=1
+                else
+                    current_rank=$((cur_idx + 1))
+                fi
+            fi
 
-        if [ "$current_unranked" -eq 1 ] || [ "$target_rank" -lt "$current_rank" ]; then
-            echo "::warning::lifecycle_advance: #$issue is at ${current_status:-no status label} and $trigger_desc would move it to $target, which does not advance the ladder — no stage transition was made (#57, D19)."
-            continue
-        fi
-        if [ "$target_rank" -eq "$current_rank" ]; then
-            # Already at the target rank — not an event (#4 D4/D7). Still
-            # true up an unrelated intent:new flag, exactly as the
-            # forward path below does.
-            log "    #$issue is already at $target for $trigger_desc — no stage transition (D19)"
-            if grep -Fxq "intent:new" <<<"$labels"; then
-                edit_labels "$issue" "" "intent:new" \
-                    || { fail_issue "could not clear intent:new on #$issue"; continue; }
+            if [ "$current_unranked" -eq 1 ] || [ "$target_rank" -lt "$current_rank" ]; then
+                echo "::warning::lifecycle_advance: #$issue is at ${current_status:-no status label} and $trigger_desc would move it to $target, which does not advance the ladder — no stage transition was made (#57, D19)."
+                continue
             fi
-            continue
         fi
     fi
 
