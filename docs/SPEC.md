@@ -761,6 +761,27 @@ workflow TO the config — a subscribed event the list omits fails the
 gate, which makes the duplication a checked derivation rather than a
 second source of truth.
 
+The runner the trigger hands a pair to starts with neither harness
+binary and no model credential, and a workflow that reached the adapter
+in that state put a red check on every pull request (#146). Both are
+the job's to supply, the same way for every persona, so that the
+workflow stays blind to which harness a persona is pinned to: it
+installs BOTH binaries through `scripts/ci/install_harness.sh` (one
+script with `resolve`, `install` and `check`, cached by version, the
+same command an operator runs on a new machine) and it authenticates
+through workload identity federation — the job's one grant beyond read
+is `id-token: write`, no cloud key is stored, and the credential file
+the auth step writes is moved out of the checkout before any persona
+can read it. Federation is provisioned once per repository by
+`scripts/setup/wif_setup.sh` (pool, provider, least-privilege service
+account, predict-only role, the repository-scoped impersonation binding,
+and the repository variables the workflow reads), idempotently and with
+`--check` and `--dry-run`; until it has been run the job reports the
+missing variable by name and stays green, the same treatment a missing
+App key gets. The adapter and its contract are unchanged: the toolchain
+and the credential are the environment an adapter runs in, never a
+second dispatcher.
+
 `scripts/ops/post.sh <number> --as <persona> --body-file <path>` is the
 one write path an unattended run has. The body is always a file and
 there is deliberately no `--body` flag. `hold` is re-read IMMEDIATELY

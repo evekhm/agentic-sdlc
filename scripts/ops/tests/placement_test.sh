@@ -207,6 +207,71 @@ grep -q 'directory name IS the value legal' "$REPO/scripts/placement/README.md" 
   || fail "D17: the registry README does not state the directory-name contract"
 pass "D17: scripts/placement/README.md states the registry contract"
 
+# ---------------------------------------------------------------------------
+banner "#146 the hosted runner installs BOTH harnesses and authenticates before it dispatches"
+# The defect was a trigger workflow that reached work.sh on a machine with
+# neither binary and no model credential, so every pull request carried
+# two red checks. Three things are held here: the installer refuses by
+# name when a binary is missing (so the check step in the workflow is
+# red for the right reason), the workflow runs it BEFORE the adapter, and
+# the workflow carries the one grant federation needs.
+INSTALLER="$REPO/scripts/ci/install_harness.sh"
+WORKFLOW="$REPO/.github/workflows/unattended.yml"
+[ -x "$INSTALLER" ] || fail "#146: scripts/ci/install_harness.sh is not executable"
+bash -n "$INSTALLER" || fail "#146: scripts/ci/install_harness.sh is not valid bash"
+# An empty HOME and a PATH without the harness stubs: `check` must name
+# both binaries and exit 1, and must not try to install anything.
+mkdir -p "$WORK/emptyhome"
+set +e
+OUT="$(HOME="$WORK/emptyhome" PATH="/usr/bin:/bin" bash "$INSTALLER" check 2>&1)"
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || fail "#146: install_harness.sh check exited 0 with no harness on PATH"
+grep -q 'claude' <<<"$OUT" && grep -q 'agy' <<<"$OUT" \
+  || fail "#146: install_harness.sh check does not name the missing binaries: $OUT"
+pass "#146: install_harness.sh check refuses by name when a harness is missing (exit $rc)"
+# With two binaries that answer `--version` the check is green: the same
+# command the workflow's last pre-dispatch step runs. These are NOT the
+# launch-forbidding stubs above (which refuse every call, `--version`
+# included) — they live in a bin dir of their own, and HOME is the empty
+# one so nothing under a real ~/.local/bin can shadow them.
+mkdir -p "$WORK/versioned"
+printf '#!/usr/bin/env bash\necho "9.9.9 (Claude Code)"\n' > "$WORK/versioned/claude"
+printf '#!/usr/bin/env bash\necho "9.9.9"\n' > "$WORK/versioned/agy"
+chmod +x "$WORK/versioned/claude" "$WORK/versioned/agy"
+OUT="$(HOME="$WORK/emptyhome" PATH="$WORK/versioned:/usr/bin:/bin" bash "$INSTALLER" check 2>&1)" \
+  || fail "#146: install_harness.sh check fails with both binaries on PATH: $OUT"
+grep -q '^claude 9.9.9 ' <<<"$OUT" && grep -q '^agy 9.9.9 ' <<<"$OUT" \
+  || fail "#146: install_harness.sh check does not report each binary's version: $OUT"
+pass "#146: install_harness.sh check passes with both binaries present and reports their versions"
+# Order in the workflow: install, then check, then the adapter. Greped
+# off the file so a reorder is caught; line numbers are the order.
+install_at="$(grep -n 'install_harness.sh install' "$WORKFLOW" | head -1 | cut -d: -f1)"
+check_at="$(grep -n 'install_harness.sh check' "$WORKFLOW" | head -1 | cut -d: -f1)"
+dispatch_at="$(grep -n 'scripts/placement/gh-actions/run.sh' "$WORKFLOW" | head -1 | cut -d: -f1)"
+[ -n "$install_at" ] && [ -n "$check_at" ] && [ -n "$dispatch_at" ] \
+  || fail "#146: unattended.yml does not call install_harness.sh install/check before the adapter"
+[ "$install_at" -lt "$check_at" ] && [ "$check_at" -lt "$dispatch_at" ] \
+  || fail "#146: unattended.yml order is install=$install_at check=$check_at dispatch=$dispatch_at; must be install < check < dispatch"
+pass "#146: unattended.yml installs and checks the harness binaries before the adapter runs"
+grep -qE '^[[:space:]]+id-token: write$' "$WORKFLOW" \
+  || fail "#146: unattended.yml grants no id-token: write, so federation cannot mint a credential"
+grep -q 'workload_identity_provider:' "$WORKFLOW" \
+  || fail "#146: unattended.yml has no federation auth step"
+auth_at="$(grep -n 'workload_identity_provider:' "$WORKFLOW" | head -1 | cut -d: -f1)"
+[ "$auth_at" -lt "$dispatch_at" ] \
+  || fail "#146: the federation auth step (line $auth_at) must precede the adapter (line $dispatch_at)"
+pass "#146: unattended.yml authenticates through federation before the adapter runs"
+# Still no cloud key at rest, still no GitHub write: the only secret the
+# workflow reads is the App key, by the name convention, and nothing
+# else is indexed out of `secrets`.
+n="$(grep -v '^[[:space:]]*#' "$WORKFLOW" | grep -c 'secrets\[')"
+[ "$n" = "1" ] || fail "#146: unattended.yml reads $n secrets; the App key by name is the only one allowed"
+if grep -qE 'secrets\.[A-Z_]*(KEY|TOKEN|CREDENTIAL)' "$WORKFLOW"; then
+  fail "#146: unattended.yml names a cloud key or token secret; model access is federation, not a key at rest"
+fi
+pass "#146: unattended.yml carries no cloud key at rest"
+
 # ===========================================================================
 T="$(fixture_tree)"
 export STUB_API_LOG="$WORK/api.log"

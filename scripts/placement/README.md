@@ -60,10 +60,10 @@ directory which is not here.
 
 ## v1 adapters
 
-| Directory | Runs where | Credential |
-|---|---|---|
-| `vm-local` | the presenter's machine | the key `scripts/auth/mint_app_token.py` already finds — the environment variable `authority.token` names, else the operator's local key directory |
-| `gh-actions` | a GitHub-hosted runner | the Actions secret whose name is the persona's `authority.token`, set into the job's environment by `.github/workflows/unattended.yml` |
+| Directory | Runs where | Credential | Model access and toolchain |
+|---|---|---|---|
+| `vm-local` | the presenter's machine | the key `scripts/auth/mint_app_token.py` already finds — the environment variable `authority.token` names, else the operator's local key directory | whatever the operator logged in with; both harness binaries already installed (`scripts/ci/install_harness.sh check` says whether they are) |
+| `gh-actions` | a GitHub-hosted runner | the Actions secret whose name is the persona's `authority.token`, set into the job's environment by `.github/workflows/unattended.yml` | workload identity federation, no cloud key at rest: provisioned once per repository by `scripts/setup/wif_setup.sh`, which writes the repository variables the workflow reads; BOTH harness binaries installed on the runner by `scripts/ci/install_harness.sh` before the adapter runs, so the workflow never learns which harness a persona is pinned to (#146) |
 
 ## Reserved names
 
