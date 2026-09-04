@@ -348,7 +348,8 @@ request, those refusals read the UNION of the pull request's own labels
 and the resolved issue's — a `hold` on either side refuses, and the
 message names the side that carries it, because the circuit breaker is
 placed where the operator is looking and resolving to the issue must
-not discard it (#50, Atlas AT-1). The stage is not part of that union:
+not discard it (#50, Atlas AT-1, PR #95). The stage is not part of that
+union:
 it is derived from the issue's labels alone, since the state machine
 belongs to the unit of work and a `status:*` label on a pull request
 must not decide which rung the issue is on. The claim's holder is the
