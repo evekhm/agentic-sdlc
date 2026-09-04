@@ -101,7 +101,11 @@ Manifest flow, skipping any persona that already has an `app_id`;
 `scripts/auth/mint_app_token.py <persona>` signs a JWT with the
 persona's private key and exchanges it for a ~1-hour installation
 token, usable directly as `GH_TOKEN`. The private key is the only
-secret — an Actions secret or a local
+secret, and WHERE it lives follows the persona's placement
+(`execution.placement`, #25): a persona placed at `gh-actions` needs
+its key as a repository Actions secret named `<PERSONA>_APP_PRIVATE_KEY`
+— in v1 that is argus and atlas and no others — and a persona placed at
+`vm-local` reads a local
 `~/.keys/<slug>.<date>.private-key.pem` file. Nothing is hardcoded to
 one owner: `_github_app.py:get_repo_info()` derives `(owner, repo)`
 from the checkout's `origin` remote, so forking the repo and
@@ -128,8 +132,13 @@ inherit their dispatcher's harness — and carries the machine-checked
 constraint that the two reviewers resolve to different model
 families; `tools.yaml` maps abstract capabilities to concrete tools
 per harness, with declared fallback text for optional capabilities a
-harness cannot map. Swapping a vendor is an edit to these files,
-never to a persona source.
+harness cannot map; `execution.yaml` pins each persona's trigger and
+placement (`execution.placement`, #25). Harness and placement are two
+axes and two files: WHICH runtime interprets a persona is
+`deployments.yaml`, WHERE that runtime runs is `execution.yaml`, and
+neither file carries the other's key — so moving a persona between a
+laptop and a hosted runner cannot silently change its model. Swapping a
+vendor is an edit to these files, never to a persona source.
 
 ### personas.compiler
 `scripts/sync_agents.py` compiles `personas/` + `config/` into every
@@ -197,10 +206,10 @@ refuses in six stated conditions rather than guessing. Tests:
 `scripts/ci/tests/lifecycle_advance_test.sh`.
 
 ### ci.gates
-`.github/workflows/ci-gates.yml` runs three deterministic gates on
-every pull request — and the first two also on pushes to `main` — as
-three independent jobs, so one push returns all three verdicts (#6,
-`intent/6-ci-gates/`). **Drift:** `python3 scripts/sync_agents.py
+`.github/workflows/ci-gates.yml` runs four deterministic gates on
+every pull request — and all but spec-check also on pushes to `main` —
+as four independent jobs, so one push returns all four verdicts (#6,
+`intent/6-ci-gates/`; the fourth added by #25). **Drift:** `python3 scripts/sync_agents.py
 --check` plus `scripts/ci/compiler_roundtrip.sh`; a hand-edited or
 stale compiled target under `.claude/agents/` or `.agents/` fails.
 **Sanitization:** `scripts/ci/sanitize_check.sh` scans every tracked
@@ -219,9 +228,14 @@ paths (`scripts/**`, `personas/**`, `config/**`,
 excluded, the drift gate owns those) unless the same diff touches this
 file or the PR body carries `Spec-impact: none — <reason>`; it checks
 that the choice was made, never whether the entry or the reason is
-good. All three are scripts runnable locally by the same command CI
-runs; the workflow needs no secrets and grants only
-`contents: read`.
+good. **Execution:** `python3 scripts/ops/execution.py --check` plus
+`scripts/ops/tests/{execution,placement,post}_test.sh`; a binding on a
+placement with no adapter directory, on an event
+`.github/workflows/unattended.yml` does not trigger on, or on a persona
+with no source fails here rather than at 03:00 in a run nobody is
+watching (`execution.placement`, #25). All four are scripts runnable
+locally by the same command CI runs; the workflow needs no secrets and
+grants only `contents: read`.
 
 ### lifecycle.labels
 Lifecycle state lives in GitHub issue labels (#4,
@@ -504,13 +518,97 @@ operator configured theirs. A fourth entry rewrites
 `git@github.com:` to `https://github.com/`, because an SSH remote
 never consults a credential helper at all.
 
+### execution.placement
+WHERE a persona runs is a second axis, orthogonal to which harness runs
+it (#25, `intent/25-execution-model/`). `config/deployments.yaml` pins
+persona→harness and `config/execution.yaml` pins persona→trigger and
+persona→placement; neither file carries the other's key, so a move
+between machines never edits a harness pin and never touches a persona
+source. A binding is four keys and no others: `trigger`
+(`repo-event`, `scheduled` or `manual`), `events` (required for
+`repo-event`, forbidden otherwise), `placement`, and `max_cost_usd`.
+That last key is **declared, not enforced**, and the distinction is
+load-bearing: the gate checks it is a positive number and the adapter
+prints it in its report line, so the intended budget is stated in one
+place and visible in every run log — but nothing meters spend against
+it or stops a run that passes it. The enforcement half of #25's D8
+("exceeding a cap is a green exit with a comment naming the cap") needs
+a spend reading the harness does not yet expose, and until it exists
+the value is a declared budget, not a ceiling. v1 binds five personas —
+argus and atlas on `pull_request` at `gh-actions`, athena, daedalus and
+odyssey `manual` at `vm-local`; cassandra carries no binding, because
+her cadence is #11's.
+
+`scripts/ops/execution.py` is the only reader of that file, in every
+context that needs it: `--check` is the gate, `--subscribers <event>`
+prints the `persona<TAB>placement` pairs an event wakes, and
+`--binding <persona>` prints one `trigger placement max_cost_usd` line
+an adapter reports. A placement is legal exactly when
+`scripts/placement/<name>/run.sh` exists — the directory name IS the
+value, so reserving a name is merging a directory and nothing else, and
+a binding on an unbuilt placement fails the gate naming the missing
+directory rather than failing at run time. v1 ships `vm-local` and
+`gh-actions`; `cloud-run-worker`, `cloud-run-instance` and
+`agent-engine` are reserved by name only.
+
+Every adapter has the same shape and is checked against it: it takes
+`<number> --as <persona>` and no other flag, reads its binding from
+`execution.py`, runs the D4 preflight, prints one report line, and
+dispatches through the single `exec scripts/ops/work.sh <number> --as
+<persona>` line — so a placement changes where a session runs and
+nothing about what it does. The preflight is
+`scripts/auth/mint_app_token.py <persona> --require-repo --quiet`,
+which asserts the App's installation covers this checkout's repository
+before any model is reached; the read is paginated, because an
+installation on dozens of repositories answers its first page without
+the one being asked about, and `--quiet` keeps the preflight's own
+token out of every shell variable. The `gh-actions` adapter additionally
+requires the private key to be present under the NAME the persona's
+`authority.token` gives, and refuses by that name when it is not.
+
+`.github/workflows/unattended.yml` is the trigger and never the
+runtime. It notices an event, asks `--subscribers` who wants it, and
+hands each pair to its adapter through a matrix — a matrix rather than
+a loop because `secrets[format('{0}_APP_PRIVATE_KEY', matrix.upper)]`
+can only be indexed by a matrix value, and because one openable run log
+per reviewer is what makes an unattended review observable. A subscriber
+placed somewhere a GitHub-hosted runner cannot host is one named skip
+line, never a silent drop; the workflow's whole grant is
+`contents: read, pull-requests: read`, every GitHub write being a
+persona App's own; a fork pull request is excluded at the resolve job
+and gets human review only; and the fork-secrets variant of the
+pull-request trigger appears nowhere under `.github/workflows/`. The
+`on:` list necessarily repeats the `events` values because GitHub
+requires a static trigger list, so the `execution` gate holds the
+workflow TO the config — a subscribed event the list omits fails the
+gate, which makes the duplication a checked derivation rather than a
+second source of truth.
+
+`scripts/ops/post.sh <number> --as <persona> --body-file <path>` is the
+one write path an unattended run has. The body is always a file and
+there is deliberately no `--body` flag. `hold` is re-read IMMEDIATELY
+BEFORE the write, not only at dispatch: a review that starts against an
+unheld pull request and finishes four minutes after a human held it is
+computed, paid for, and posts nothing. For a pull request the hold set
+is the pull request AND every issue it closes, resolved by the same
+code `ops.dispatch` resolves on (`scripts/ops/lib/github.sh`, sourced by
+both, so the two cannot disagree) — every closing reference, not the
+first, because suppressing a post is never the ambiguous half of that
+rule. A suppressed post is GREEN: exit 0 and one line naming the held
+number, since a red X on every held pull request trains the room to
+ignore the signal. Tests: `scripts/ops/tests/execution_test.sh`,
+`placement_test.sh` and `post_test.sh`, all three run by the
+`execution` gate (`ci.gates`).
+
 ## Agreed, not yet built
 
 Each entry is on the record as a tracker issue; it moves into the
 spec body when its implementing PR merges.
 
-- **review.automation** — Argus workflow, Atlas sidecar, consensus
-  (#8, #9).
+- **review.automation** — the review duty itself and the
+  `status:in-review` writer (#8, #9); the argus and atlas bindings in
+  `config/execution.yaml` are inert until then, which is what #25's
+  staged rollout intends.
 - **intake.automation** — headless Athena on `intent:new` (#10).
 - **maintain.watchers** — Cassandra, control bands, seeded incident
   (#11).

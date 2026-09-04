@@ -328,8 +328,10 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
   watch live, clone the template after.
 - **Presenter** — needs a re-runnable demo: resettable repo state,
   seeded incident, idempotent provisioning.
-- **GitHub** — the demo org/repo, six bot identities, Actions
-  workflows, labels as the state machine.
+- **GitHub** — the demo org/repo, six bot identities, labels as the
+  state machine, and Actions workflows that CAPTURE events and hand
+  each one to a placement adapter rather than being where the personas
+  run (#25, `execution.placement`).
 - **Model runtimes (GCP)** — two model-family deployments behind the
   tier pins (WIF-authenticated from Actions, per the predecessor's
   Argus path); optional Agent Runtime for a dispatched implementer.
@@ -378,23 +380,24 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
    carry the mechanism.
 2. **Hosting**: which org/repo for the shared demo; is the take-home
    template the same repo or a sanitized twin?
-3. **Runtime placement** — PARTIALLY RESOLVED: harness (which agent
-   framework interprets a persona — Claude Code vs Antigravity, pinned
-   in `config/deployments.yaml`) and deployment/execution environment
-   (where that framework's process runs and what triggers it — local
-   interactive, GitHub Actions, a VM, Cloud Run, an agent platform) are
-   orthogonal axes. The compiler (#5) stays scoped to producing the
-   harness-native persona definition only and carries no deployment
-   knowledge; each automation issue (#8 Argus, #9 Atlas, #10 Athena
-   intake, #11 Cassandra watchers) decides its own execution
-   environment at build time rather than one upfront global pin, since
-   event-triggered review/intake and continuous watching are genuinely
-   different trigger shapes. Antigravity does support headless
-   invocation (confirmed), so atlas being antigravity-pinned does not
-   block #9. Still open: the concrete target per persona/issue (which
-   of local/github-actions/vm/agent-platform/cloud-run) and Cassandra's
-   watcher cadence and seeded-incident mechanism — decided when each
-   issue is picked up, not now.
+3. ~~**Runtime placement**~~ — RESOLVED for #8/#9/#10 (#25): harness
+   (which agent framework interprets a persona — Claude Code vs
+   Antigravity, pinned in `config/deployments.yaml`) and placement
+   (where that framework's process runs and what triggers it, pinned in
+   `config/execution.yaml`) are orthogonal axes, one axis per file. The
+   compiler (#5) stays scoped to producing the harness-native persona
+   definition only and carries no placement knowledge. The concrete
+   target is no longer decided per issue at build time: v1 binds argus
+   and atlas to `gh-actions` on `pull_request` and athena, daedalus and
+   odyssey to `vm-local` on a manual trigger, a placement is legal
+   exactly when `scripts/placement/<name>/run.sh` exists, and moving a
+   persona between placements is one line in one file. Antigravity does
+   support headless invocation (confirmed), so atlas being
+   antigravity-pinned does not block #9. Still open, and deliberately
+   left to **#11**: Cassandra's watcher cadence and seeded-incident
+   mechanism — she is the one persona with no binding in
+   `config/execution.yaml`, because a cadence nobody has chosen is not
+   a `scheduled` trigger yet.
 4. ~~**Label taxonomy**~~ — RESOLVED (#4): a merged taxonomy, not a
    verbatim adoption of either candidate. Five labels are
    human-facing (`intent:new`, `in-progress`, `hold`, `blocked`,
