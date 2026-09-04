@@ -1,121 +1,159 @@
-# Intent: repin odyssey and cassandra to antigravity
+# Intent: harness and model selection is configuration
 
 **Issue:** #44 · **Stage:** plan · **Author:** athena
 (`evekhm-athena-app[bot]`)
 
+## Amendment r1 (2026-09-03)
+
+The presenter, who is this repository's human product owner, on
+2026-09-03:
+
+> actually it is pretty easy to update the pins for the models, so I can
+> change it. in the spec - I want to explicitly mention - that the whole
+> idea is to be able to re-pin and easily configure the harness and model
+> selection! i do not want spec to hardcode or reference any choices!!!
+> that must be changed!
+
+and, asked which pins they wanted: *"I want to specify my own pins now."*
+
+**The idea, stated once, up front.** Which harness runs a persona, and
+which model a semantic tier resolves to on that harness, are
+**configuration**. Re-pinning any persona to any harness, or changing
+which model a tier resolves to, is an edit to `config/deployments.yaml`
+or `config/model_tiers.yaml` followed by the compiler rebuild committed
+alongside it — and nothing else. **No persona source changes for a
+repin, ever.** Every gate in the repository proves whatever
+configuration is present rather than one particular assignment. That
+property, demonstrated end to end, is the deliverable of #44; the pins
+themselves are the operator's input and live only in `config/`.
+
+**What this amendment changed.** The original intent argued *for* a
+particular repin — two named personas to one named harness, two named
+personas staying, each with a defence — and its Proposed outcome quoted
+the resulting YAML. All of that is struck. The problem is restated as
+the property that was never demonstrated, the outcome as the demonstration,
+and every affected system is named by its role rather than by the
+persona whose pin happens to change. `spec.md` in this folder carries
+the same amendment row by row; `plan.md` is Daedalus's and is re-synced
+after this merges.
+
+---
+
 ## Problem
 
-Four of the six personas — `athena`, `odyssey`, `argus`, `cassandra` —
-are pinned to `claude-code` in `config/deployments.yaml`; only
-`daedalus` and `atlas` are on `antigravity`. The presenter's direction
-(2026-09-02, recorded on #44) is the opposite balance: run as much of
-the loop as possible on antigravity for price, and keep on the other
-harness only the personas whose duty makes it necessary.
+`config/deployments.yaml` pins each persona to a harness and
+`config/model_tiers.yaml` binds each semantic tier to a model per
+harness. That is the whole design (#2 D1/D2): one axis per file, so
+swapping a vendor or a harness edits exactly one place, and vendor and
+model names never enter `personas/**`.
 
-Two of those four are on `claude-code` for no reason anyone recorded —
-they were pinned there in #2 because that was the harness that worked:
+The design is real but it has never been **exercised**. Every pin in the
+file is the one #2 set on the day the persona was written, chosen
+because that harness was the one that worked; no persona has ever
+changed harness, so nothing in the repository has ever demonstrated
+that changing one is the two-file edit the design claims. Three things
+are therefore unproven:
 
-- **`odyssey`** is the highest-volume persona in the system. It runs at
-  `IMPLEMENTATION` tier with `limits: {max_turns: 120, timeout_mins:
-  90}` — the largest cap of any persona — and its stage is the one that
-  reads plans, writes code, and runs test suites. Every token the
-  implement stage spends is spent on `claude-sonnet-5` today.
-- **`cassandra`** runs at `FAST` tier on a cadence: watcher sweeps that
-  compare metrics to control bands and, at 1 sigma, only log. That is
-  the cheapest possible work on the most expensive available billing
-  relationship — a sweep that finds nothing still pays Anthropic list
-  rates for the context it re-reads.
+- **That a repin is config-only.** Until #43 the pin decided nothing at
+  launch time, so moving a persona would have moved it into a harness
+  `scripts/ops/work.sh` could not start. #43 (PR #60) closes that: both
+  harnesses launch, each has a compiled target layout, and the resolved
+  model reaches the launcher from the compiled artifact. A repin is now
+  a real change of where work runs — and the first one is what shows
+  that the persona sources, the scripts and the spec all sit still while
+  it happens.
+- **That the gates prove *whatever* configuration is present.** The
+  drift gate and the sanitize gate are already written that way. The
+  launch smoke is not: `scripts/ops/smoke_launch.sh` names its two arms
+  as persona literals, which were correct when they were written and
+  which any repin silently invalidates — the run keeps exiting 0 while
+  covering one harness twice. A gate that only holds for one pinning is
+  not a gate on the property.
+- **That the one constraint a pin can violate is guarded where the pin
+  is edited.** `docs/SPEC.md` says the two reviewers are pinned to
+  different model families and that "which family backs which reviewer
+  is a `config/` fact". Nothing in `config/deployments.yaml` says so out
+  loud, so a session repinning "everything else" for price can break the
+  review policy with a one-line edit and, until #6's check lands, no
+  error.
 
-Until #43 the pin decided nothing at launch time, so moving them would
-have been moving them into a harness `scripts/ops/work.sh` could not
-start. #43 (PR #60) closes that: both harnesses now launch, the
-antigravity target is `.agents/agents/<name>/agent.md`, and the model
-reaches `agy` as `--model` from the compiled sidecar. The repin is
-therefore now a real change of where work runs rather than a
-config-file edit with no observable.
-
-Left alone, the balance also degrades on its own. `docs/SPEC.md` says
-the two reviewers are pinned to different model families and that
-"which family backs which reviewer is a `config/` fact"; today
-`argus` is the *only* thing keeping that true, and nothing in the
-repository says so out loud. A later session repinning "everything
-else" for price would break the review policy with a one-line edit
-and no error.
+*(Amended 2026-09-03. The Problem previously read that "four of the six
+personas … are pinned to `claude-code`" against a presenter direction of
+2026-09-02 for "the opposite balance", and argued two specific moves:
+`odyssey` as "the highest-volume persona in the system … `limits:
+{max_turns: 120, timeout_mins: 90}`", and `cassandra` as "the cheapest
+possible work on the most expensive available billing relationship".
+Struck. Those are arguments for a choice, and the choice is the
+operator's to make in `config/`; the problem this issue exists to fix is
+that the repository cannot yet demonstrate the choice is cheap to make
+or safe to change.)*
 
 ## Proposed outcome
 
-`config/deployments.yaml` reads:
+The operator sets the pins they want in `config/deployments.yaml`, and
+the model cells they want in `config/model_tiers.yaml`. Everything else
+follows mechanically and is proven to follow:
 
-```yaml
-  odyssey:   { harness: antigravity }
-  cassandra: { harness: antigravity }
-```
+1. **The rebuild follows the pins, in the same commit.** For each
+   persona whose pin changed, the target its old harness emitted
+   disappears and the target its new harness emits appears.
+   `scripts/sync_agents.py --check` is the gate; a rebuild that leaves
+   a stale target behind fails it, and so does a hand-edited one.
+2. **The resolved model follows the tier table.** Each rebuilt target
+   carries the model `config/model_tiers.yaml` binds to that persona's
+   tier on its new harness — in the place that harness's layout puts it,
+   never as a `model:` key in an Antigravity `agent.md`, which voids the
+   agent (#43 D8/D9).
+3. **The launch smoke derives its arms from the pins.** One arm per
+   harness present in `config/deployments.yaml`, the persona for each
+   selected by a rule over config facts, with no persona name written
+   into the script. Flipping a pin changes which personas run, with no
+   edit to the script; a harness with no persona that can produce the
+   arm's observables fails the run rather than being skipped.
+4. **The reviewer constraint is resolved and recorded, not asserted.**
+   For each name in `constraints.distinct_model_families`, the harness
+   and the `REVIEW`-tier model are read and the families compared, at
+   the merge commit, whatever the pins are — and the result is written
+   into `config/deployments.yaml` beside the constraint, where the next
+   editor will read it.
+5. **The move is measured.** The presenter's reason for re-pinning is
+   price, so a repin owes a number rather than a belief: a before/after
+   session-spend comparison per moved persona, within what the tools can
+   honestly measure across two vendors (see Constraints).
 
-and a compiler rebuild follows the pins: `.claude/agents/odyssey.md`
-and `.claude/agents/cassandra.md` disappear, `.agents/agents/odyssey/`
-and `.agents/agents/cassandra/` appear with the `{agent.md,
-agent.json}` layout #43 landed. `scripts/sync_agents.py --check` is the
-gate that the checked-in targets match the pins; a rebuild that leaves
-either stale file behind fails it.
-
-Four of six personas then run on antigravity. Two stay, each for a
-stated reason rather than by inertia:
-
-- **`athena` stays.** Plan and design are the two gates where words
-  become commitments, and the spec-adversary protocol is the highest-
-  judgment work in the loop. Moving it later is the same one-line edit
-  this issue makes; making it now would change the harness of the
-  persona writing this sentence in the same PR that changes it.
-- **`argus` stays, and this is a constraint, not a preference.** #2 D4
-  makes the two reviewers a machine-checkable pair —
-  `constraints.distinct_model_families: [argus, atlas]` — and `atlas`
-  is on antigravity. Exactly one reviewer must therefore remain off the
-  Gemini family, and after this issue `argus` is the only persona on
-  `claude-code` that could be it.
-
-Alongside the pins, three things the repin makes true and that must
-move with it:
-
-1. **The smoke test's two arms.** `scripts/ops/smoke_launch.sh` runs
-   `odyssey` for the claude-code arm and `daedalus` for the antigravity
-   arm. After the repin, "run 1 · claude-code · odyssey" launches
-   `agy`, the run still exits 0, and #43's gate silently stops covering
-   the Claude harness at all. The arms must follow the pins.
-2. **A before/after cost measurement.** `scripts/ops/session_spend.sh`
-   is the repository's spend tool and the reason the presenter asked
-   for this move is price, so the move owes a number rather than a
-   belief. What that tool can and cannot measure across two vendors is
-   itself a decision (see Constraints).
-3. **The standing guard.** After this move the D4 pair has no slack:
-   the file must say, where the next session will read it, that
-   repinning `argus` is a violation and not a cost optimisation.
+*(Amended 2026-09-03. The outcome previously opened with a YAML block
+pinning two named personas to a named harness, then defended two
+personas staying — `athena` because "plan and design are the two gates
+where words become commitments", `argus` because "#2 D4 makes the two
+reviewers a machine-checkable pair … and `atlas` is on antigravity".
+Struck as choices. The `argus`/`atlas` reasoning is not lost: it is
+point 4, quantified over whatever names the constraint lists.)*
 
 ## Affected users and systems
 
-- `config/deployments.yaml` — two lines. The only source edit.
-- `.claude/agents/{odyssey,cassandra}.md` — deleted by the rebuild.
-- `.agents/agents/{odyssey,cassandra}/{agent.md,agent.json}` — created
-  by the rebuild. `agent.md` carries `name`, `description`, `tools` and
-  never `model` (#43 D8); the resolved model rides in `agent.json`
-  (#43 D9).
-- `scripts/ops/work.sh` — not edited. It reads the pin, so its
-  behaviour changes without its text changing: an implement stage now
-  starts `agy` and reads `.agents/agents/odyssey/agent.json`.
-- `scripts/ops/smoke_launch.sh` — its two arms are persona names, and
-  the repin invalidates both.
-- `docs/SPEC.md` — the `ops.dispatch` entry states that the antigravity
-  smoke run's claim half is `BLOCKED ON #47`; that becomes false if the
-  antigravity arm moves to a persona whose App already has
-  `issues: write`.
-- **The presenter**, whose bill this is, and the room watching the
-  demo: four of six personas running on Gemini is also the visible
-  claim that the personas are harness-agnostic.
-- **Not affected:** `personas/**` (no persona source changes, so no new
-  sanitize surface), `config/model_tiers.yaml` (unchanged; only which
-  column each persona resolves through changes), `config/tools.yaml`,
-  `personas/lifecycle.json`, and `config/execution.yaml` — #25 D19's
-  bindings name *placements*, not harnesses, and every v1 antigravity
-  binding is already `placement: vm-local`.
+- `config/deployments.yaml` and `config/model_tiers.yaml` — the
+  operator's input, and the only sources edited.
+- **The compiled targets** — derived, never hand-edited: for each moved
+  persona, one harness's target deleted and another's added by the
+  rebuild in the same commit.
+- `scripts/ops/work.sh` — not edited. It reads the pin, so its behaviour
+  changes without its text changing: a stage now starts the harness the
+  file names and reads that harness's compiled artifact.
+- `scripts/ops/smoke_launch.sh` — its arms are persona literals today,
+  and any repin invalidates them; they become derived.
+- `docs/SPEC.md` — `config.bindings` gains one sentence stating the
+  re-pin property; `ops.dispatch` describes the smoke's arms as fixed
+  personas and as blocked on a now-closed issue, and is upserted by the
+  implementing PR.
+- **The presenter**, whose bill this is, and the room watching the demo:
+  a persona that changes harness with a one-line edit is the visible
+  claim that the personas are harness-agnostic, and it is the claim the
+  demo makes.
+- **Not affected:** `personas/**` — a repin never touches a persona
+  source, which is the property itself and is also why it adds no
+  sanitize surface; `config/tools.yaml`; `personas/lifecycle.json`;
+  `config/execution.yaml` (#25 D19's bindings name *placements*, not
+  harnesses); `CLAUDE.md`.
 
 ## Constraints
 
@@ -125,22 +163,22 @@ move with it:
   enforces it, and this issue gives it no new surface.
 - **The compiled targets are derived, never hand-edited.**
   `scripts/sync_agents.py --check` is the gate (#5, #43 D10). A repin
-  whose rebuild is not committed is drift, and a hand-made
-  `agent.md` is the same failure.
-- **#2 D4 is non-negotiable.** The two reviewers resolve to different
-  model families at `REVIEW` tier. It is data in
-  `config/deployments.yaml`, and until #6 automates it the check is
-  performed and recorded by hand.
-- **Depends on #43 (PR #60).** A persona pinned to a harness
-  `work.sh` cannot start is unlaunchable from the one door AGENTS.md
-  allows. This issue branches from that PR and merges after it.
-- **Does not depend on #47.** #47 raises `daedalus`, `argus` and
-  `atlas` from `issues: read` to `issues: write`. Both personas moving
-  here already have `issues: write` in
-  `scripts/auth/app_manifests.yaml` (`odyssey`: contents, pull
-  requests, issues, all write; `cassandra`: `issues: write`), so
-  neither the claim nor the handoff half of a moved persona's run is
-  blocked.
+  whose rebuild is not committed is drift, and a hand-made target is the
+  same failure.
+- **#2 D4 is non-negotiable.** The names in
+  `constraints.distinct_model_families` must resolve to different model
+  families at `REVIEW` tier. It is data in `config/deployments.yaml`,
+  and until #6 automates it the check is performed and recorded by hand
+  — for whatever pins are present, including when the pins did not
+  change.
+- **Depends on #43 (PR #60).** A persona pinned to a harness `work.sh`
+  cannot start is unlaunchable from the one door AGENTS.md allows.
+- **The spec states no pin.** No decision, acceptance item, table or
+  paragraph in this folder may state a persona→harness or persona→model
+  choice; each is a rule quantified over the configuration, testable
+  against the config as it stands at merge time. A spec that names a pin
+  turns the operator's one-line edit into a spec amendment, which is
+  precisely the friction this issue exists to remove.
 - **The cost tool is single-vendor.** `scripts/ops/session_spend.sh`
   reads Claude Code `*.jsonl` transcripts and prices them against the
   Anthropic rate table; a model the table does not know is reported
@@ -148,27 +186,25 @@ move with it:
   `--output-format json` (findings Q5). There is no one number that
   spans both, and the measurement must say so rather than produce a
   cross-vendor dollar figure the tool cannot support.
-- **`cassandra` owns stage `maintain`, which has no rung.**
-  `personas/lifecycle.json` states it: `intake`, `deploy` and
+- **A persona whose only stage has no rung cannot be dispatched at all.**
+  `personas/lifecycle.json` states that `intake`, `deploy` and
   `maintain` "are stage-enum values with no rung and are absent by
-  construction". No `status:*` label resolves to `maintain`, and
-  `work.sh` validates `--as` against the current stage's owners — so
-  `cassandra` cannot be launched by `work.sh <n>` before or after this
-  change, and the repin neither causes nor fixes that.
+  construction", and `work.sh` validates `--as` against the current
+  stage's owners. Repinning such a persona changes its harness and not
+  its dispatchability, before or after.
+- **The App permissions are config too.** `scripts/auth/app_manifests.yaml`
+  records what each persona's App may do, and the smoke's arm selection
+  reads it: an observable a persona's App cannot produce is a reason not
+  to select that persona, never a tolerated skip.
 
 ## Open questions
 
-One, filed on the issue, and it is settled in `spec.md` in this same
-folder rather than left for the builder:
-
-- **Does CLAUDE.md's `IMPLEMENTATION_TIER` note — "sonnet-5 via a
-  dedicated agent definition … a repo-local compiled `coder` will bind
-  this tier" — change when `odyssey` moves?** Two readings are
-  available: the note describes the tier for *the persona that runs at
-  it*, in which case moving `odyssey` makes it stale prose; or it
-  describes the tier *for sessions running on the Claude Code harness*,
-  in which case the persona pin is orthogonal to it. `spec.md` decides
-  it with the differing case.
+None. The one filed on the issue — whether `CLAUDE.md`'s
+`IMPLEMENTATION_TIER` note goes stale when the persona that ran at that
+tier changes harness — is settled in `spec.md` D11 with its differing
+case, and is settled generically: a harness's tier→model note describes
+the tier for sessions on that harness, not for whichever persona happens
+to run at it, so no pin can make it stale.
 
 Both artifacts land in one pull request under the bootstrap-compression
 precedent (`intent/1-personas/spec.md` D10, reused by
