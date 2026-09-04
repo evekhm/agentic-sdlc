@@ -86,6 +86,17 @@ legacy_msg() {
         cache_creation_input_tokens:$c, output_tokens:0}}}' >> "$f"
 }
 
+# envelope_msg <file> <ts> <conv_id> <model> <inp> <cr> <out> <think>
+# One Antigravity headless dispatch envelope.
+envelope_msg() {
+  local f=$1 ts=$2 conv=$3 model=$4 inp=$5 cr=$6 out=$7 think=$8
+  jq -cn --arg ts "$ts" --arg conv "$conv" --arg m "$model" \
+    --argjson i "$inp" --argjson cr "$cr" --argjson o "$out" --argjson th "$think" \
+    '{conversation_id:$conv, status:"SUCCESS", timestamp:$ts, model:$m, usage:{
+        input_tokens:$i, cache_read_tokens:$cr, output_tokens:$o, thinking_tokens:$th,
+        total_tokens:($i+$cr+$o+$th)}}' >> "$f"
+}
+
 # ---------------------------------------------------------------------------
 # 1. R1-1/AT-1 — a trailing slash on the target must not change the answer.
 #    `find "$dir/"` prints "$dir//sub/file", so stripping the prefix "$dir/"
@@ -298,6 +309,56 @@ bad_flag=$("$SCRIPT" "$T1" --nope --out "$WORK/o12" 2>&1 || true)
 has "$bad_flag" "unknown argument" "args: an unknown flag is rejected"
 no_match=$("$SCRIPT" "$T1" --since 2030-01-01 --out "$WORK/o13" 2>&1 || true)
 has "$no_match" "no assistant messages matched" "args: an empty window is reported, not printed as zero spend"
+
+# ---------------------------------------------------------------------------
+# 10. Gemini models: Vertex AI rate tiers for Flash ($0.15/$0.60/$0.0375) and
+#     Pro ($1.25/$5.00/$0.3125), and refusal for unknown versions (D1-D3, PR #156).
+# ---------------------------------------------------------------------------
+T10="$WORK/gemini"; mkdir -p "$T10"
+# Flash models: 1M input = $0.15, 1M output = $0.60, 1M cache read = $0.0375 -> total $0.7875 -> rounded $0.79
+msg "$T10/g_flash_38.jsonl" 2026-08-20T10:00:00.000Z gemini-3.8-flash-high 1000000 1000000 0 0 1000000
+msg "$T10/g_flash_med.jsonl" 2026-08-20T10:00:00.000Z gemini-3.8-flash-medium 1000000 0 0 0 0
+msg "$T10/g_flash_15.jsonl" 2026-08-20T10:00:00.000Z gemini-1.5-flash 1000000 0 0 0 0
+# Pro models: 1M input = $1.25, 1M output = $5.00, 1M cache read = $0.3125 -> total $6.5625 -> rounded $6.56
+msg "$T10/g_pro_31.jsonl" 2026-08-20T10:00:00.000Z gemini-3.1-pro-high 1000000 1000000 0 0 1000000
+msg "$T10/g_pro_15.jsonl" 2026-08-20T10:00:00.000Z gemini-1.5-pro 1000000 0 0 0 0
+# Unknown Gemini versions: unpriced
+msg "$T10/g_unk.jsonl" 2026-08-20T10:00:00.000Z gemini-9.9-flash 1000000 0 0 0 0
+msg "$T10/g_bare.jsonl" 2026-08-20T10:00:00.000Z gemini 1000000 0 0 0 0
+
+gemini_out=$("$SCRIPT" "$T10" --out "$WORK/o14")
+is_usd "$gemini_out" gemini-3.8-flash-high 0.79 "Gemini 3.8 Flash High prices at 0.15/0.60/0.0375 (1M in + 1M out + 1M read = 0.79)"
+is_usd "$gemini_out" gemini-3.8-flash-medium 0.15 "Gemini 3.8 Flash Medium prices 1M input at 0.15"
+is_usd "$gemini_out" gemini-1.5-flash 0.15 "Gemini 1.5 Flash prices 1M input at 0.15"
+is_usd "$gemini_out" gemini-3.1-pro-high 6.56 "Gemini 3.1 Pro High prices at 1.25/5.00/0.3125 (1M in + 1M out + 1M read = 6.56)"
+is_usd "$gemini_out" gemini-1.5-pro 1.25 "Gemini 1.5 Pro prices 1M input at 1.25"
+is_usd "$gemini_out" gemini-9.9-flash 0.00 "Unknown Gemini version is unpriced"
+is_usd "$gemini_out" gemini 0.00 "Bare gemini alias is unpriced"
+has "$gemini_out" "no rate for model gemini-9.9-flash — 1000000 tokens" "Unknown Gemini version warning is reported"
+has "$gemini_out" "no rate for model gemini — 1000000 tokens" "Bare gemini alias warning is reported"
+
+# ---------------------------------------------------------------------------
+# 11. Antigravity dispatch envelopes: JSON files with .usage and .status /
+#     .conversation_id are parsed into session roll-ups (D5, PR #156).
+# ---------------------------------------------------------------------------
+T11="$WORK/envelopes"; mkdir -p "$T11"
+# Envelope with 1M input, 500k output, 500k thinking tokens (total output = 1M) on gemini-3.8-flash-high
+# 1M in * 0.15 + 1M out * 0.60 = $0.75
+envelope_msg "$T11/dispatch_success.json" 2026-08-20T10:00:00.000Z "conv-1" gemini-3.8-flash-high 1000000 0 500000 500000
+env_out=$("$SCRIPT" "$T11" --out "$WORK/o15")
+is_usd "$env_out" gemini-3.8-flash-high 0.75 "Antigravity envelope prices input and output+thinking tokens"
+has "$env_out" "metered messages: 1" "Antigravity envelope counted as metered message"
+
+# ---------------------------------------------------------------------------
+# 12. Pipeline exit code and stream order: awk reading from sorted pipe rather
+#     than positional $TSV prevents SIGPIPE (code 141) on large inputs (D6, PR #156).
+# ---------------------------------------------------------------------------
+T12="$WORK/pipeline"; mkdir -p "$T12"
+for i in $(seq 1 600); do
+  msg "$T12/big.jsonl" 2026-08-20T10:00:00.000Z gemini-3.8-flash-high 100 0 0 0 10
+done
+pipe_out=$("$SCRIPT" "$T12" --out "$WORK/o16")
+has "$pipe_out" "metered messages: 600" "Pipeline processes 600 messages without SIGPIPE 141"
 
 echo
 echo "session_spend_test.sh: all scenarios passed"

@@ -9,10 +9,10 @@
 # read or emitted.
 #
 # USD figures are list-rate estimates. Rates: Anthropic model pricing table
-# (platform.claude.com/docs/en/about-claude/pricing, fetched 2026-08-23),
-# per MTok: base input / 5m cache write / 1h cache write / cache read / output.
-# Vertex AI bills separately (cloud.google.com/vertex-ai/generative-ai/pricing);
-# the GCP bill is authoritative — these numbers rank spend, they don't invoice it.
+# (platform.claude.com/docs/en/about-claude/pricing, fetched 2026-08-23) and
+# Google Cloud Vertex AI (cloud.google.com/vertex-ai/generative-ai/pricing,
+# effective 2026-09-04), per MTok: base input / 5m cache write / 1h cache write / cache read / output.
+# The cloud bill is authoritative — these numbers rank spend, they don't invoice it.
 # A model whose family+version the table does not list is left UNPRICED and
 # reported by name with its token count, rather than being charged at a
 # neighbouring tier (see rate_tier); its tokens are excluded from the USD
@@ -114,20 +114,30 @@ SUMMARY="$OUT/summary.txt"
 emit_file() {
   local f=$1 session=$2 kind=$3 stream=$4
   jq -r --arg s "$session" --arg k "$kind" --arg st "$stream" '
-    select(.type=="assistant" and .message.usage != null and .message.model != "<synthetic>")
-    | .message.usage as $u
-    | [ .timestamp, (.timestamp[0:10]), $s, $k, (.message.model // "unknown"),
-        ($u.input_tokens // 0), ($u.cache_read_input_tokens // 0),
-        ($u.cache_creation.ephemeral_5m_input_tokens // 0),
-        ($u.cache_creation.ephemeral_1h_input_tokens // 0),
-        ($u.cache_creation_input_tokens // 0),
-        ($u.output_tokens // 0), $st ] | @tsv' "$f"
+    if .type=="assistant" and .message.usage != null and .message.model != "<synthetic>" then
+      .message.usage as $u
+      | [ .timestamp, (.timestamp[0:10]), $s, $k, (.message.model // "unknown"),
+          ($u.input_tokens // 0), ($u.cache_read_input_tokens // 0),
+          ($u.cache_creation.ephemeral_5m_input_tokens // 0),
+          ($u.cache_creation.ephemeral_1h_input_tokens // 0),
+          ($u.cache_creation_input_tokens // 0),
+          ($u.output_tokens // 0), $st ] | @tsv
+    elif .usage != null and (.conversation_id != null or .status != null) then
+      .usage as $u
+      | [ (.timestamp // "1970-01-01T00:00:00Z"), ((.timestamp // "1970-01-01T00:00:00Z")[0:10]),
+          (.conversation_id // $s), $k, (.model // "gemini-3.8-flash-high"),
+          ($u.input_tokens // 0), ($u.cache_read_tokens // 0),
+          0, 0, 0,
+          (($u.output_tokens // 0) + ($u.thinking_tokens // 0)), $st ] | @tsv
+    else
+      empty
+    end' "$f" 2>/dev/null || true
 }
 
 : > "$TSV"
 if [ -f "$TARGET" ]; then
-  base=$(basename "$TARGET" .jsonl)
-  emit_file "$TARGET" "$base" main "$base" >> "$TSV"
+  base=$(basename "$TARGET")
+  emit_file "$TARGET" "${base%.*}" main "$base" >> "$TSV"
 else
   found=0 n_main=0 n_sub=0
   while IFS= read -r f; do
@@ -136,12 +146,12 @@ else
     top=${rel%%/*}
     if [ "$rel" = "$top" ]; then
       n_main=$((n_main + 1))
-      emit_file "$f" "${top%.jsonl}" main "$rel" >> "$TSV"
+      emit_file "$f" "${top%.*}" main "$rel" >> "$TSV"
     else
       n_sub=$((n_sub + 1))
       emit_file "$f" "$top" sub "$rel" >> "$TSV"
     fi
-  done < <(find "$TARGET" -name '*.jsonl' -type f | sort)
+  done < <(find "$TARGET" \( -name '*.jsonl' -o -name '*.json' \) -type f | sort)
   [ "$found" -eq 1 ] || err "no *.jsonl files under $TARGET"
   # The main/sub split is positional: a file at the top level is a main
   # session, anything deeper is a subagent of the directory naming it. Aimed
@@ -185,6 +195,7 @@ function model_family(m) {
   if (m ~ /opus/)   return "opus"
   if (m ~ /sonnet/) return "sonnet"
   if (m ~ /haiku/)  return "haiku"
+  if (m ~ /gemini/) return "gemini"
   return ""
 }
 # "4.1", "3.0", "5.0" — or "" when the ID carries no version at all.
@@ -195,11 +206,17 @@ function model_version(m,   a, tail, p, n) {
   # Version after the family: claude-opus-4-1-*, claude-haiku-4-5-*. Split the
   # tail rather than regex it, so the 8-digit release date in
   # claude-opus-4-20250514 cannot be read as a minor version.
-  if (!match(m, /(fable|mythos|opus|sonnet|haiku)[-@]/, a)) return ""
-  tail = substr(m, RSTART + RLENGTH)
-  n = split(tail, p, /[-@]/)
-  if (p[1] !~ /^[0-9]{1,2}$/) return ""
-  return p[1] "." ((n >= 2 && p[2] ~ /^[0-9]{1,2}$/) ? p[2] : "0")
+  if (match(m, /(fable|mythos|opus|sonnet|haiku)[-@]/, a)) {
+    tail = substr(m, RSTART + RLENGTH)
+    n = split(tail, p, /[-@]/)
+    if (p[1] ~ /^[0-9]{1,2}$/) {
+      return p[1] "." ((n >= 2 && p[2] ~ /^[0-9]{1,2}$/) ? p[2] : "0")
+    }
+  }
+  # Gemini models: gemini-3.8-flash-high, gemini-3.1-pro, gemini-1.5-flash-001, etc.
+  if (match(m, /gemini-([0-9]{1,2})\.([0-9]{1,2})/, a))
+    return a[1] "." a[2]
+  return ""
 }
 function rate_tier(m,   f, v) {
   f = model_family(m)
@@ -228,6 +245,20 @@ function rate_tier(m,   f, v) {
     if (v == "3.0")                               return "0.25 0.3125 0.5 0.025 1.25"
     if (v == "3.5")                               return "0.8 1 1.6 0.08 4"
     if (v == "4.5")                               return "1 1.25 2 0.1 5"
+    return ""
+  }
+  if (f == "gemini") {
+    if (m ~ /flash/) {
+      if (v == "1.5" || v == "2.0" || v == "2.5" ||
+          v == "3.5" || v == "3.6" || v == "3.7" || v == "3.8")
+        return "0.15 0.1875 0.30 0.0375 0.60"
+      return ""
+    }
+    if (m ~ /pro/) {
+      if (v == "1.5" || v == "2.5" || v == "3.1")
+        return "1.25 1.5625 2.50 0.3125 5.00"
+      return ""
+    }
     return ""
   }
   return ""
@@ -362,7 +393,7 @@ END {
     printf "  NOTE: price is optimal and volume is not. The remedy is fan-out or\n        a fresh session, NOT a caching change.\n"
   if (hit < 70 && t_c1 == 0)
     printf "  NOTE: the 1-hour TTL was never used. If turns are >5 min apart by\n        design (a polling loop), that is the first thing to change.\n"
-}' "$TSV" | tee "$SUMMARY"
+}' | tee "$SUMMARY"
 
 echo >&2
 echo "wrote: $TSV" >&2
