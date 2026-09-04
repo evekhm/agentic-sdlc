@@ -277,9 +277,14 @@ persona already holds the repository permission it needs
 (team `login`/`name`/`slug` fields, PR #106) and `gh issue view`
 (projectCards). The rule (#112):
 
-- A scope error on a `gh` porcelain command is never grounds to widen
-  a token or an App grant. Use the REST endpoint through `gh api`,
-  which asks for exactly the permission the write needs.
+- A scope error on a `gh` porcelain command is not a missing App
+  grant: on a user-owned repository an App has no organization
+  permission to widen, and its repository permissions already cover
+  the write. Use the REST endpoint through `gh api`, which asks for
+  exactly the permission the write needs. (The operator bot's classic
+  PAT is the one place `read:org` can be added; the account belongs to
+  no organization, so the scope is inert and is a convenience for
+  interactive sessions only — it does nothing for personas.)
 - Edit a pull request body:
   `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@<file>`.
 - Read an issue or a pull request:
