@@ -297,6 +297,11 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number || inputs.number }}
           GITHUB_REPO: ${{ github.repository }}
           DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
+          # Not a preference: a hosted runner has no terminal, so the
+          # interactive row of work.sh's launch table can never be the
+          # right one here and the launcher refuses outright without
+          # this (#159). Antigravity is headless whatever this says.
+          HEADLESS: '1'
           # The Apps' private keys are loaded as repository secrets by a
           # human, once, in #7 — and this workflow merges before that
           # happens. Without this flag, every pull request in the
