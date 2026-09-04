@@ -58,7 +58,28 @@ Tests: `scripts/ops/tests/work_test.sh`,
 | Script | What it does | Invocation | Touches |
 |---|---|---|---|
 | `bootstrap_tracker.sh` | Provisions the bootstrap tracker on GitHub: the base labels, the bootstrap backlog issues, and the pinned tracker issue that indexes them. Idempotent: labels are kept, issues are matched by exact title so numbers stay stable, and an existing tracker body is never overwritten because its checkboxes are live state. | `scripts/setup/bootstrap_tracker.sh`; `--labels-only` stops after the labels. Review `issues/*.md` before running; there is no dry run. | GitHub labels and issues. |
+| `wif_setup.sh` | Provisions model access for the HOSTED runner (#146): Workload Identity Federation pool + GitHub OIDC provider, a predict-only custom role, a service account bound to it, the impersonation binding scoped to this repository, and the four Actions **variables** `unattended.yml` reads (`WIF_PROVIDER`, `WIF_SERVICE_ACCOUNT`, `CLAUDE_VERTEX_PROJECT_ID`, `ANTIGRAVITY_PROJECT_ID`). No cloud key at rest and no secret handled. Idempotent; an existing pool from a sibling project is reused, not duplicated. Until it has been run, `WIF_PROVIDER` is unset and every reviewer job reports a named skip and stays green. | `GCP_PROJECT=<project> GH_TOKEN=<admin token> bash scripts/setup/wif_setup.sh` — `--dry-run` prints the mutations, `--check` verifies and exits 1 on anything missing. Needs gcloud authenticated as owner/editor of `GCP_PROJECT`, and a token with repository ADMIN (the operator bot's PAT has push only). | GCP services, WIF pool/provider, custom role, service account, IAM bindings; GitHub repository variables. |
 | `issues/*.md` | The bodies of the bootstrap backlog issues, one file per issue, numbered in ladder order. Reviewable in a PR before anything is filed. | Read by `bootstrap_tracker.sh`. | Nothing; data files. |
+
+**Run on this repository 2026-09-04** against `GCP_PROJECT=agent-quality-lab-01`:
+nine items created (`sts.googleapis.com`, the `unattendedVertexPredict` role,
+the `unattended-personas` service account, its role binding, the
+`evekhm/agentic-sdlc` impersonation binding, and the four variables), six
+verified as already present — the `github-actions` pool and its provider were
+reused from the predecessor's `argus_setup.sh` provisioning.
+`wif_setup.sh --check` passes with `Missing: 0`.
+
+Two steps no script can do, both still open unless a human has done them:
+
+1. **Enable the Claude models you pin in Vertex Model Garden** for the project
+   (console: Vertex AI → Model Garden, one click per model, per project).
+   Until then every predict call fails with a permission or "model not found"
+   error even though WIF is correct.
+2. **Repository Settings → Actions → General**: allow the actions the workflow
+   uses — `actions/checkout`, `actions/setup-python`, `actions/cache`,
+   `google-github-actions/auth`. If the banner says this is managed at the
+   organization level, an org owner must allow them there. The operator bot's
+   PAT cannot read or set this (404 on `actions/permissions`).
 
 ## auth/ — GitHub App identities for the personas
 
