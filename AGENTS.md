@@ -352,7 +352,12 @@ PR here (agent or human), regardless of harness:
   record (issue or thread reference required) — never filler.
 - A PR that touches behavior-bearing paths without changing behavior
   (refactor, comments, test-only) declares that in the PR body with
-  the machine marker line `Spec-impact: none — <reason>`.
+  the machine marker line `Spec-impact: none — <reason>`. This is a
+  literal, grep-matched prefix (`scripts/ci/spec_check.sh`), not a
+  sentence to paraphrase: "no spec impact", "documentation-only" or
+  any other wording that merely states the same thing in prose fails
+  the check. Write the line exactly as shown, verbatim, including the
+  em dash before the reason.
 - CI enforces this: `scripts/ci/spec_check.sh`, run by the
   `spec-check` job in `.github/workflows/ci-gates.yml`, fails a PR
   that touches behavior-bearing paths unless the diff touches
@@ -414,7 +419,21 @@ Search the tracker first, every time, before creating a new issue:
 2. Search open issues and PRs by the feature's key terms in title and
    body (e.g. `gh search issues --repo <owner>/<repo> --state open
    "<term>"` and the same query via `gh search prs`).
-3. Read the matches — including their comment threads. Agreed findings
+3. If the issue concerns specific file(s) — nearly always true for a
+   defect you just diagnosed rather than a feature you're proposing —
+   also run a **file-scoped** check: `gh pr list --state open --json
+   number,title,files --repo <owner>/<repo>` filtered to those paths.
+   Every session's writes land under the same handful of shared bot
+   identities, so authorship tells you nothing about who's already
+   working it; a keyword search misses a PR whose title and body don't
+   happen to use your words. The file-scoped check catches it
+   regardless of phrasing. Do this again immediately before `gh pr
+   create`, not only when you filed the issue — minutes are enough for
+   a peer's fix to land (agentic-sdlc #130/PR #132 duplicated #126/PR
+   #127 this way on 2026-09-04: same defect, independently diagnosed,
+   19 minutes apart, because the search ran once at issue-filing time
+   and was never repeated at PR time).
+4. Read the matches — including their comment threads. Agreed findings
    in an existing thread are settled design; do not re-propose what a
    thread has already killed.
 
@@ -431,7 +450,10 @@ Then act on what you found:
 
 A new issue that ignores an existing thread duplicates tracking,
 splits the discussion, and burns reviewer rounds re-litigating
-settled findings.
+settled findings. This applies even to a defect you found incidentally
+while working something else, under direct pressure to "just fix it
+now": the defect-repair path (#32) skips the claim ceremony, not this
+search.
 
 ## Subagent model tiers
 
