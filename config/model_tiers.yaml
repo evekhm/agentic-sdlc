@@ -15,9 +15,10 @@ harnesses:
                                 # resolves to sonnet-4.5, NOT enabled here
     IMPLEMENTATION: claude-sonnet-5
     REVIEW: opus
-    FRONTIER: opus              # interactive sessions may inherit the
-                                # session model instead (costlier; only
-                                # when frontier reasoning is warranted)
+    FRONTIER: claude-fable-5-1  # exact ID (a `fable` alias exists; exact IDs
+                                # are the convention here, see MECHANICAL).
+                                # Spec gate only: REVIEW stays opus, Fable is
+                                # 2x its rate and review runs every PR round (#105)
 
   antigravity:
     FAST: gemini-3.8-flash-medium   # or -low; `agy models` lists runtime

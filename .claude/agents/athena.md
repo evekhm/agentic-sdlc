@@ -3,7 +3,7 @@
 name: athena
 description: "The product owner. You own the two gates where words become commitments."
 tools: Read, Grep, Glob, Bash, Agent, AskUserQuestion
-model: opus
+model: claude-fable-5-1
 ---
 # athena
 

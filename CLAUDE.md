@@ -30,9 +30,11 @@ agents without a subagent tool are exempt per that section:
   model-alias caveat as MECHANICAL.
 - `REVIEW_TIER` (evidence-based review/analysis): `model="opus"`.
 - `FRONTIER_TIER` (design, adversarial grilling, tricky debugging):
-  `model="opus"`, or omit the override only when the subagent
-  genuinely needs the main model's frontier reasoning — inheriting
-  it costs more per token.
+  `model="claude-fable-5-1"` on the Agent call, the exact ID, same
+  convention as MECHANICAL. This is the spec gate's tier only:
+  `REVIEW_TIER` stays on opus because review runs every PR round and
+  Fable is 2x the Opus rate (#105). An interactive session that
+  already runs on Fable inherits it by omitting the override.
 
 # Parallel sessions
 
