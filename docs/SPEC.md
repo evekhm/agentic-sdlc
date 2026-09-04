@@ -129,7 +129,14 @@ constraint that the two reviewers resolve to different model
 families; `tools.yaml` maps abstract capabilities to concrete tools
 per harness, with declared fallback text for optional capabilities a
 harness cannot map. Swapping a vendor is an edit to these files,
-never to a persona source.
+never to a persona source. Re-pinning a persona to another harness, or
+re-binding a tier to another model, is that same edit plus the compiler
+rebuild committed with it — no persona source changes for a repin — and
+the gates are written to prove whatever configuration is present rather
+than one particular assignment: the drift gate recompiles the pins as
+they stand, the sanitize gate holds because no vendor string moves into
+`personas/`, and the reviewer constraint is resolved against the pins at
+the commit that changes them (#44, PR #93).
 
 ### personas.compiler
 `scripts/sync_agents.py` compiles `personas/` + `config/` into every
