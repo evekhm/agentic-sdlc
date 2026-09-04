@@ -561,6 +561,83 @@ wrongly.
    launch — so the next reader re-runs the proof rather than trusting
    this note.
 
+**Deviation 2026-09-04 (odyssey, review round 3).** Round 2 left one
+blocking defect and three normal ones in the same file. Four changes,
+all inside T4's own file set (`scripts/ops/smoke_launch.sh`, its test
+file, `docs/SPEC.md`); no new file and no new input surface.
+
+1. **The scratch guard's acceptance rule is now ONE explicit opt-in**
+   (Argus **R2-2**, Atlas **AT-R2-5**, both high; this closes R1-4's
+   third shape). The round-2 guard accepted an issue that carried *no
+   labels*, and two things were measured through that: `gh api
+   /repos/{o}/{r}/issues/{n}` also serves **pull requests**, every pull
+   request in this repository carries zero labels, and `gh issue edit`
+   resolves a pull-request number without a warning — so
+   `smoke_launch.sh <a PR number>` passed the guard and the first write
+   replaced that pull request's body, stripped `in-progress`, rewrote
+   the stage label and launched two live personas at it; and any
+   freshly filed, untriaged issue is zero-label by definition and is
+   somebody's unit of work from the moment it is opened. Both are
+   closed by two conditions. **(a)** A response carrying
+   `.pull_request` is refused **first**, before the marker is looked
+   at — first because a pull request's body is precisely where the
+   marker gets quoted (a ledger row, a finding, a paragraph about this
+   guard). **(b)** The *"no labels"* acceptance is gone; the only fact
+   that earns the writes is the errand's own marker, `SMOKE TEST — not
+   a unit of work.`, already in the body. That is not a new contract —
+   it is the contract a second run against the same fixture already
+   relied on, now the whole of the rule — and first use opts in by the
+   operator typing the marker into the body of the issue they open:
+   `gh issue create --title 'smoke fixture' --body 'SMOKE TEST — not a
+   unit of work.'`, which the refusal message prints. **No bypass
+   flag**, for the reason the script already gave about an off switch,
+   plus one more: a marker in the body is a fact the tracker keeps and
+   the next reader can audit, and a flag in a shell is not. Documented
+   in the script header, at the guard, and in `docs/SPEC.md`'s
+   `ops.dispatch`.
+2. **`pins()` reads `harness:` only at the persona mapping's own
+   indent** (Argus **R2-15**, Atlas **AT-R2-11**). It took the first
+   `harness:` at any depth inside a persona's block, so a `harness:`
+   nested under another key of that persona was read as the pin. Alone
+   among the reader's divergences from `yaml.safe_load` this one failed
+   **open** — an extra arm on a harness nobody pinned, silently, which
+   is AT-2's class. A persona whose only `harness:` is nested now
+   yields `-` and is exit 1 naming it. The header's parity claim is
+   softened to the forms actually covered, and records the quoted-scalar
+   divergence explicitly: `work.sh harness_of` does not unquote either,
+   so the two shell readers agree and the case is exit 1 — unquoting
+   here alone would derive an arm the launcher then could not resolve.
+3. **`clear_smoke_refs` no longer swallows a refused delete** (Argus
+   **R2-14**). A delete that fails for any reason other than "no such
+   ref" is now a `note`, so the litter R1-9 named cannot persist in
+   silence. The cross-namespace half is answered rather than changed,
+   and the reason is recorded at the function: the housekeeper is the
+   script's own hands, not a persona doing persona work, and it already
+   writes the body, strips labels and deletes each arm's own ref; a
+   `branch:` glob bounds what the agent it belongs to may push while
+   working an issue, not who may reset a fixture ref. It stays a `note`
+   and not a failure because leftover fixture refs are housekeeping,
+   not an observable.
+4. **`recheck_verified_refs` distinguishes a failed read from a deleted
+   ref** (Atlas **AT-R2-12**). `--jq '.object.sha' || true` yielded the
+   empty string on a transient 5xx, a rate limit or an expired token
+   exactly as it did on a deleted ref, and the row then printed
+   `-> deleted` and failed the run. The read is retried up to three
+   times and, if it still fails, reported as a **failed read** —
+   evidence unverified, not known stale. Still a failure, because a
+   re-read that did not happen is not a re-read that passed.
+
+Not changed, and why. **AT-4** needed no code change: Athena's
+amendment r2 (PR **#135**) rules D7's second reading normative and says
+so in as many words — *"the code on PR #133 head `ab53c5b` stands;
+Odyssey owes no code change on this row"* — and appends Acceptance 15
+for D7's clauses (ii) and (iii), which the `SMOKE_PERSONA_DIR`
+scenarios in `smoke_launch_test.sh` already exercise. **R2-1 /
+AT-R2-1's residual** — the re-read is a detector, not a bound, and a
+force-push landing *after* the gate exits is still invisible — is
+`scripts/ops/work.sh`'s launcher-side refusal, on both this plan's and
+the spec's do-not-edit list, and remains **#134**.
+
 **Amended r1.** The old T4 was an arm *swap*: a before/after table
 naming two personas, two relabel labels, two artifact paths and two bot
 logins, five numbered notes about the swap, and an instruction to keep

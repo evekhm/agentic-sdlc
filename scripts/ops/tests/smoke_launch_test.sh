@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/ops/smoke_launch.sh (#44, spec D7/D14; round-2
-# regressions for Argus R1-1/R1-2/R1-4 and Atlas AT-2/AT-3/AT-5).
+# regressions for Argus R1-1/R1-2/R1-4 and Atlas AT-2/AT-3/AT-5; round-3
+# regressions for Argus R2-2/R2-15 and Atlas AT-R2-5/AT-R2-11).
 #
 #   bash scripts/ops/tests/smoke_launch_test.sh
 #
@@ -20,8 +21,9 @@
 #               an attempted WRITE.
 #
 # Why these scenarios and not others: each one is a defect a reviewer
-# measured on this script at head 3eaff89, so each must be red against
-# that head and green now. The derivation half is where this gate's
+# measured on this script — at head 3eaff89 for the round-2 scenarios and
+# at head ab53c5b for the round-3 ones — so each must be red against the
+# head it was measured on and green now. The derivation half is where this gate's
 # whole value sits — a parser that drops a pin makes the gate report
 # coverage of a harness it never touched — and the guard half is the
 # blast radius, since the first three writes land before any launch.
@@ -189,6 +191,47 @@ contains "declares daedalus under personas: with no harness" "$out" \
 refutes "run 1 ·" "$out" || fail "AT-2: it derived arms from a pin list it had dropped a persona from: $out"
 pass "AT-2 · a persona whose harness cannot be read is exit 1 naming it, never a shorter arm list"
 
+# --- R2-15 / AT-R2-11: a nested `harness:` is not the persona's pin -----------------
+# Red at ab53c5b: `pins()` took the first `harness:` at ANY depth inside a
+# persona's block, so a `harness:` nested under some other key was read as
+# the pin. Unlike every other divergence from `yaml.safe_load` it failed
+# OPEN: an arm on a harness nobody pinned, silently. `harness:` now counts
+# only at the persona mapping's own indent.
+cat > "$WORK/nested.yaml" <<'YAML'
+personas:
+  athena:
+    overrides:
+      harness: openhands
+    harness: claude-code
+  daedalus:  { harness: antigravity }
+  odyssey:   { harness: claude-code }
+  argus:     { harness: claude-code }
+  atlas:     { harness: antigravity }
+  cassandra: { harness: claude-code }
+YAML
+out="$(dry "$WORK/nested.yaml")"
+refutes "openhands" "$out" || fail "R2-15/AT-R2-11: a nested harness: became an arm: $out"
+refutes "run 3 ·"   "$out" || fail "R2-15/AT-R2-11: a third arm appeared on a harness nobody pinned: $out"
+contains "run 1 · claude-code · athena"   "$out" || fail "R2-15/AT-R2-11: $out"
+contains "run 2 · antigravity · daedalus" "$out" || fail "R2-15/AT-R2-11: $out"
+pass "R2-15/AT-R2-11 · a harness: nested inside a persona's block is not its pin"
+
+# And when the nested one is the ONLY `harness:` the persona has, the
+# reader fails CLOSED — exit 1 naming the persona — rather than inventing
+# a pin from a key that is not one.
+cat > "$WORK/nested-only.yaml" <<'YAML'
+personas:
+  athena:    { harness: claude-code }
+  daedalus:
+    overrides:
+      harness: antigravity
+YAML
+out="$(dry "$WORK/nested-only.yaml")"
+contains "declares daedalus under personas: with no harness" "$out" \
+    || fail "R2-15/AT-R2-11: a persona whose only harness: is nested did not fail closed: $out"
+refutes "run 1 ·" "$out" || fail "R2-15/AT-R2-11: it derived arms anyway: $out"
+pass "R2-15/AT-R2-11 · a persona whose only harness: is nested is exit 1 naming it, not a phantom arm"
+
 # --- AT-3: comment lines inside `personas:` ----------------------------------------
 # Red at 3eaff89: commenting a pin out while trying another invented a
 # persona named `#` pinned to a harness nobody uses, and the run refused
@@ -343,19 +386,62 @@ contains "status:build"                "$out" || fail "R1-4: the refusal does no
 [ ! -s "$LAUNCHES" ] || fail "R1-4: the guard launched before refusing: $(cat "$LAUNCHES")"
 pass "R1-4 · a labelled issue is refused, with nothing written and nothing launched"
 
-# A fresh scratch issue carries no labels: accepted, and the proof is
-# that the run gets as far as the body write (which the stub refuses).
-out="$(run_guard '{"body":"","labels":[]}')"
-refutes "is not a scratch issue" "$out" || fail "R1-4: a fresh unlabelled issue was refused: $out"
-grep -q "issue edit" "$WRITES" || fail "R1-4: an accepted issue did not reach the body write: $(cat "$WRITES")"
-pass "R1-4 · a fresh unlabelled issue is accepted"
-
-# And so is one this script has already run against: its body carries the
+# An issue this script has already run against: its body carries the
 # marker the script itself writes, which is why a second run is legal.
 out="$(run_guard '{"body":"**SMOKE TEST — not a unit of work.** Created by scripts/ops/smoke_launch.sh","labels":[{"name":"status:planning"},{"name":"in-progress"}]}')"
 refutes "is not a scratch issue" "$out" \
     || fail "R1-4: an issue carrying the errand marker was refused, so no second run is possible: $out"
 grep -q "issue edit" "$WRITES" || fail "R1-4: a marked issue did not reach the body write: $(cat "$WRITES")"
 pass "R1-4 · an issue carrying the errand's own marker is accepted, so re-running against it works"
+
+# --- R2-2 / AT-R2-5: a pull-request number is refused before any write --------------
+# Red at ab53c5b: `/repos/{o}/{r}/issues/{n}` serves pull requests too and
+# every pull request in this repository carries zero labels, so the guard
+# ADMITTED them — `smoke_launch.sh <a PR number>` reached `gh issue edit`,
+# which resolves a pull-request number silently, and would have replaced
+# that pull request's body with the errand, stripped `in-progress`,
+# rewritten the stage label and launched two live personas at it.
+out="$(run_guard '{"body":"Round-2 ledger: rows, evidence, gate numbers.","labels":[],"pull_request":{"url":"https://api.github.com/repos/test/repo/pulls/999"}}')"
+contains "#999 is not a scratch issue" "$out" || fail "R2-2: a pull request was accepted: $out"
+contains "PULL REQUEST"                "$out" || fail "R2-2: the refusal does not say it is a pull request: $out"
+[ ! -s "$WRITES" ]   || fail "R2-2: the guard wrote before refusing a pull request: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R2-2: the guard launched before refusing a pull request: $(cat "$LAUNCHES")"
+pass "R2-2/AT-R2-5 · a pull-request-shaped object is refused, with nothing written and nothing launched"
+
+# The pull-request check must be FIRST, not a consequence of the marker
+# rule: a pull request's body is exactly where the marker gets quoted —
+# a ledger row, a finding, a review comment about this very guard.
+out="$(run_guard '{"body":"AT-R2-5 quotes the marker: **SMOKE TEST — not a unit of work.**","labels":[],"pull_request":{"url":"https://api.github.com/repos/test/repo/pulls/999"}}')"
+contains "PULL REQUEST" "$out" \
+    || fail "R2-2: a pull request whose body quotes the marker was not refused as a pull request: $out"
+[ ! -s "$WRITES" ] || fail "R2-2: the guard wrote before refusing it: $(cat "$WRITES")"
+pass "R2-2/AT-R2-5 · the pull-request refusal precedes the marker rule, so a quoted marker cannot buy the writes"
+
+# --- R2-2 / AT-R2-5: "no labels" is not an opt-in -----------------------------------
+# Red at ab53c5b: the guard accepted any zero-label number, and a freshly
+# filed, untriaged issue carries no labels and is somebody's unit of work
+# from the moment it is opened. The opt-in is now an explicit fact ON the
+# issue — this script's own marker in the body — which is the same
+# contract a second run already relied on, not a new one.
+out="$(run_guard '{"body":"Repin the personas. Nobody has triaged this yet.","labels":[]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R2-2: an unlabelled issue with no marker was accepted: $out"
+contains "carrying no labels is not an opt-in" "$out" \
+    || fail "R2-2: the refusal does not say why no labels is not enough: $out"
+contains "gh issue create" "$out" \
+    || fail "R2-2: the refusal does not tell the operator how to opt a fresh issue in: $out"
+[ ! -s "$WRITES" ]   || fail "R2-2: the guard wrote before refusing: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R2-2: the guard launched before refusing: $(cat "$LAUNCHES")"
+pass "R2-2/AT-R2-5 · an unlabelled issue without the opt-in is refused, with nothing written"
+
+# The opt-in path: a fresh, unlabelled issue whose body the operator
+# opened with the marker. Accepted, and the proof is that the run gets as
+# far as the body write (which the stub refuses).
+out="$(run_guard '{"body":"SMOKE TEST — not a unit of work.","labels":[]}')"
+refutes "is not a scratch issue" "$out" \
+    || fail "R2-2: a fresh issue carrying the opt-in marker was refused: $out"
+grep -q "issue edit" "$WRITES" \
+    || fail "R2-2: the opted-in issue did not reach the body write: $(cat "$WRITES")"
+pass "R2-2/AT-R2-5 · a fresh issue whose body carries the marker is accepted — the opt-in works on first use"
 
 echo "smoke_launch_test.sh: all $passes scenarios passed"

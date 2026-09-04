@@ -65,10 +65,32 @@
 # The issue must be a SCRATCH issue: this script's first writes overwrite
 # the body, delete `in-progress` (the only mutex this system has) and
 # rewrite the stage label, so pointing it at a real unit of work
-# corrupts tracker state before anything is launched. It refuses unless
-# the issue already carries the errand's own marker (a scratch issue this
-# script has run against before) or carries no lifecycle label at all (a
-# fresh one). See `scratch_refusal`.
+# corrupts tracker state before anything is launched.
+#
+# ONE fact earns those writes and nothing else does: the body already
+# carries this script's own marker, `SMOKE TEST — not a unit of work.`
+# — written there by a previous run of this script, or typed by the
+# operator into the body of the fresh issue they open for the purpose:
+#
+#   gh issue create --repo <repo> --title 'smoke fixture' \
+#       --body 'SMOKE TEST — not a unit of work.'
+#
+# That is the opt-in, and it is deliberately a fact ON THE ISSUE rather
+# than a flag in the invoking shell: the next reader of the tracker can
+# see which numbers this script is allowed to destroy, and a number
+# nobody opted in cannot be opted in by a hurried command line. Absence
+# of labels is NOT an opt-in — a freshly filed, untriaged issue carries
+# none and is somebody's unit of work from the moment it is opened.
+#
+# A PULL REQUEST is refused outright, before anything else is looked at:
+# `/repos/{owner}/{repo}/issues/{n}` serves pull requests too, `gh issue
+# edit` resolves a pull-request number without a warning, and a pull
+# request's body is exactly the kind of record — the review ledger, the
+# acceptance table — whose loss this guard exists to prevent. The check
+# is first because a pull request whose body QUOTES the marker (a review
+# comment, a ledger row, this paragraph) would otherwise pass it.
+#
+# See `scratch_refusal`.
 #
 # Trailing arguments name the arms explicitly: each persona binds to the
 # harness ITS OWN pin names and replaces that harness's derived arm. A
@@ -127,10 +149,23 @@ banner()  { echo; echo "=== $*"; }
 die()     { echo "smoke_launch: $*" >&2; exit 1; }
 
 # --- reading the config the arms are derived from -------------------------------
-# ONE parse of the pins for this whole script, and it must agree with the
-# repository's other two readers — `scripts/sync_agents.py`'s
-# `yaml.safe_load` and `scripts/ops/work.sh`'s `harness_of` — on every
-# input either of them accepts. The first version of this function read
+# ONE parse of the pins for this whole script. It is a shell reader of a
+# YAML subset, not a YAML parser, so the claim it makes is bounded and
+# measured rather than universal: on the forms this repository's schema
+# actually uses — the inline `{ harness: x }` form, the two-line block
+# form, comment lines, and extra keys inside a persona's own mapping —
+# it agrees with the repository's other two readers,
+# `scripts/sync_agents.py`'s `yaml.safe_load` and `scripts/ops/work.sh`'s
+# `harness_of`. Outside that set it must fail CLOSED, never quietly
+# differently, and one input is known to sit outside it: a quoted scalar
+# (`harness: "claude-code"`) is not unquoted here, and is not unquoted by
+# `work.sh harness_of` either — so the two shell readers agree with each
+# other, both diverge from `yaml.safe_load`, and the divergence is exit 1
+# ("with no harness this script can read") rather than a wrong arm
+# (Argus R2-15). Unquoting here alone would be worse than the refusal: it
+# would derive an arm that the launcher then cannot resolve.
+#
+# The first version of this function read
 # `harness:` only when it sat on the SAME line as the persona key, so a
 # pin written in the block form
 #
@@ -153,6 +188,17 @@ die()     { echo "smoke_launch: $*" >&2; exit 1; }
 #                `personas:`; anything deeper is that persona's own
 #                mapping, so a block-form persona carrying keys besides
 #                `harness:` does not turn one of them into a persona.
+#   depth        within a persona's own mapping, `harness:` counts only
+#                at that mapping's OWN indent — the first indent seen
+#                inside it — never deeper. Taking the first `harness:` at
+#                any depth read a `harness:` nested inside some other key
+#                of the persona (`overrides: { harness: … }`) as the
+#                persona's pin, and that is the one divergence from
+#                `yaml.safe_load` that failed OPEN: a third arm on a
+#                harness nobody pinned, silently (Atlas AT-R2-11, Argus
+#                R2-15). A persona whose only `harness:` is nested now
+#                yields `-` and is exit 1 naming it, like every other pin
+#                this reader cannot read.
 #
 # A persona key whose harness cannot be read prints `-` rather than
 # disappearing, and the startup check below turns that into exit 1
@@ -162,18 +208,22 @@ pins() { # -> "<persona> <harness>", declaration order; harness `-` if unreadabl
     awk '
         /^[[:space:]]*(#|$)/ { next }
         { ind = match($0, /[^[:space:]]/) - 1 }
-        $1 == "personas:" && ind == 0 { inside = 1; keyind = -1; pend = ""; next }
+        $1 == "personas:" && ind == 0 { inside = 1; keyind = -1; subind = -1; pend = ""; next }
         ind == 0 { if (pend != "") { print pend, "-"; pend = "" } inside = 0 }
         !inside { next }
         keyind < 0 && $1 ~ /:$/ { keyind = ind }
-        ind > keyind && pend != "" && $1 == "harness:" {
-            v = $2; gsub(/[,}]/, "", v)
-            print pend, (v == "" ? "-" : v); pend = ""; next
+        ind > keyind && pend != "" {
+            if (subind < 0) subind = ind
+            if (ind == subind && $1 == "harness:") {
+                v = $2; gsub(/[,}]/, "", v)
+                print pend, (v == "" ? "-" : v); pend = ""
+            }
+            next
         }
         ind > keyind { next }
         $1 ~ /:$/ {
             if (pend != "") print pend, "-"
-            n = $1; sub(/:$/, "", n); pend = n
+            n = $1; sub(/:$/, "", n); pend = n; subind = -1
             for (k = 2; k <= NF; k++)
                 if ($k == "harness:") {
                     v = $(k + 1); gsub(/[,}]/, "", v)
@@ -436,36 +486,60 @@ done
 # is tracker-state corruption plus a released mutex, which is how two
 # sessions end up on one issue.
 #
-# So the number has to earn the writes. Exactly two kinds of issue do:
-# one this script has already run against, which carries the errand's own
-# marker in its body, and a fresh issue carrying no labels at all. A
-# labelled issue is somebody's unit of work; refusing it costs an
-# operator one `gh issue create` and costs nothing else.
+# So the number has to earn the writes, and exactly one fact earns them:
+# the body already carries this script's own marker. That covers both
+# legitimate uses with one rule — an issue this script has run against
+# before carries the marker because this script wrote it, and a fresh
+# fixture carries it because the operator typed it when opening the
+# issue. It is an explicit, visible OPT-IN, which "carries no labels"
+# never was: a freshly filed issue nobody has triaged yet has no labels
+# and is somebody's unit of work from the moment it is opened, so the
+# old acceptance admitted every untriaged number in the tracker (Argus
+# R2-2, Atlas AT-R2-5, closing R1-4's third shape).
+#
+# Refusing a pull request is a SEPARATE and EARLIER condition, not a
+# consequence of the marker rule. `/repos/{o}/{r}/issues/{n}` serves
+# pull requests as well as issues, `gh issue edit` resolves a
+# pull-request number silently, and every pull request in this
+# repository carries zero labels — so under the old rule
+# `smoke_launch.sh <this PR's number>` passed the guard and the first
+# write replaced the pull request's body. It is checked FIRST because a
+# pull request's body is precisely where the marker is likely to be
+# quoted: a review ledger row, a finding, or a paragraph like this one.
 SCRATCH_MARKER='SMOKE TEST — not a unit of work.'
 
-scratch_refusal() { # <labels, one per line> <body> -> the reason, or empty
-    local labels="$1" body="$2" found
+scratch_refusal() { # <is-pull-request: 1|0> <labels, one per line> <body> -> the reason, or empty
+    local is_pr="$1" labels="$2" body="$3" found
+    if [ "$is_pr" = "1" ]; then
+        echo "it is a PULL REQUEST, not an issue — the issues endpoint serves both and \`gh issue edit\` resolves a pull-request number, so this would have overwritten the pull request's own body"
+        return 0
+    fi
     case "$body" in
         *"$SCRATCH_MARKER"*) return 0 ;;
     esac
     found="$(printf '%s\n' "$labels" | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//')"
-    [ -n "$found" ] || return 0
-    echo "it carries labels ($found) and its body has no \"$SCRATCH_MARKER\" marker, so it is a unit of work, not a fixture"
+    if [ -n "$found" ]; then
+        echo "it carries labels ($found) and its body has no \"$SCRATCH_MARKER\" marker, so it is a unit of work, not a fixture"
+    else
+        echo "its body has no \"$SCRATCH_MARKER\" marker, so nothing on it opts it in; carrying no labels is not an opt-in, because a freshly filed issue nobody has triaged yet carries none either"
+    fi
 }
 
 require_scratch_issue() {
-    local json labels body why
+    local json is_pr labels body why
     json="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/issues/$ISSUE")" \
         || die "cannot read #$ISSUE to check that it is a scratch issue; nothing was written"
+    is_pr="$(printf '%s' "$json" | jq -r 'if .pull_request then "1" else "0" end')"
     labels="$(printf '%s' "$json" | jq -r '.labels[].name')"
     body="$(printf '%s' "$json" | jq -r '.body // ""')"
-    why="$(scratch_refusal "$labels" "$body")"
-    [ -z "$why" ] || die "#$ISSUE is not a scratch issue: $why. Open a fresh unlabelled issue for the smoke run, or pass one this script has run against before. Nothing was written."
+    why="$(scratch_refusal "$is_pr" "$labels" "$body")"
+    [ -z "$why" ] || die "#$ISSUE is not a scratch issue: $why. Pass an issue this script has run against before, or open a fresh one that opts in — \`gh issue create --repo $GITHUB_REPO --title 'smoke fixture' --body '$SCRATCH_MARKER'\`. Nothing was written."
 }
 
 # No bypass variable: a guard with an off switch is the guard the hurried
-# operator turns off, and the two accepted shapes already cover every
-# legitimate use.
+# operator turns off, and the one accepted shape already covers every
+# legitimate use — the opt-in is a line in the issue body, which costs
+# the operator the same keystrokes and leaves the decision on the record.
 require_scratch_issue
 
 # --- the instruction every arm will read ----------------------------------------
@@ -702,13 +776,34 @@ check_pushed_artifact() { # <persona> <ref>
 # `worktrees.sh --prune-remote` never takes them because it collects
 # merged branches and these are never merged. So the reset is over every
 # pinned persona's smoke ref for THIS issue, not over this run's arms.
+#
+# It deletes those refs as the HOUSEKEEPER, which means one persona's
+# minted token deleting a ref inside another persona's `branch:<glob>`
+# namespace, and that is deliberate rather than an oversight (Argus
+# R2-14). The housekeeping identity is not a persona doing a persona's
+# work — it is this script's own hands, defined by making no model call,
+# and it already writes the issue body, strips every `status:*` label and
+# deletes each arm's own ref below. A `branch:` glob bounds what the
+# AGENT it belongs to may push while working an issue; it is not a
+# per-namespace lock on the repository, and re-minting a second, third
+# and fourth token to delete four fixture refs would buy no authority
+# the housekeeper's App does not already hold. What was an oversight is
+# the silence: `|| true` swallowed a refused delete, so the litter R1-9
+# named would persist with nothing in the run saying so. A delete that
+# fails for any reason other than "there is no such ref" is now said out
+# loud. It stays a `note` and not a failure: leftover fixture refs are
+# housekeeping, not an observable.
 clear_smoke_refs() {
-    local persona branch
+    local persona branch out
     while read -r persona _; do
         branch="$(smoke_branch_of "$persona")"
         [ -n "$branch" ] || continue
-        gh_as "$HOUSEKEEPER" api -X DELETE \
-            "/repos/$GITHUB_REPO/git/refs/heads/$branch" >/dev/null 2>&1 || true
+        out="$(gh_as "$HOUSEKEEPER" api -X DELETE \
+                   "/repos/$GITHUB_REPO/git/refs/heads/$branch" 2>&1)" && continue
+        case "$out" in
+            *404*|*"Not Found"*|*"does not exist"*) : ;;   # nothing there to reset
+            *) note "could not delete the stale fixture ref $branch as $HOUSEKEEPER: ${out%%$'\n'*}" ;;
+        esac
     done < <(pins)
 }
 
@@ -723,12 +818,35 @@ clear_smoke_refs() {
 # dispatch — that is a launcher-side refusal in `scripts/ops/work.sh`,
 # out of this file's set and tracked on #134 — it stops this gate from
 # reporting a green it can no longer stand behind.
+#
+# "The read failed" and "the ref is gone" are DIFFERENT outcomes and are
+# reported differently (Atlas AT-R2-12). `--jq '.object.sha' || true`
+# collapsed them: a transient 5xx, a rate limit or an expired
+# installation token yields the empty string exactly as a deleted ref
+# does, and the row then printed `-> deleted` and failed the run — a
+# false FAILED on the one observable whose whole point is trustworthy
+# evidence. A failed read is retried, because that is what makes a 5xx
+# transient rather than fatal, and if it still cannot be read the row
+# says so in its own words. It is still a failure — a re-read that did
+# not happen is not a re-read that passed — but it names a failed read,
+# so the operator retries instead of hunting a session that overwrote
+# nothing.
 recheck_verified_refs() {
-    local ref now
+    local ref now attempt read_ok
     [ "${#VERIFIED_REF[@]}" -gt 0 ] || { note "no push observable held, so there is none to re-read"; return 0; }
     for ref in "${!VERIFIED_REF[@]}"; do
-        now="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" \
-                   --jq '.object.sha' 2>/dev/null || true)"
+        read_ok=0
+        for attempt in 1 2 3; do
+            if now="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" \
+                          --jq '.object.sha' 2>/dev/null)"; then
+                read_ok=1; break
+            fi
+            [ "$attempt" = "3" ] || sleep 2
+        done
+        if [ "$read_ok" = "0" ]; then
+            bad "could not re-read $ref after 3 attempts, so this run cannot confirm it still points at ${VERIFIED_REF[$ref]}. This is a FAILED READ, not a moved ref: the evidence above is unverified rather than known stale."
+            continue
+        fi
         if [ "$now" = "${VERIFIED_REF[$ref]}" ]; then
             ok "$ref still points at the commit this run verified (${VERIFIED_REF[$ref]})"
         else
