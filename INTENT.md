@@ -272,8 +272,11 @@ Carry-overs are proven in the predecessor repo.
 Deployment pinning: persona sources never say which harness or model
 family runs them. `config/` carries the pins — which harness executes
 which persona, and which vendor family backs each tier on that
-harness. v1 deploys **two harnesses live** (currently Claude Code and
-Antigravity — swappable by editing pins, not personas); dual-model
+harness. v1 targets **two harnesses** (currently Claude Code and
+Antigravity — swappable by editing pins, not personas), and both are
+compiled today; launch is not yet harness-agnostic, so
+`scripts/ops/work.sh` starts a Claude Code session itself and prints
+the launch instruction for an Antigravity one (#43). Dual-model
 review only requires that the two reviewers' pins resolve to
 different model families. IDE targets compiled-only.
 
