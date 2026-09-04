@@ -129,8 +129,17 @@ if [ -f "$TMP/new/.claude/agents/throwaway.md" ]; then
 fi
 echo "  ok: emitted for the pinned harness only"
 
-assert_in '"model": "gemini-3.7-flash-medium"' "$AGENT/agent.json" \
-  "agent.json carries the FAST-tier model for the pinned harness"
+# The model is a config value, not a constant. Resolve it from the same
+# source tree the compiler just read, so re-pinning a tier in
+# config/model_tiers.yaml never turns into a failing test here.
+FAST_MODEL="$(awk '/^  antigravity:/ {inh=1; next}
+                   /^  [a-z]/        {inh=0}
+                   inh && /^    FAST:/ {print $2; exit}' \
+              "$SRC/config/model_tiers.yaml")"
+[ -n "$FAST_MODEL" ] \
+  || fail "could not resolve the antigravity FAST tier from config/model_tiers.yaml"
+assert_in "\"model\": \"$FAST_MODEL\"" "$AGENT/agent.json" \
+  "agent.json carries the FAST-tier model ($FAST_MODEL) for the pinned harness"
 assert_in '  - view_file' "$AGENT/agent.md" \
   "agent.md carries the tools mapped from read_repo, as a YAML block list"
 assert_in '# Skill: trusted-posting' "$AGENT/agent.md" \
