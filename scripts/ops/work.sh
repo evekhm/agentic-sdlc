@@ -78,11 +78,14 @@ HEADLESS="${HEADLESS:-0}"
 #   WORK_MAX_USD          hard per-run spend ceiling, enforced by the harness
 #   WORK_PERMISSION_MODE  passed to --permission-mode; without it an
 #                         unattended persona is denied Edit/git/gh
-#   WORK_COST_FILE        path the observed cost of this run is written to,
+#   WORK_COST_FILE        path the observed cost (line 1) and the model the run
+#                         actually billed to (line 2) are written to,
 #                         so a caller can meter without scanning transcripts
+#   WORK_MODEL            re-tier ONE dispatch without a compiler run
 WORK_MAX_USD="${WORK_MAX_USD:-}"
 WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
 WORK_COST_FILE="${WORK_COST_FILE:-}"
+WORK_MODEL="${WORK_MODEL:-}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GITHUB_LIB="$REPO_ROOT/scripts/ops/lib/github.sh"
@@ -119,6 +122,14 @@ Unattended-run controls, claude-code headless only, all opt-in (#108):
                               scanning transcripts — which is wrong for
                               worktrees anyway, since each working
                               directory gets its own transcript tree.
+                              Line 1 is the cost; line 2 names the model
+                              the run actually billed to.
+  WORK_MODEL=<model>          run this one dispatch on another model. It
+                              must be this and not ANTHROPIC_MODEL: the
+                              environment variable does NOT override the
+                              model: line the compiler writes into the
+                              persona's agent file, so a run set that way
+                              bills to the compiled pin regardless.
 USAGE
 }
 
@@ -569,6 +580,15 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
                 # permission_denials field; see WORK_COST_FILE below.
                 [ -z "$WORK_PERMISSION_MODE" ] \
                     || LAUNCH_ARGV+=( --permission-mode "$WORK_PERMISSION_MODE" )
+                # Re-tier one dispatch without recompiling the persona. This
+                # MUST be the flag: ANTHROPIC_MODEL does not override the
+                # `model:` line the compiler writes into the agent file, and
+                # measuring the difference is not optional -- a run launched
+                # with the environment variable set to a cheaper model billed
+                # in full to the compiled pin while the caller's ledger
+                # recorded the model it had asked for.
+                [ -z "$WORK_MODEL" ] \
+                    || LAUNCH_ARGV+=( --model "$WORK_MODEL" )
             else
                 LAUNCH_ARGV+=( claude --agent "$persona" "$PROMPT" )
             fi
@@ -931,7 +951,16 @@ if [ -n "$WORK_COST_FILE" ]; then
     cost="$(printf '%s' "$raw" | jq -r '.total_cost_usd // empty' 2>/dev/null)" || cost=""
     case "$cost" in ''|*[!0-9.]*) cost="" ;; esac
     if [ -n "$cost" ]; then
-        printf '%s\n' "$cost" > "$WORK_COST_FILE"
+        # Line 1 is the cost. Line 2 is the model or models the run ACTUALLY
+        # billed to, read from the envelope rather than echoed back from what
+        # the caller asked for -- a ledger that records the request cannot
+        # show a re-tiering that silently did not happen, which is exactly how
+        # a run meant for a cheap model was billed to an expensive one while
+        # the ledger said otherwise. A caller wanting only the cost reads the
+        # first line.
+        models="$(printf '%s' "$raw" \
+            | jq -r '(.modelUsage // {}) | keys | join(",")' 2>/dev/null)" || models=""
+        printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
     else
         # Truncate rather than guess. A caller that reads an empty cost
         # must refuse; one that reads a fabricated 0 would keep spending.
