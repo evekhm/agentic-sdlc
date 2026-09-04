@@ -138,8 +138,24 @@ jq -e '.stages | type == "array" and length > 0' "$LIFECYCLE_JSON" >/dev/null 2>
 
 # The ONE read path to GitHub. Every call goes through it, so a test can
 # put a stub `gh` first on PATH and the whole script becomes hermetic.
-gh_json() { # <api-path>
-    gh api "$1"
+#
+# `--paginate` is the caller's choice, and for a LIST read it is not
+# optional: the API answers 30 items per page, so a plain `gh api
+# .../comments` returns the OLDEST thirty comments and nothing else. On
+# a thread longer than that the last claim is on a page nobody asked
+# for, the mutex below reads a stale holder — or no holder at all — and
+# D5(e) can pass while another session is holding the issue (#51, Atlas
+# AT-2). `gh api --paginate` emits one JSON array per page; `jq -s add`
+# rejoins them into the single array every caller here expects, and
+# `// []` keeps a thread with no comments an empty array rather than
+# null. `per_page=100` is the API's maximum and only reduces the number
+# of round trips — correctness comes from `--paginate`, not from it.
+gh_json() { # <api-path> [--paginate]
+    if [ "${2:-}" = "--paginate" ]; then
+        gh api --paginate "$1?per_page=100" | jq -s 'add // []'
+    else
+        gh api "$1"
+    fi
 }
 
 # --- Resolve the number (D9) ---------------------------------------------------
@@ -216,9 +232,17 @@ labels="$(printf '%s\n%s\n' "$issue_labels" "$PR_LABELS" | grep -v '^$' | sort -
 
 has_label() { grep -Fxq "$1" <<<"$labels"; }
 # Which side carries a label, so a refusal sends the operator to the
-# number they have to clear rather than to the other one.
-label_side() { # <label> -> "#<issue>" | "#<pr> (the pull request)"
-    if grep -Fxq "$1" <<<"$issue_labels"; then
+# number they have to clear rather than to the other one. BOTH sides are
+# named when both carry it: reporting only the issue there hands the
+# operator half the work, and they clear it, re-run, and are refused a
+# second time by the other number (PR #95, Argus R1-2).
+label_side() { # <label> -> "#<issue>" | "#<pr> (the pull request)" | "#<issue> (and #<pr>, the pull request)"
+    local on_issue=0 on_pr=0
+    if grep -Fxq "$1" <<<"$issue_labels"; then on_issue=1; fi
+    if grep -Fxq "$1" <<<"$PR_LABELS"; then on_pr=1; fi
+    if [ "$on_issue" = 1 ] && [ "$on_pr" = 1 ]; then
+        printf '#%s (and #%s, the pull request)' "$ISSUE" "$NUMBER"
+    elif [ "$on_issue" = 1 ]; then
         printf '#%s' "$ISSUE"
     else
         printf '#%s (the pull request)' "$NUMBER"
@@ -340,24 +364,34 @@ persona_for_login() { # <login> -> persona name, or empty
 #     same goes for a thread this script cannot read — an unverifiable
 #     mutex is a held mutex. Removing `in-progress` is how a session
 #     hands the issue back (AGENTS.md, "Working the tracker", step 5).
+#     `in-progress` is read from the UNION like every other refusal
+#     above, so its four messages name the side that carries the label
+#     through `label_side` rather than asserting it of the issue — a
+#     mutex an operator set on the pull request was being reported
+#     against a clean issue number they could not clear it from (PR #95,
+#     Argus R1-1). The THREAD is always the issue's, on both sides: the
+#     claim AGENTS.md prescribes is posted on the unit of work, so a
+#     pull-request-side `in-progress` refuses with both numbers in view
+#     — the one carrying the label and the one whose thread was read.
 claim_holder=""
 if has_label "in-progress"; then
     resumers="$owners"
     [ -z "$AS" ] || resumers="$AS"
+    held_on="$(label_side in-progress)"
     comments=""
-    comments="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE/comments")" \
-        || refuse "in-progress on #$ISSUE is set and its thread cannot be read, so the holder cannot be established"
+    comments="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE/comments" --paginate)" \
+        || refuse "in-progress on $held_on is set and #$ISSUE's thread cannot be read, so the holder cannot be established"
     claim_re='\A[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
     claim_login="$(jq -r --arg re "$claim_re" \
         '[.[] | select((.body // "") | test($re; "i"))] | last | .user.login // ""' \
         <<<"$comments")"
     [ -n "$claim_login" ] \
-        || refuse "in-progress on #$ISSUE is set but no comment opens with a structured claim line (AGENTS.md, \"Working the tracker\", step 2): the mutex names no holder"
+        || refuse "in-progress on $held_on is set but no comment opens with a structured claim line (AGENTS.md, \"Working the tracker\", step 2) in #$ISSUE's thread: the mutex names no holder"
     claim_holder="$(persona_for_login "$claim_login")"
     [ -n "$claim_holder" ] \
-        || refuse "in-progress on #$ISSUE is held by $claim_login, a login no persona identity names"
+        || refuse "in-progress on $held_on is held by $claim_login, a login no persona identity names"
     grep -Fxq "$claim_holder" <<<"$resumers" \
-        || refuse "in-progress on #$ISSUE is held by $claim_holder"
+        || refuse "in-progress on $held_on is held by $claim_holder"
 fi
 
 # (f) --as must name an owner of the stage the labels say is current.
