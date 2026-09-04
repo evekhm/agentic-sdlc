@@ -281,10 +281,19 @@ only when three conjuncts hold (PR #102): its head branch parses as
 computes from the pull request's own refs, hence the same set under
 a merge-commit, a squash and a rebase merge — changes at least one
 path outside `intent/`; and exactly one `intent/<n>-*/` directory
-exists in the after-tree with `<slug>` as its slug. An answer to
-either API read that cannot be read — a non-zero exit or a payload
-that will not parse — is a counted failure naming the pull request,
-never a quiet skip. Two folders is a
+exists in the after-tree with `<slug>` as its slug. Every read this
+script makes fails closed, never open (#73): `gh api
+--paginate repos/<repo>/commits/<sha>/pulls` failing — a non-zero
+exit or a payload that will not parse — is a counted failure naming
+the COMMIT, because no pull request is identified yet to name; the
+pull request's own file list at `.../pulls/<n>/files` is trusted
+only from a payload that parses as a JSON array — a non-zero exit,
+an empty body, unparseable text and a payload that parses as
+something other than an array (`{}`) are all the same counted
+failure naming the PULL REQUEST, and only a well-formed `[]` is the
+silent "changes nothing outside intent/" answer, because a pull
+request that changes nothing changes nothing outside `intent/`
+either. Two folders is a
 counted failure, zero yields no candidate, and there is no
 closing-keyword fallback at all: the implementing pull request is
 precisely the one that must not carry a closing keyword for its
@@ -334,7 +343,40 @@ a closed one — with one exception: a CLOSED issue still carrying the
 merge rung's label, whose implementing pull request merged in the
 range, is a red counted failure that writes nothing at all: the ladder
 cannot advance a closed issue, and the human is told to reopen it and
-re-run the range (PR #67, PR #102). The
+re-run the range (PR #67, PR #102). A transition never walks the
+ladder backward (D19): rank is the row's position in
+`personas/lifecycle.json`'s own label order, the same list the merge
+rung's guards already read, so nothing here keeps a second ordering.
+An issue with no `status:*` label ranks below every rung and any
+first transition is forward; a `status:*` label the ladder does not
+name at all (`status:review-stuck` is one) has no rank either. A
+trigger that would move the issue below its current rank, or a
+current label that cannot be ranked, is a no-op with exactly one
+`::warning::` line naming the issue, its current status and the rung
+the trigger would otherwise have written — never a counted failure,
+because a folder rename or a revert-and-reland is an ordinary event
+on a healthy ladder, not evidence of a broken one. A trigger that
+would leave the issue at its current rank writes no label and posts
+no comment, but still clears a stray `intent:new` in its own edit.
+`blocked` is advisory only: this script never reads it and never
+writes it, and it neither halts a transition nor taints one — the
+refusal it signals belongs to the actors at dispatch, not to the
+ladder (D20; only `hold` halts this script, checked first as
+always). Every read this script makes fails closed end to end
+(D21): the merge-candidate reads above were already this way; the
+per-issue `gh issue view` that decides whether an issue advances is
+now the same — a non-zero exit is a counted failure naming the
+issue, with no `DRY_RUN` substitution of a fabricated open,
+unlabelled issue (that default now lives only in the test harness,
+never in this script, so a dry run and a real run answer a bad read
+identically); and the range walk itself, `git rev-list --topo-order
+--reverse before..after`, is checked before any candidate is
+discovered or any issue is read — its failure is a counted,
+run-ending error naming the range walk, before a single `gh` call is
+made. The one deliberate exception is the near-miss report's own
+read (D17): it is not a candidate and buys at most one warning, so a
+failed read there stays quiet rather than turning the run red over a
+line that was never going to write anything (#73, PR #111). The
 workflow uses the default `GITHUB_TOKEN` and posts as
 `github-actions[bot]` — infrastructure, not a persona — with
 `issues: write, contents: read, pull-requests: read` and no secrets.

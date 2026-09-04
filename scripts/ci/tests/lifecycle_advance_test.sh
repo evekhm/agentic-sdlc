@@ -4,9 +4,13 @@
 #   bash scripts/ci/tests/lifecycle_advance_test.sh
 #
 # Hermetic: a synthetic range in a throwaway git repository, a stub `gh`
-# first on PATH that cannot read any issue (so DRY_RUN substitutes an
-# open, unlabelled one) and records any write it is asked to make, and
-# DRY_RUN=1 throughout. No network, no token, no issue is touched.
+# first on PATH that answers an issue view from a fixture when one names
+# the issue and otherwise with an OPEN, unlabelled issue carrying no
+# comments (D13(c) — the default the advancer itself no longer
+# fabricates, per D21), records any write it is asked to make, and
+# DRY_RUN=1 throughout. A `git` stub sits beside it, a pass-through to
+# the real `git` except for one fault a scenario can arm by environment
+# variable (D13(d)). No network, no token, no issue is touched.
 #
 # What these pin is the #36 change and nothing else: the label a merged
 # artifact advances to, and the line posted when it does, are READ from
@@ -47,22 +51,30 @@ banner() { printf '\n--- %s\n' "$*"; }
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 # The stub answers exactly the READS the advancer makes, and only from
-# files in $FIXTURES — no network, no token. A missing fixture falls
-# through to the pre-#57 behaviour, so every scenario written before
-# merge discovery existed still runs against an issue the stub cannot
-# read and DRY_RUN substitutes an open, unlabelled one for. Anything
-# else reaching gh in a dry run is a write that should never have been
-# attempted, and is recorded as one.
+# files in $FIXTURES — no network, no token. Anything else reaching gh
+# in a dry run is a write that should never have been attempted, and is
+# recorded as one.
 #
 # Every invocation — reads included — is appended to $INVOKES first
 # (D13 as amended). $WRITES keeps its own, narrower meaning.
 printf '%s\n' "gh $*" >> "$INVOKES"
 if [ "${1:-}" = "issue" ] && [ "${2:-}" = "view" ]; then
-  if [ -f "$FIXTURES/issue-${3:-}.json" ]; then
-    cat "$FIXTURES/issue-${3:-}.json"
+  n="${3:-}"
+  # An armed unreadable-issue fault (D13(c), D21(a)/AT-2) — the stub
+  # answers non-zero for this one number regardless of any fixture.
+  if [ -f "$FIXTURES/issue-$n.unreadable" ]; then
+    exit 1
+  fi
+  if [ -f "$FIXTURES/issue-$n.json" ]; then
+    cat "$FIXTURES/issue-$n.json"
     exit 0
   fi
-  exit 1
+  # D13(c): the default answer for an issue no fixture names is an
+  # OPEN, unlabelled issue with no comments — the substitution D21
+  # deletes from the advancer itself moves here, so every scenario
+  # written before this repair still runs unchanged.
+  jq -nc --argjson n "$n" '{number: $n, state: "OPEN", labels: [], comments: []}'
+  exit 0
 fi
 if [ "${1:-}" = "api" ]; then
   # `gh api --paginate <path>` puts the flag first, so scan the argv for
@@ -108,6 +120,25 @@ printf '%s\n' "gh $*" >> "$WRITES"
 exit 1
 STUB
 chmod +x "$WORK/bin/gh"
+
+# D13(d): a `git` stub, first on PATH beside the `gh` one, is a
+# pass-through to the real `git` except for one fault a scenario arms by
+# environment variable: `rev-list` exits non-zero. It is the only way
+# D21(b)'s range-walk failure is reachable hermetically — the
+# advancer's own `git cat-file -e` preflight rejects every bad sha a
+# fixture could supply, so the walk cannot be made to fail through its
+# inputs. Captured before this stub exists on PATH, so it resolves the
+# real binary and never itself.
+REAL_GIT="$(command -v git)"
+cat > "$WORK/bin/git" <<GITSTUB
+#!/usr/bin/env bash
+if [ "\${1:-}" = "rev-list" ] && [ "\${LIFECYCLE_TEST_GIT_REV_LIST_FAIL:-0}" = "1" ]; then
+  echo "simulated rev-list failure (LIFECYCLE_TEST_GIT_REV_LIST_FAIL=1)" >&2
+  exit 1
+fi
+exec "$REAL_GIT" "\$@"
+GITSTUB
+chmod +x "$WORK/bin/git"
 
 # --- the synthetic range (the #4 fixture) --------------------------------------
 SANDBOX="$WORK/repo"
@@ -299,7 +330,7 @@ row() { jq -r --arg a "$1" ".stages[] | select(.artifact == \$a) | .$2" \
 lrow() { jq -r --arg l "$1" ".stages[] | select(.label == \$l) | .$2" \
            "$SANDBOX/personas/lifecycle.json"; }
 
-reset_fixtures() { rm -f "$FIXTURES"/*.json; : > "$INVOKES"; }
+reset_fixtures() { rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable; : > "$INVOKES"; }
 issue_fixture() { # <number> <state> [label ...]
   local n="$1" state="$2" labels='[]'
   shift 2
@@ -307,6 +338,19 @@ issue_fixture() { # <number> <state> [label ...]
   jq -nc --argjson n "$n" --arg s "$state" --argjson l "$labels" \
     '{number: $n, state: $s, labels: $l, comments: []}' > "$FIXTURES/issue-$n.json"
 }
+# issue_fixture_comment <number> <state> <comment-body> [label ...] —
+# same as issue_fixture but with one comment in the thread, for AT-10's
+# reconstructed partial-write residue (item 30).
+issue_fixture_comment() {
+  local n="$1" state="$2" comment="$3" labels='[]'
+  shift 3
+  [ "$#" -eq 0 ] || labels="$(printf '%s\n' "$@" | jq -Rc '{name: .}' | jq -sc '.')"
+  jq -nc --argjson n "$n" --arg s "$state" --argjson l "$labels" --arg c "$comment" \
+    '{number: $n, state: $s, labels: $l, comments: [{body: $c}]}' > "$FIXTURES/issue-$n.json"
+}
+# issue_unreadable <number> — arms the gh stub to exit non-zero for
+# `issue view <number>` regardless of any fixture (D13(c), item 32).
+issue_unreadable() { : > "$FIXTURES/issue-$1.unreadable"; }
 # <sha> <pr-number> <head-ref> <body> [merge-commit-sha] [head-repo|null] [base-ref]
 #
 # merge_commit_sha defaults to the commit the pull request is reported
@@ -337,6 +381,11 @@ files_fixture() { # <pr-number> <path>...
   shift
   printf '%s\n' "$@" | jq -Rc '{filename: .}' | jq -sc '.' > "$FIXTURES/files-$n.json"
 }
+# files_fixture_raw <pr-number> <raw-body> — writes the file-list
+# response verbatim, for the three-way separation D15 conjunct (2) now
+# makes (item 31): an empty body, a body that is not JSON, and a body
+# that parses as something other than a JSON array (`{}`).
+files_fixture_raw() { printf '%s' "$2" > "$FIXTURES/files-$1.json"; }
 invoked() { # <extended-regex> <name>
   if grep -Eq -- "$1" "$INVOKES"; then pass "$2"
   else cat "$INVOKES" >&2; fail "$2 (no gh invocation matching: $1)"; fi
@@ -915,20 +964,198 @@ pass "S29: lifecycle.labels cites the pull request that changed it"
 # repair added and removed none. A literal count is not that property:
 # it is the count at whatever commit the assertion was written against,
 # and it goes red the moment an unrelated entry lands on main (R1-1).
-# The property is expressed against this branch's merge base instead,
-# so it survives any merge of main and still catches an entry this
-# pull request adds, deletes or renames.
-SPEC_BASE="$(git -C "$REPO" merge-base HEAD origin/main 2>/dev/null || true)"
-if [ -z "$SPEC_BASE" ]; then
-  echo "NOTE: S29: no origin/main in this checkout — the section-set check is skipped" >&2
+# Comparing against `origin/main` made the check skip itself silently
+# whenever the checkout had no such remote — a hermeticity leak this
+# suite is not supposed to have (D13) and a silent no-op this repair
+# exists to close everywhere else (#73 R2-1). The baseline lives IN
+# this file instead: the section headers docs/SPEC.md carried before
+# any of #72/#73 touched it. No git history, no network, and a missing
+# or empty baseline is a hard `fail`, never a skip.
+SPEC_SECTIONS_BASELINE="$(sort <<'BASELINE'
+### docs.structure
+### tracker.workflow
+### tracker.provisioning
+### personas.sources
+### identity.bots
+### config.bindings
+### personas.compiler
+### personas.resume
+### ci.gates
+### lifecycle.labels
+### review.policy
+### ops.spend
+### ops.dispatch
+### ops.identity
+### execution.placement
+BASELINE
+)"
+[ -n "$SPEC_SECTIONS_BASELINE" ] || fail "S29: the section-set baseline in this test is empty"
+spec_now="$(grep '^### ' "$REPO/docs/SPEC.md" | sort)"
+[ "$SPEC_SECTIONS_BASELINE" = "$spec_now" ] \
+  || { diff <(printf '%s\n' "$SPEC_SECTIONS_BASELINE") <(printf '%s\n' "$spec_now") >&2 || true
+       fail "S29: docs/SPEC.md's section set no longer matches this test's own baseline — update both together"; }
+pass "S29: the section set of docs/SPEC.md is unchanged by this pull request"
+
+# ---------------------------------------------------------------------------
+# #73 — fail closed on every read, and a transition never walks backward.
+# ---------------------------------------------------------------------------
+
+banner "S30 · item 28 · F3 · D19 · a backward transition is refused, not applied"
+reset_fixtures
+issue_fixture 999 OPEN status:in-review
+run "$C2" "$C3" "S30: the plan.md range against a further-along issue still exits 0"
+exactly "::warning::lifecycle_advance:" 1 "S30: exactly one warning line"
+has "::warning::lifecycle_advance: #999 is at status:in-review" \
+  "S30: the warning names the issue and its current rung"
+has "would move it to status:implementing" \
+  "S30: and names the rung the trigger would otherwise have written"
+has "does not advance the ladder" "S30: and states why nothing happened (D19)"
+hasnt "--add-label" "S30: no label is written for a backward transition"
+hasnt "--remove-label" "S30: and nothing is removed either"
+hasnt "gh issue comment 999" "S30: and no comment is posted for #999"
+
+banner "S30 · item 28 · D19 · a forward transition still lands"
+reset_fixtures
+issue_fixture 999 OPEN status:build
+run "$C2" "$C3" "S30: the plan.md range against a lower rung exits 0"
+hasnt "::warning::lifecycle_advance:" "S30: a forward transition draws no D19 warning"
+has "--add-label $(row plan.md advances_to)" \
+  "S30: the build row's label is still written when the transition is forward"
+has "--remove-label status:build" "S30: and the previous rung is removed"
+
+banner "S30 · item 28 · D19 · an issue already at the target rank writes nothing"
+reset_fixtures
+issue_fixture 999 OPEN status:implementing
+run "$C2" "$C3" "S30: the plan.md range against an issue already at the target rank exits 0"
+hasnt "--add-label" "S30: no label is written when the target equals the current rank"
+hasnt "--remove-label status:implementing" "S30: and the current label is not removed either"
+hasnt "gh issue comment 999" "S30: and no comment is posted for #999"
+hasnt "::warning::lifecycle_advance:" "S30: and no warning is drawn — this is equal, not below"
+
+reset_fixtures
+issue_fixture 999 OPEN status:implementing intent:new
+run "$C2" "$C3" "S30: the same equal-rank case with intent:new still exits 0"
+has "gh issue edit 999 --repo $TESTREPO --remove-label intent:new" \
+  "S30: intent:new is still cleared in its own edit, even though the rung is unchanged"
+hasnt "--add-label" "S30: and no rung label rides along with it"
+
+banner "S30 · item 28 · D19 · an unranked current status is refused like a backward one"
+reset_fixtures
+issue_fixture 999 OPEN status:review-stuck
+run "$C2" "$C3" "S30: the plan.md range against an unranked status exits 0"
+has "::warning::lifecycle_advance: #999 is at status:review-stuck" \
+  "S30: the warning names the issue and its unranked status"
+hasnt "--add-label" "S30: no label is written when the current status cannot be ranked"
+
+banner "S31 · item 29 · AT-7 · D20 · blocked is advisory: it never stops or taints a legitimate transition"
+reset_fixtures
+pulls_fixture "$CM" 4296 odyssey/999-test "Implements the plan."
+issue_fixture 999 OPEN status:implementing blocked
+run "$C4" "$CM" "S31: the merge range with blocked also carried exits 0"
+has "--add-label $(lrow status:implementing advances_to)" \
+  "S31: blocked does not refuse the transition — the label is still written"
+has "--remove-label status:implementing" "S31: and the previous rung is still removed"
+has "$(lrow status:implementing advance_message)" "S31: and the advance comment is still posted"
+hasnt "blocked" "S31: the string blocked never appears in a label write, a comment, or a warning"
+
+banner "S32 · item 30 · AT-10 · D6 · the comment is written before the label, in that order"
+reset_fixtures
+pulls_fixture "$CM" 4297 odyssey/999-test "Implements the plan."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S32: the ordinary merge range exits 0"
+comment_line="$(printf '%s\n' "$OUT" | grep -nF -- "DRY-RUN gh issue comment 999" | head -1 | cut -d: -f1)"
+edit_line="$(printf '%s\n' "$OUT" | grep -nF -- "DRY-RUN gh issue edit 999" | head -1 | cut -d: -f1)"
+if [ -n "$comment_line" ] && [ -n "$edit_line" ] && [ "$comment_line" -lt "$edit_line" ]; then
+  pass "S32: the comment line precedes the label edit line, so a crash between them leaves the comment as the only trace (D6)"
 else
-  spec_before="$(git -C "$REPO" show "$SPEC_BASE:docs/SPEC.md" | grep '^### ' | sort)"
-  spec_now="$(grep '^### ' "$REPO/docs/SPEC.md" | sort)"
-  [ "$spec_before" = "$spec_now" ] \
-    || { diff <(printf '%s\n' "$spec_before") <(printf '%s\n' "$spec_now") >&2 || true
-         fail "S29: this pull request added, removed or renamed a docs/SPEC.md section"; }
-  pass "S29: the section set of docs/SPEC.md is unchanged by this pull request"
+  printf '%s\n' "$OUT" >&2
+  fail "S32: expected the comment line before the label edit line (comment=$comment_line edit=$edit_line)"
 fi
+
+banner "S32 · item 30 · AT-10 · D6 · a marker already on the thread means the comment half already landed — only the label is retried"
+reset_fixtures
+issue_fixture_comment 999 OPEN "<!-- lifecycle:in-review:$CM -->" status:implementing
+pulls_fixture "$CM" 4298 odyssey/999-test "Implements the plan."
+run "$C4" "$CM" "S32: the reconstructed partial-write range exits 0"
+has "--add-label $(lrow status:implementing advances_to)" \
+  "S32: the label half is still written on retry"
+hasnt "DRY-RUN gh issue comment" "S32: the comment half is not re-posted — its marker is already on the thread"
+
+banner "S33 · item 31 · R2-2 · D15 conjunct (2) · an empty file-list body is a counted failure, not a quiet skip"
+reset_fixtures
+pulls_fixture "$CM" 4299 odyssey/999-test "Implements the plan."
+files_fixture_raw 4299 ""
+issue_fixture 999 OPEN status:implementing
+run_fail "$C4" "$CM" "S33: the empty file-list body ends red"
+has "::error::" "S33: it is a counted failure"
+has "pull request #4299" "S33: the failure names the pull request"
+hasnt "--add-label" "S33: nothing is written"
+hasnt "::warning::lifecycle_advance:" "S33: and it is not mistaken for a near miss either"
+
+banner "S33 · item 31 · D15 conjunct (2) · a file-list body that is not JSON is the same counted failure"
+reset_fixtures
+pulls_fixture "$CM" 4300 odyssey/999-test "Implements the plan."
+files_fixture_raw 4300 "not json at all"
+issue_fixture 999 OPEN status:implementing
+run_fail "$C4" "$CM" "S33: the non-JSON file-list body ends red"
+has "::error::" "S33: it is a counted failure"
+has "pull request #4300" "S33: the failure names the pull request"
+hasnt "--add-label" "S33: nothing is written"
+
+banner "S33 · item 31 · D15 conjunct (2) · a file-list body that parses as an object, not an array, is the same counted failure"
+reset_fixtures
+pulls_fixture "$CM" 4301 odyssey/999-test "Implements the plan."
+files_fixture_raw 4301 "{}"
+issue_fixture 999 OPEN status:implementing
+run_fail "$C4" "$CM" "S33: the {} file-list body ends red"
+has "::error::" "S33: it is a counted failure"
+has "pull request #4301" "S33: the failure names the pull request"
+hasnt "--add-label" "S33: nothing is written"
+
+banner "S33 · item 31 · D15 conjunct (2) · a well-formed empty array is still the silent negative answer"
+reset_fixtures
+pulls_fixture "$CM" 4302 odyssey/999-test "Implements the plan."
+files_fixture_raw 4302 "[]"
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S33: the [] file-list body exits 0"
+hasnt "::error::" "S33: an empty array is not a counted failure"
+hasnt "::warning::lifecycle_advance:" "S33: and not a near miss either"
+hasnt "--add-label" "S33: nothing is written — the pull request touched nothing outside intent/"
+
+banner "S34 · item 32 · AT-2 · D21(a) · an unreadable issue is a counted failure, never silent and never substituted"
+reset_fixtures
+pulls_fixture "$CM" 4303 odyssey/999-test "Implements the plan."
+issue_fixture 999 OPEN status:implementing
+issue_unreadable 999
+run_fail "$C4" "$CM" "S34: the merge range against an unreadable issue ends red"
+has "::error::" "S34: it is a counted failure"
+has "cannot read #999" "S34: the failure names the issue"
+hasnt "--add-label" "S34: nothing is written"
+hasnt "DRY-RUN gh issue comment" "S34: no comment is posted"
+hasnt "DRY-RUN gh issue edit" "S34: no label edit is attempted"
+hasnt "==> Done." "S34: the run never reports a completed pass"
+
+banner "S34 · item 32 · AT-2 · D21 · the near-miss read stays quiet on the same fault — an intentional exception, not a hole"
+reset_fixtures
+pulls_fixture "$CM" 4304 odyssey/999-998-land "Landing #998's work."
+issue_fixture 999 OPEN status:implementing
+issue_unreadable 999
+run "$C4" "$CM" "S34: the near-miss range with #999 unreadable still exits 0"
+hasnt "::error::" "S34: the near-miss read failing is not a counted failure (#57, D21)"
+hasnt "::warning::lifecycle_advance:" "S34: and draws no warning — an unreadable issue cannot be shown to be at the merge rung"
+
+banner "S35 · item 33 · AT-11 · D21(b) · a failed range walk is a counted, run-ending failure before any issue is read"
+reset_fixtures
+pulls_fixture "$CM" 4305 odyssey/999-test "Implements the plan."
+issue_fixture 999 OPEN status:implementing
+export LIFECYCLE_TEST_GIT_REV_LIST_FAIL=1
+run_fail "$C4" "$CM" "S35: the range walk fault ends red"
+unset LIFECYCLE_TEST_GIT_REV_LIST_FAIL
+has "::error::" "S35: it is a counted failure"
+has "range walk" "S35: the failure names the range walk"
+hasnt "--add-label" "S35: nothing is written"
+hasnt "DRY-RUN gh issue comment" "S35: no comment is posted"
+not_invoked 'issue view' "S35: no issue is read — the range walk fails before any candidate is discovered"
 
 reset_fixtures
 

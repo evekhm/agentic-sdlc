@@ -62,14 +62,26 @@
 #
 # Invariants (#4, intent/4-labels/spec.md):
 #   hold is absolute      an issue carrying `hold` is skipped, always,
-#                         first among the guards that act on an OPEN
-#                         issue — D9's closed-at-merge red is checked
-#                         ahead of it and is #73's to settle (R1-5).
+#                         first — before state, before labels, before
+#                         anything else the per-issue loop does. D9's
+#                         closed-at-merge red is checked AFTER it, so a
+#                         closed issue that also carries `hold` is one
+#                         log line and exit 0, not a counted failure
+#                         (#57, D5; #73 D9 amended, F4).
 #                         The circuit breaker is worth nothing if
 #                         automation gets a vote on it.
 #   one status:*          more than one status:* label is a corrupted
 #                         state machine: the script says so, applies
 #                         `hold`, and stops touching that issue.
+#   no backward transition a transition never walks down the ladder: the
+#                         target must outrank the issue's current
+#                         status:* label. Below or unranked is a no-op
+#                         with one `::warning::`; equal is a plain log
+#                         line; neither is a counted failure (#57, D19).
+#   blocked is advisory    `blocked` is never read and never written by
+#                         this script and never suppresses a transition
+#                         — only `hold` halts it. Refusal on `blocked`
+#                         lives with the actors, at dispatch (#57, D20).
 #   furthest transition   a push adding two or three of the triple for
 #                         one issue (bootstrap compression) applies the
 #                         furthest transition only, in one comment.
@@ -95,8 +107,14 @@
 #                         label, with its implementing pull request
 #                         merged in the range, is a counted failure and
 #                         NOTHING is written to it: that pull request
-#                         carried a closing keyword it must not carry
-#                         (#57, D9).
+#                         carried a closing keyword it must not carry,
+#                         or a human closed it directly (#57, D9).
+#   no read fails open     every lookup this script makes is checked. A
+#                         failed per-issue read is a counted failure
+#                         naming the issue; a failed range walk ends the
+#                         run before any issue is read. DRY_RUN=1
+#                         suppresses writes and nothing else — it never
+#                         changes what a read answers (#57, D21).
 #
 # Usage:
 #   scripts/ci/lifecycle_advance.sh <before-sha> <after-sha>
@@ -105,9 +123,9 @@
 # DRY_RUN=1 performs no writes: every gh mutation prints instead of
 # running. Reads still happen, so the live guards (hold, multiple
 # status labels, an already-posted comment) are exercised as they would
-# be for real; if the issue cannot be read, a dry run substitutes an
-# assumed-open, unlabelled issue and says so, so the transition logic
-# stays demonstrable against synthetic input.
+# be for real; a read that fails is reported exactly as it would be for
+# real, never substituted (#57, D21) — the advancer is the same program
+# under DRY_RUN=1 on every read path.
 #
 # Fail-closed on inputs, fail-soft per issue: an unusable range is an
 # error, but one unreachable issue does not stop the others — it is
@@ -231,11 +249,20 @@ done <<<"$added"
 # first-parent the range is a graph, so "oldest first" had to be given a
 # definition; this one is deterministic for a given DAG, and the index of
 # a commit in it is the integer D15's second-candidate rule ranks on.
+#
+# D21(b): materialise, check, then loop — matching the `git diff
+# --diff-filter=A` guard above. An unchecked process substitution here
+# would let a failed walk report zero candidates and exit 0; this ends
+# the run before any issue is read, the same posture the artifact
+# read already has.
+if ! range_walk="$(git rev-list --topo-order --reverse "$BEFORE..$AFTER")"; then
+    die "range walk (git rev-list --topo-order --reverse $BEFORE..$AFTER) failed; the pushed range is unknown"
+fi
 RANGE_SHAS=()
 while read -r sha; do
     [ -n "$sha" ] || continue
     RANGE_SHAS+=("$sha")
-done < <(git rev-list --topo-order --reverse "$BEFORE..$AFTER")
+done <<<"$range_walk"
 
 declare -A RANGE_INDEX  # commit sha -> its position in that total order
 range_pos=0
@@ -281,11 +308,22 @@ intent_folders() { # <issue>
 # pull request, and the sibling commits/pulls read is already red on
 # it (R1-3, AT-2). It is a function because the near-miss path must
 # consult it too, before recording (R1-2).
+#
+# D15 conjunct (2), corrected (#73 Argus R2-2, R1-4 ≡ Atlas AT-1). The
+# answer is trusted only from a payload that PARSES AS A JSON ARRAY: a
+# non-zero exit, an empty body, a body that will not parse, or a body
+# that parses as anything other than an array (`{}`) is return 2 — the
+# same counted failure as an outright read error, never the "changes
+# nothing outside intent/" answer. A well-formed `[]` IS that answer
+# and stays silent: a pull request that changes nothing changes nothing
+# outside `intent/` either.
 PR_OUTSIDE=""
 pr_outside_intent() { # <pull-request-number>
     local raw list
     PR_OUTSIDE=""
     raw="$(gh api --paginate "repos/$GITHUB_REPO/pulls/$1/files" 2>/dev/null)" || return 2
+    [ -n "$raw" ] || return 2
+    jq -e 'type == "array"' <<<"$raw" >/dev/null 2>&1 || return 2
     list="$(jq -r '.[].filename' <<<"$raw" 2>/dev/null)" || return 2
     PR_OUTSIDE="$(printf '%s\n' "$list" | grep -vE '^intent/' | grep -v '^$' | head -1 || true)"
     [ -n "$PR_OUTSIDE" ]
@@ -511,52 +549,58 @@ for issue in $(printf '%s\n' "$CANDIDATES" | grep -E '^[0-9]+$' | sort -nu || tr
 
     # Read state and the recent thread in ONE call: state and labels
     # decide whether to act, the comment bodies decide whether the
-    # comment is already there.
+    # comment is already there. D21(a): a failed read is a counted
+    # failure naming the issue, never a silent skip and never
+    # substituted — under DRY_RUN=1 or for real, this is the same
+    # program on this path. The default a dry run needs for an issue no
+    # fixture describes lives in the test harness now (D13(c)), not
+    # here.
     if view="$(gh issue view "$issue" --repo "$GITHUB_REPO" \
                  --json number,state,labels,comments 2>/dev/null)"; then
         issue_state="$(jq -r '.state' <<<"$view")"
         labels="$(jq -r '.labels[].name' <<<"$view")"
         recent="$(jq -r '.comments | .[-20:] | .[].body' <<<"$view")"
-    elif [ "$DRY_RUN" = "1" ]; then
-        log "    #$issue is not readable — DRY_RUN substitutes an open, unlabelled issue"
-        issue_state="OPEN"; labels=""; recent=""
     else
-        log "    #$issue does not exist or is not visible — skipping"
+        fail_issue "cannot read #$issue; whether it advances is unknown (#57, D21(a))"
         continue
     fi
 
-    # A pure move: the status labels are read before the state check
-    # because the closed-issue rule below needs them. No guard changes
-    # position relative to another guard — `hold` is still first among
-    # the guards that act on an open issue.
     current_status="$(grep '^status:' <<<"$labels" || true)"
     status_count="$(grep -c . <<<"${current_status}" || true)"
     [ -n "$current_status" ] || status_count=0
+
+    # hold is absolute, and it is checked FIRST — before state, before
+    # labels, before anything else this loop does (#4 D2; #57 D5 reuses
+    # this chain unchanged). A closed issue that also carries hold is
+    # one log line and exit 0, not D9's red below: hold is the manual
+    # override for every other decision here too, and a breaker with an
+    # exception for one issue shape is not a breaker (Amended D9, #73
+    # F4 ≡ Argus R1-6).
+    if grep -Fxq "hold" <<<"$labels"; then
+        log "    #$issue halted by hold — no label, no comment"
+        continue
+    fi
 
     if [ "$issue_state" != "OPEN" ]; then
         # D9. A closed issue still carrying the merge rung's label, with
         # a pull request for it merged in this range, means the
         # implementing pull request carried a closing keyword it must
-        # not carry. That is red, and NOTHING is written to the issue —
-        # no label, no comment, no reopen. Every other non-OPEN case
-        # keeps today's quiet skip: an artifact candidate, no status
-        # label at all, more than one of them (never guess on two
-        # status labels, #4 D1 — no row can be identified), or a row
-        # whose trigger is not a merge.
+        # not carry — or a human closed the issue while its real
+        # implementing pull request was merging in this range (#73 F5,
+        # message widened, rule unchanged). That is red, and NOTHING is
+        # written to the issue — no label, no comment, no reopen. Every
+        # other non-OPEN case keeps today's quiet skip: an artifact
+        # candidate, no status label at all, more than one of them
+        # (never guess on two status labels, #4 D1 — no row can be
+        # identified), or a row whose trigger is not a merge.
         if [ -n "${MERGE_PR[$issue]:-}" ] && [ "$status_count" -eq 1 ] \
            && jq -e --arg l "$current_status" \
                 '[.stages[] | select(.label == $l and .advances_on == "merge")] | length == 1' \
                 "$LIFECYCLE_JSON" >/dev/null 2>&1; then
-            fail_issue "#$issue is $issue_state but still carries $current_status, and pull request #${MERGE_PR[$issue]} merged in the range — the ladder cannot advance a closed issue. The implementing pull request must not carry a closing keyword for #$issue (#57, D9); reopen #$issue, drop the keyword, and re-run this range."
+            fail_issue "#$issue is $issue_state but still carries $current_status, and pull request #${MERGE_PR[$issue]} merged in the range — the ladder cannot advance a closed issue. Likely cause: the implementing pull request must not carry a closing keyword for #$issue (#57, D9); it is also possible a human closed #$issue directly while that pull request was merging. Reopen #$issue if it should still advance, drop any closing keyword, and re-run this range."
             continue
         fi
         log "    #$issue is $issue_state — skipping (a closed issue has no stage to advance)"
-        continue
-    fi
-
-    # hold is absolute, and it is checked FIRST. Nothing below may run.
-    if grep -Fxq "hold" <<<"$labels"; then
-        log "    #$issue halted by hold — no label, no comment"
         continue
     fi
 
@@ -685,6 +729,55 @@ $marker"
         fi
     fi
 
+    # --- D19: a transition never walks down the ladder -------------------------
+    # Rank is the row's 1-based position in `[.stages[].label]` — the
+    # same list D5's contest already ranks on, so no second ordering is
+    # written anywhere. No status:* label ranks 0, so a first transition
+    # is always forward; a single status:* label that names no rung
+    # (e.g. status:review-stuck) has no rank either, and a transition
+    # against it cannot be shown to be forward. Below or unranked is a
+    # no-op with one ::warning::, never a counted failure — a folder
+    # rename or a revert-and-reland is an ordinary act on a healthy
+    # ladder, not a broken one (#57, D19). Skipped when target is empty:
+    # the Draft override and the last, inert rung are not transitions to
+    # rank at all.
+    # tgt_idx="null" — the row's own advances_to is not one of the
+    # ladder's five labels at all (reachable only by hand-editing
+    # personas/lifecycle.json, as the "ladder file is the source" test
+    # below does) — is outside what D19 ranks; such a target is neither
+    # shown backward nor forward, so it is let through unranked rather
+    # than refused on data D19 was never told how to order.
+    if [ -n "$target" ] && tgt_idx="$(jq -r --arg l "$target" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON")" \
+        && [ "$tgt_idx" != "null" ]; then
+        target_rank=$((tgt_idx + 1))
+        current_rank=0
+        current_unranked=0
+        if [ -n "$current_status" ]; then
+            cur_idx="$(jq -r --arg l "$current_status" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON")"
+            if [ "$cur_idx" = "null" ]; then
+                current_unranked=1
+            else
+                current_rank=$((cur_idx + 1))
+            fi
+        fi
+
+        if [ "$current_unranked" -eq 1 ] || [ "$target_rank" -lt "$current_rank" ]; then
+            echo "::warning::lifecycle_advance: #$issue is at ${current_status:-no status label} and $trigger_desc would move it to $target, which does not advance the ladder — no stage transition was made (#57, D19)."
+            continue
+        fi
+        if [ "$target_rank" -eq "$current_rank" ]; then
+            # Already at the target rank — not an event (#4 D4/D7). Still
+            # true up an unrelated intent:new flag, exactly as the
+            # forward path below does.
+            log "    #$issue is already at $target for $trigger_desc — no stage transition (D19)"
+            if grep -Fxq "intent:new" <<<"$labels"; then
+                edit_labels "$issue" "" "intent:new" \
+                    || { fail_issue "could not clear intent:new on #$issue"; continue; }
+            fi
+            continue
+        fi
+    fi
+
     # Bootstrap compression is an artifact-path note: a merge candidate
     # adds no files, so there is nothing to compress.
     compression=""
@@ -730,22 +823,14 @@ $marker"
     # `intent:new` marks an item nobody has triaged. The first status
     # label this workflow writes IS the triage, so the two must never be
     # carried together (D7). It rides along on the same `gh issue edit`.
+    # D19's rank check above already ended this issue's processing when
+    # target ranked at or below current_status, so by construction
+    # target strictly outranks it here — this is always a forward write.
     remove="$current_status"
     if grep -Fxq "intent:new" <<<"$labels"; then
         remove="${remove:+$remove,}intent:new"
     fi
 
-    if [ "$current_status" = "$target" ]; then
-        if [ "$remove" = "$current_status" ]; then
-            log "    #$issue already at $target — no label write"
-            continue
-        fi
-        # Already at the target but still flagged new: clear the flag and
-        # leave the status where it is.
-        edit_labels "$issue" "" "intent:new" \
-            || { fail_issue "could not clear intent:new on #$issue"; continue; }
-        continue
-    fi
     edit_labels "$issue" "$target" "$remove" \
         || { fail_issue "could not set $target on #$issue"; continue; }
 done
