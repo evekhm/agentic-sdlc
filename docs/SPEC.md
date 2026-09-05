@@ -446,8 +446,8 @@ and the harness from `config/deployments.yaml`. There is deliberately
 no flag naming a stage, folder, artifact or branch — one would let a
 session work a stage the labels say is not current. Eight refusals,
 checked in order before anything is dispatched and each exiting 2
-with the condition named: `hold`; a dispatch targeting the issue
-this session was launched for (re-entrant self-dispatch, #134);
+with the condition named: `hold`; a dispatch targeting any issue in
+the session's dispatch chain (re-entrant self-dispatch, #134);
 closed, or `status:review-stuck`; `blocked`; more than one
 `status:*` (reported, never guessed, and never `hold`-ed — the
 advancer is the single writer of the circuit breaker); a number on no

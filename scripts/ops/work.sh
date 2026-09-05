@@ -84,8 +84,9 @@ HEADLESS="${HEADLESS:-0}"
 #                         so a caller can meter without scanning transcripts
 #   WORK_MODEL            re-tier ONE dispatch without a compiler run
 # Re-entrancy control (#134).
-#   WORK_DISPATCHED_ISSUE issue number the current session was launched for;
-#                         refuses re-entrant dispatch of the same issue.
+#   WORK_DISPATCHED_ISSUE colon-separated issue numbers the current session
+#                         was launched for (the dispatch chain); refuses
+#                         re-entrant dispatch of any issue in the chain.
 WORK_MAX_USD="${WORK_MAX_USD:-}"
 WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
 WORK_COST_FILE="${WORK_COST_FILE:-}"
@@ -137,8 +138,9 @@ Unattended-run controls, claude-code headless only, all opt-in (#108):
                               bills to the compiled pin regardless.
 
 Re-entrancy control (#134):
-  WORK_DISPATCHED_ISSUE=<n>   issue number the current session was launched
-                              for; prevents recursive self-dispatch.
+  WORK_DISPATCHED_ISSUE=<list> colon-separated issue numbers in the current
+                              session's dispatch chain; prevents recursive
+                              self-dispatch.
 USAGE
 }
 
@@ -257,10 +259,14 @@ if has_label "hold"; then
     refuse "$(label_side hold) carries hold"
 fi
 
-# (b) self-dispatch re-entrancy (#134): a session must not dispatch the
-#     issue it was itself launched for.
-if [ -n "$WORK_DISPATCHED_ISSUE" ] && [ "$ISSUE" = "$WORK_DISPATCHED_ISSUE" ]; then
-    refuse "session was launched for #$ISSUE; refusing re-entrant dispatch"
+# (b) self-dispatch re-entrancy (#134): a session must not dispatch any
+#     issue in its dispatch chain.
+if [ -n "$WORK_DISPATCHED_ISSUE" ]; then
+    case ":$WORK_DISPATCHED_ISSUE:" in
+        *":$ISSUE:"*)
+            refuse "session was launched for #$ISSUE; refusing re-entrant dispatch"
+            ;;
+    esac
 fi
 
 # (c) humans have taken over.
@@ -297,12 +303,12 @@ elif grep -Fxq "intent:new" <<<"$issue_labels"; then
     # Filed but not yet on the ladder: the first rung is where work starts.
     stage="$(jq -r '.stages[0].stage' "$LIFECYCLE_JSON")"
 else
-    # Not on the ladder at all: a defect-repair issue (`bug`, no rung —
-    # its fix PR is the final stage, AGENTS.md) or a bare filing. Nothing
-    # is wrong with it; it is simply not a number this script works, so
-    # it is a refusal like the six above, not an error: unattended, the
-    # difference is a named green line versus a red check on every fix
-    # PR in the repository (#129).
+    # (f) not on the ladder at all (#129): a defect-repair issue (`bug`,
+    #     no rung — its fix PR is the final stage, AGENTS.md) or a bare
+    #     filing. Nothing is wrong with it; it is simply not a number
+    #     this script works, so it is a refusal like the five above, not
+    #     an error: unattended, the difference is a named green line
+    #     versus a red check on every fix PR in the repository (#129).
     refuse "cannot derive a stage for #$ISSUE: it carries no status:* label and no intent:new"
 fi
 
@@ -900,7 +906,7 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
         export "GIT_CONFIG_KEY_$((base + 3))=url.https://github.com/.insteadOf"
         export "GIT_CONFIG_VALUE_$((base + 3))=git@github.com:"
         export GIT_CONFIG_COUNT=$((base + 4))
-        export WORK_DISPATCHED_ISSUE="$ISSUE"
+        export WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:+$WORK_DISPATCHED_ISSUE:}$ISSUE"
         exec "${LAUNCH[@]}"
     )
 }
