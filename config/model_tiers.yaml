@@ -24,5 +24,13 @@ harnesses:
     FAST: gemini-3.8-flash-medium   # or -low; `agy models` lists runtime
     MECHANICAL: gemini-3.8-flash-high
     IMPLEMENTATION: gemini-3.8-flash-high
-    REVIEW: gemini-3.1-pro-high
-    FRONTIER: gemini-3.1-pro-high
+    # Pro (Low) with thinking, and the id is not a typo: `agy` serves a
+    # DIFFERENT catalog under ADC than under an account login, and
+    # `gemini-3.1-pro-high` exists only in the second one. A runner has
+    # no interactive login, so the workflow sets AGY_ADC_AUTH=true and
+    # atlas died in 17s on every dispatch against a pin that resolves
+    # perfectly on a laptop (#167). The ADC catalog serves exactly one
+    # Pro-tier id and this is it; no IAM grant or project change adds
+    # the other, because the catalog is chosen by auth mode.
+    REVIEW: gemini-3.1-pro-low-thinking
+    FRONTIER: gemini-3.1-pro-low-thinking

@@ -910,8 +910,11 @@ has "daedalus reported: ok" "D14: the later verdict wins"
 banner "#150 Antigravity dispatch writes cost and model to WORK_COST_FILE"
 : > "$LAUNCHES"; : > "$MINTS"
 cost_file="$WORK/cost.txt"
-# 100,000 input, 10,000 output, 5,000 thinking, 20,000 cache read
-# on daedalus (pinned to antigravity, model: gemini-3.1-pro-high).
+# 100,000 input, 10,000 output, 5,000 thinking, 20,000 cache read on
+# daedalus (pinned to antigravity, at whatever Pro-tier id config names
+# — read from the sidecar below, same reason as D9). The cost figure
+# survives a re-pin within the tier: session_spend.sh's gemini table
+# matches on family and version, not on the effort suffix.
 # Pro rates: input: 1.25, cache_read: 0.3125, output: 5.00
 # cost = (100000 * 1.25 + 20000 * 0.3125 + (10000 + 5000) * 5.00) / 1000000
 # cost = (125000 + 6250 + 75000) / 1000000 = 206250 / 1000000 = 0.206250
@@ -924,7 +927,10 @@ cost_line1="$(sed -n '1p' "$cost_file")"
 cost_line2="$(sed -n '2p' "$cost_file")"
 [ "$cost_line1" = "0.206250" ] || fail "#150: expected cost 0.206250, got '$cost_line1'"
 pass "#150: Antigravity dispatch calculates list-rate cost from .usage"
-[ "$cost_line2" = "gemini-3.1-pro-high" ] || fail "#150: expected model gemini-3.1-pro-high, got '$cost_line2'"
+pinned_model="$(sed -n 's/.*"model": "\([^"]*\)".*/\1/p' \
+                "$REPO/.agents/agents/daedalus/agent.json")"
+[ -n "$pinned_model" ] || fail "#150: no model in daedalus's compiled sidecar"
+[ "$cost_line2" = "$pinned_model" ] || fail "#150: expected model $pinned_model, got '$cost_line2'"
 pass "#150: Antigravity dispatch writes resolved model to line 2"
 
 # Missing usage truncates WORK_COST_FILE
