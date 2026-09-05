@@ -444,24 +444,24 @@ first `:` or `;`, lowercased, runs of other characters to `-`, ≤24
 characters at a word boundary); the branch `<persona>/<n>-<slug>`;
 and the harness from `config/deployments.yaml`. There is deliberately
 no flag naming a stage, folder, artifact or branch — one would let a
-session work a stage the labels say is not current. Seven refusals,
+session work a stage the labels say is not current. Eight refusals,
 checked in order before anything is dispatched and each exiting 2
-with the condition named: `hold`; closed, or `status:review-stuck`;
-`blocked`; more than one `status:*` (reported, never guessed, and
-never `hold`-ed — the advancer is the single writer of the circuit
-breaker); a number on no rung at all — no `status:*` and no
-`intent:new`, which is every defect-repair issue, whose fix pull
-request is the final stage and has no reviewer rung before merge
-(#129; it was an error before, one red reviewer check per fix pull
-request); `in-progress` claimed by another actor; and `--as` naming a
-persona that does not own the stage. When the number given is a pull
-request, those refusals read the UNION of the pull request's own labels
-and the resolved issue's — a `hold` on either side refuses, and the
-message names the side that carries it, or both sides when both do,
-because the circuit breaker is
-placed where the operator is looking and resolving to the issue must
-not discard it (#50, Atlas AT-1, PR #95; both sides, PR #99). The
-stage is not part of that
+with the condition named: `hold`; a dispatch targeting any issue in
+the session's dispatch chain (re-entrant self-dispatch, #134);
+closed, or `status:review-stuck`; `blocked`; more than one
+`status:*` (reported, never guessed, and never `hold`-ed — the
+advancer is the single writer of the circuit breaker); a number on no
+rung at all — no `status:*` and no `intent:new`, which is every
+defect-repair issue, whose fix pull request is the final stage and has
+no reviewer rung before merge (#129; it was an error before, one red
+reviewer check per fix pull request); `in-progress` claimed by another
+actor; and `--as` naming a persona that does not own the stage. When
+the number given is a pull request, those refusals read the UNION of the
+pull request's own labels and the resolved issue's — a `hold` on either
+side refuses, and the message names the side that carries it, or both
+sides when both do, because the circuit breaker is placed where the
+operator is looking and resolving to the issue must not discard it (#50,
+Atlas AT-1, PR #95; both sides, PR #99). The stage is not part of that
 union:
 it is derived from the issue's labels alone, since the state machine
 belongs to the unit of work and a `status:*` label on a pull request
