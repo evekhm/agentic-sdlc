@@ -32,6 +32,21 @@
 
 set -euo pipefail
 
+# Hermetic against the launcher this suite tests. `launch_child()`
+# exports GIT_CONFIG_COUNT and GIT_CONFIG_KEY/VALUE_0..3 into every
+# session it starts, so a persona running these tests from inside a
+# launched session hands the stub child an OFFSET install and the
+# fixed-name assertions miss — one spurious `FAIL: D13: the credential
+# helper was not installed in the child`, for a difference in the
+# caller's environment rather than in the tree (Argus #164 R2-1). That
+# is now the normal way this suite runs: the runner work reviewers do
+# starts by running the repository's own gates. The AT-7 scenario sets
+# these deliberately and is unaffected — it exports them itself, after
+# this scrub.
+unset GIT_CONFIG_COUNT
+for _i in 0 1 2 3 4 5 6 7; do unset "GIT_CONFIG_KEY_$_i" "GIT_CONFIG_VALUE_$_i"; done
+unset _i
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_SH="$REPO/scripts/ops/work.sh"
 WORK="$(mktemp -d)"

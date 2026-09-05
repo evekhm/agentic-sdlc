@@ -787,16 +787,27 @@ bypassed, because a gate whose only answer is a prompt has nobody to
 prompt and denies every read the persona was dispatched to make — down
 to the `hold` re-read that trusted posting requires before any write,
 so a gated reviewer cannot review AND must not post. What bounds the
-persona instead is what the runner holds: the job's own token cannot
-write, the App installation token is the single write credential and
-lives an hour, the persona's App private key is unset before the launch
-so a session inherits the hour and not the App, and the placement is
-the boundary of the grant — the bypass is the `gh-actions` adapter's,
-never `HEADLESS`'s, because a headless session on an operator's machine
-has a human at the keyboard. Moving the credential file out of the
-checkout is a defence against the workspace, not against the persona:
-a bypassed session reads any path the runner can, and the file's value
-is that it is short-lived and predict-only, not that it is hidden. Federation is provisioned once per repository by
+persona is therefore not the gate but what the runner holds: the job's
+own token cannot write, the App installation token is the single write
+credential and lives an hour, and the placement is the boundary of the
+grant — the bypass is the `gh-actions` adapter's, never `HEADLESS`'s,
+because a headless session on an operator's machine has a human at the
+keyboard.
+
+Two things a bypassed session can reach anyway, both stated because
+they are measured rather than feared. The cloud credential file is
+moved out of the checkout as a defence against the workspace, not
+against the persona: a bypassed session reads any path the runner can,
+and the file's value is that it is short-lived and predict-only, not
+that it is hidden. The persona's App private key is unset before the
+launch, so the session does not INHERIT it — but `/proc/<pid>/environ`
+is fixed at `exec` and no later unset can reach it, so the key stays
+readable from the launcher's own live process for as long as it runs.
+Withholding it in full needs the mint to happen in a process that has
+exited before the session starts; until it does, the bound on the key
+is the runner's lifetime, and this paragraph does not claim otherwise.
+
+Federation is provisioned once per repository by
 `scripts/setup/wif_setup.sh` (pool, provider, least-privilege service
 account, predict-only role, the repository-scoped impersonation binding,
 and the repository variables the workflow reads), idempotently and with
