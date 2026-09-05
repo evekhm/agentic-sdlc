@@ -510,18 +510,31 @@ harness's stock agent under a persona's name — and so is a harness
 binary, or `timeout` itself, that is not on `PATH`.
 
 An unattended runner has no interactive login, so it authenticates
-`agy` by ADC (`AGY_ADC_AUTH=true`) — and that choice narrows what can
-be pinned, because `agy` serves a DIFFERENT model catalog under ADC
-than under an account login. Every antigravity binding in
-`config/model_tiers.yaml` must therefore name an id the ADC catalog
-serves; a pin that resolves perfectly on a maintainer's laptop can
-still kill every dispatch on the runner, which is how atlas came to
-die in 17 seconds on each of its review rounds (#167). This is a
-property of the auth mode alone: no IAM grant, project change or
-region widens the catalog, and the failure is invisible to every gate
-that does not actually launch the harness, so re-pinning antigravity
-means checking the pin against `agy models` under ADC — not under the
-login the person doing the re-pin happens to hold.
+`agy` by ADC (`AGY_ADC_AUTH=true`), and `agy` does not carry a model
+list: it FETCHES its catalog at startup from
+`cloudcode-pa.googleapis.com`, an API distinct from the Vertex
+endpoint the models themselves are served on. Both must therefore
+work, and today only one does. The runner's federated service account
+holds `aiplatform.endpoints.predict`, which is why argus runs; the
+catalog call returns `403 SERVICE_DISABLED` because Cloud Code Private
+API is not enabled on the project, `agy` reports `timed out waiting
+for available models`, and with an empty catalog it rejects EVERY
+`--model` value as "not recognized as a known model or custom model in
+settings". That is why atlas died in seventeen seconds on every review
+round it was ever dispatched for (#167), and no pin fixes it: with no
+catalog there is no id that resolves. Enabling that API is a human
+action — it needs `servicemanagement.services.bind`, which neither the
+runner nor a maintainer account here holds.
+
+The pin still matters, for the case where the catalog is reachable:
+`agy` serves a narrower list under ADC than under an account login,
+and where it answers at all it offers exactly one Pro-tier id, so an
+antigravity binding in `config/model_tiers.yaml` that names anything
+else resolves on a laptop and not on a runner. Both properties are
+invisible to every gate short of one that actually launches the
+harness — a schema check sees a well-formed string, and a placement
+check sees no model literal — so an antigravity re-pin is verified by
+a live dispatch or it is not verified.
 
 Every MODE is an environment variable, for the same reason argv is
 closed: `DRY_RUN=1` prints the resolved launch command instead of

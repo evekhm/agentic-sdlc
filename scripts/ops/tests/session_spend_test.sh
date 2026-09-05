@@ -320,7 +320,7 @@ msg "$T10/g_flash_38.jsonl" 2026-08-20T10:00:00.000Z gemini-3.8-flash-high 10000
 msg "$T10/g_flash_med.jsonl" 2026-08-20T10:00:00.000Z gemini-3.8-flash-medium 1000000 0 0 0 0
 msg "$T10/g_flash_15.jsonl" 2026-08-20T10:00:00.000Z gemini-1.5-flash 1000000 0 0 0 0
 # Pro models: 1M input = $1.25, 1M output = $5.00, 1M cache read = $0.3125 -> total $6.5625 -> rounded $6.56
-msg "$T10/g_pro_31.jsonl" 2026-08-20T10:00:00.000Z gemini-3.1-pro-high 1000000 1000000 0 0 1000000
+msg "$T10/g_pro_31.jsonl" 2026-08-20T10:00:00.000Z gemini-3.1-pro-low-thinking 1000000 1000000 0 0 1000000
 msg "$T10/g_pro_15.jsonl" 2026-08-20T10:00:00.000Z gemini-1.5-pro 1000000 0 0 0 0
 # Unknown Gemini versions: unpriced
 msg "$T10/g_unk.jsonl" 2026-08-20T10:00:00.000Z gemini-9.9-flash 1000000 0 0 0 0
@@ -330,7 +330,7 @@ gemini_out=$("$SCRIPT" "$T10" --out "$WORK/o14")
 is_usd "$gemini_out" gemini-3.8-flash-high 0.79 "Gemini 3.8 Flash High prices at 0.15/0.60/0.0375 (1M in + 1M out + 1M read = 0.79)"
 is_usd "$gemini_out" gemini-3.8-flash-medium 0.15 "Gemini 3.8 Flash Medium prices 1M input at 0.15"
 is_usd "$gemini_out" gemini-1.5-flash 0.15 "Gemini 1.5 Flash prices 1M input at 0.15"
-is_usd "$gemini_out" gemini-3.1-pro-high 6.56 "Gemini 3.1 Pro High prices at 1.25/5.00/0.3125 (1M in + 1M out + 1M read = 6.56)"
+is_usd "$gemini_out" gemini-3.1-pro-low-thinking 6.56 "Gemini 3.1 Pro prices at 1.25/5.00/0.3125 (1M in + 1M out + 1M read = 6.56), effort suffix and all"
 is_usd "$gemini_out" gemini-1.5-pro 1.25 "Gemini 1.5 Pro prices 1M input at 1.25"
 is_usd "$gemini_out" gemini-9.9-flash 0.00 "Unknown Gemini version is unpriced"
 is_usd "$gemini_out" gemini 0.00 "Bare gemini alias is unpriced"
