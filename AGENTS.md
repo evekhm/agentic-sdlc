@@ -24,24 +24,18 @@ The tracker loop (detailed under "Working the tracker" below), in the
 order it happens. Every session, every harness, before the first
 edit. The never-list at the end is absolute.
 
-1. **Issue open and claimable.** Verify the issue is *open*, has no
-   `in-progress`, no `hold`, and closed dependencies. Pointed at a
-   closed issue? It is not a work item: file a follow-up ("Before
-   filing an issue" below) and work that. Never reuse a closed
-   issue's number for a branch, a PR or a handoff.
-2. **Claim.** Add `in-progress` and post the one-line claim comment:
-   who, which session, which stage, which worktree path.
-3. **Your own worktree.** Create it from `origin/main` on
-   `<actor>/<issue>-<slug>` and do every edit and commit there. The
-   primary checkout is read-only reference — except its `runs/`,
-   which is the one shared run root for every session ("Outputs go
-   in timestamped run folders" below); never write `runs/` inside a
-   worktree.
-4. **Read the chain.** AGENTS.md → INTENT.md → docs/SPEC.md → the
+1. **Claim and create worktree.** Run `scripts/ops/claim.sh <issue>`. This verifies the issue is claimable, posts the claim comment, and creates your worktree. **By-hand fallback** (if the script fails):
+   - *Verify:* The issue must be open, have no `in-progress`, no `hold`, and closed dependencies. Pointed at a closed issue? It is not a work item: file a follow-up ("Before filing an issue" below) and work that. Never reuse a closed issue's number.
+   - *Claim:* Add `in-progress` and post the one-line claim comment: who, which session, which stage, which worktree path.
+   - *Worktree:* Create it from `origin/main` on `<actor>/<issue>-<slug>`. If an `intent/<issue>-*/` folder exists, the branch slug MUST be that folder's slug. Do every edit and commit there. The primary checkout is read-only reference — except its `runs/`, which is the one shared run root for every session ("Outputs go in timestamped run folders" below); never write `runs/` inside a worktree.
+2. **Read the chain.** AGENTS.md → INTENT.md → docs/SPEC.md → the
    issue thread bottom-up.
-5. **Produce the stage's artifact, commit by path, open a PR.** A
-   bare push is not a delivery; a human merges.
-6. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
+3. **Produce the stage's artifact, commit by path, open a PR.** A
+   bare push is not a delivery; a human merges. After a workflow-file
+   change merges, failed PR checks need a rebase onto main, never
+   `gh run rerun` (a `pull_request` run executes against the head+base
+   merge ref, so the stale ref reruns identically).
+4. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
    pausing, drop `in-progress`; after the merge, remove your worktree.
 
 Never: commit, stage, stash or checkout in the primary checkout; work

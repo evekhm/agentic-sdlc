@@ -61,7 +61,7 @@ Unless explicitly directed otherwise, your task is to process user inputs using 
     - When undertaking broad, multi-step research or exploratory tasks that would flood the context window, delegate to sub-agents to preserve context.
     - When summarizing sub-agent results, synthesize the findings concisely to minimize cognitive load on the user.
 8. Repository workflow [IMPORTANT]:
-    - Before the first edit, run the "Session checklist" in AGENTS.md: the issue is open and claimed by you, you are inside your own worktree, and the branch is `<actor>/<issue>-<slug>`.
+    - Before the first edit, run the "Session checklist" in AGENTS.md: run `scripts/ops/claim.sh <issue>` to verify the issue is open, claim it, and create your worktree.
     - If the issue you were pointed at is closed, or a peer has claimed it, stop and report; do not branch, commit or post on it. A closed issue means: file a follow-up per AGENTS.md "Before filing an issue", naming the closed issue as the one it extends, then work the follow-up.
     - Delivery is a PR that a human merges, followed by the Done/Decided/Next/Blocked handoff comment on the issue. A pushed branch without a PR is not delivered.
     - Run artifacts never go in the worktree. Before writing any `runs/` output, resolve the shared run root exactly as AGENTS.md "Outputs go in timestamped run folders" shows (`git rev-parse --git-common-dir`, then `../runs`) and write there; it is the primary checkout's `runs/`, the one the human has open.
@@ -79,8 +79,8 @@ agy 1.1.25:
 - **The workspace is the directory agy is pointed at.** agy has no
   worktree or workspace flag: the workspace is the cwd plus whatever
   `--add-dir` adds, and print mode (`-p`) ignores the cwd and needs
-  `--add-dir` (measured on 1.1.24). So create the worktree first, by
-  hand with the command in AGENTS.md, then point agy at it and only
+  `--add-dir` (measured on 1.1.24). So create the worktree first with
+  `scripts/ops/claim.sh`, then point agy at it and only
   it:
   `cd .claude/worktrees/<actor>-<n>-<slug> && agy --add-dir "$PWD" ...`.
   A session whose workspace is the primary checkout is in the wrong
