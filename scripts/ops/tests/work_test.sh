@@ -112,6 +112,7 @@ echo "claude-saw-pwd=$PWD" >> "$LAUNCHES"
 echo "claude-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
 echo "claude-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
 echo "claude-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
+echo "claude-saw-WORK_DISPATCHED_ISSUE=${WORK_DISPATCHED_ISSUE:-none}" >> "$LAUNCHES"
 # D15's "inherits … the terminal", made measurable (PR #60, R2-1). An
 # interactive harness does two things this stub otherwise never did: it
 # asks the terminal who its foreground process group is, and it puts the
@@ -162,6 +163,7 @@ echo "agy-saw-pwd=$PWD" >> "$LAUNCHES"
 echo "agy-saw-helper-reset=${GIT_CONFIG_VALUE_1-unset}" >> "$LAUNCHES"
 echo "agy-saw-helper=${GIT_CONFIG_VALUE_2:-none}" >> "$LAUNCHES"
 echo "agy-saw-insteadOf=${GIT_CONFIG_VALUE_3:-none}" >> "$LAUNCHES"
+echo "agy-saw-WORK_DISPATCHED_ISSUE=${WORK_DISPATCHED_ISSUE:-none}" >> "$LAUNCHES"
 # Every GIT_CONFIG_* the child actually inherited, so an offset install
 # (AT-7) can be asserted by index rather than by the fixed names above.
 env | grep '^GIT_CONFIG_' | sed 's/^/agy-saw-env-/' >> "$LAUNCHES" || true
@@ -265,6 +267,7 @@ run() {
   shift 3  # drop want, name and the literal --
   set +e
   OUT="$(DRY_RUN="${DRY:-1}" HEADLESS="${HL:-0}" WORK_COST_FILE="${WORK_COST_FILE:-}" \
+    WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:-}" \
     "${TREE:-$REPO}/scripts/ops/work.sh" "$@" 2>&1)"
   rc=$?
   set -e
@@ -286,7 +289,7 @@ run() {
 run_tty() {
   local want="$1" name="$2" rc=0 cmd a
   shift 3  # drop want, name and the literal --
-  cmd="DRY_RUN=${DRY:-1} HEADLESS=${HL:-0} $(printf '%q' "${TREE:-$REPO}/scripts/ops/work.sh")"
+  cmd="DRY_RUN=${DRY:-1} HEADLESS=${HL:-0} WORK_DISPATCHED_ISSUE=${WORK_DISPATCHED_ISSUE:-} $(printf '%q' "${TREE:-$REPO}/scripts/ops/work.sh")"
   for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
   set +e
   OUT="$(script -qec "$cmd" /dev/null 2>&1)"
@@ -573,6 +576,27 @@ pr 141 "Closes #140" "eva/140-unattended-cryptography"
 run 2 "#129: the fix pull request resolves to the bug issue and exits 2" -- 141 --as atlas
 has "refused: cannot derive a stage for #140" "#129: the refusal names the resolved issue, not the pull request"
 
+banner "#134 self-dispatch re-entrancy refusal"
+# A session must not dispatch the issue it was itself launched for (#134).
+# When WORK_DISPATCHED_ISSUE matches the target issue, work.sh refuses
+# with exit 2 and a clear message, attempting no write and launching nothing.
+issue 144 open "status:build" "Refuse self-dispatch re-entrancy"
+WORK_DISPATCHED_ISSUE=144 run 2 "#134: dispatch targeting the same issue exits 2" -- 144
+has "refused: session was launched for #144; refusing re-entrant dispatch" \
+  "#134: the refusal names the issue and explains re-entrancy"
+[ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "#134: something was launched or written"; }
+pass "#134: no session was launched and no write was attempted"
+
+# The refusal catches a pull request that resolves to the dispatched issue
+pr 145 "Closes #144" "odyssey/144-dispatch-reentrancy"
+WORK_DISPATCHED_ISSUE=144 run 2 "#134: pull request resolving to dispatched issue exits 2" -- 145
+has "refused: session was launched for #144; refusing re-entrant dispatch" \
+  "#134: the refusal names the resolved issue, not the pull request"
+
+# A dispatch targeting a different issue proceeds
+WORK_DISPATCHED_ISSUE=144 run 0 "#134: dispatch targeting a different issue proceeds" -- 112 --as argus
+has "--> argus" "#134: different issue resolved normally"
+
 banner "#43 D1/D5/D6/D9 the antigravity row is real, and always headless"
 # The #36 suite used this stage as its "unlaunchable harness" case.
 # There IS a row now, so the scenario splits: this half asserts the row,
@@ -832,6 +856,9 @@ TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" \
 grep -qF "agy-saw-GH_TOKEN=stub-token-for-daedalus" "$LAUNCHES" \
   || { cat "$LAUNCHES" >&2; fail "D12: the child did not see the minted token"; }
 pass "D12: the child saw the minted token, not the operator's ambient one"
+grep -qF "agy-saw-WORK_DISPATCHED_ISSUE=113" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "#134: the child did not see WORK_DISPATCHED_ISSUE"; }
+pass "#134: the child saw WORK_DISPATCHED_ISSUE set to the dispatched issue"
 grep -qF "agy-saw-helper=$T/scripts/auth/git-credential-persona daedalus" "$LAUNCHES" \
   || { cat "$LAUNCHES" >&2; fail "D13: the credential helper was not installed in the child"; }
 pass "D13: the child's git is pointed at the re-minting credential helper"
@@ -1101,6 +1128,9 @@ pass "D11: the interactive row's stdout+stderr under bash -x carries no token"
 grep -qF "claude-saw-GH_TOKEN=stub-token-for-odyssey" "$LAUNCHES" \
   || { cat "$LAUNCHES" >&2; fail "D11: the interactive child never got the token"; }
 pass "D11: the interactive child got the token too, and the trace did not"
+grep -qF "claude-saw-WORK_DISPATCHED_ISSUE=130" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "#134: the interactive child did not see WORK_DISPATCHED_ISSUE"; }
+pass "#134: the interactive child saw WORK_DISPATCHED_ISSUE set to the dispatched issue"
 
 banner "#43 AT-7 an inherited GIT_CONFIG_* set is extended, not overwritten"
 # A caller that already installs `http.proxy` or `safe.directory` through

@@ -57,8 +57,8 @@
 #      (a dry run, an unlaunchable harness, or a multi-owner stage that
 #      deliberately launches nothing)
 #   2  the number was NOT WORKED, BY DESIGN — either this script refused
-#      (one of the six D5 conditions, or a number on no rung, #129) or
-#      the launched persona itself
+#      (one of the eight refusal conditions: re-entrancy #134, the six D5
+#      conditions, or a number on no rung #129) or the launched persona itself
 #      reported `WORK-RESULT: refused|blocked`. One code, because a
 #      caller asks whether the number was worked, not which layer
 #      declined (#43, D23).
@@ -83,10 +83,14 @@ HEADLESS="${HEADLESS:-0}"
 #                         actually billed to (line 2) are written to,
 #                         so a caller can meter without scanning transcripts
 #   WORK_MODEL            re-tier ONE dispatch without a compiler run
+# Re-entrancy control (#134).
+#   WORK_DISPATCHED_ISSUE issue number the current session was launched for;
+#                         refuses re-entrant dispatch of the same issue.
 WORK_MAX_USD="${WORK_MAX_USD:-}"
 WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
 WORK_COST_FILE="${WORK_COST_FILE:-}"
 WORK_MODEL="${WORK_MODEL:-}"
+WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:-}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GITHUB_LIB="$REPO_ROOT/scripts/ops/lib/github.sh"
@@ -131,6 +135,10 @@ Unattended-run controls, claude-code headless only, all opt-in (#108):
                               model: line the compiler writes into the
                               persona's agent file, so a run set that way
                               bills to the compiled pin regardless.
+
+Re-entrancy control (#134):
+  WORK_DISPATCHED_ISSUE=<n>   issue number the current session was launched
+                              for; prevents recursive self-dispatch.
 USAGE
 }
 
@@ -249,7 +257,13 @@ if has_label "hold"; then
     refuse "$(label_side hold) carries hold"
 fi
 
-# (b) humans have taken over.
+# (b) self-dispatch re-entrancy (#134): a session must not dispatch the
+#     issue it was itself launched for.
+if [ -n "$WORK_DISPATCHED_ISSUE" ] && [ "$ISSUE" = "$WORK_DISPATCHED_ISSUE" ]; then
+    refuse "session was launched for #$ISSUE; refusing re-entrant dispatch"
+fi
+
+# (c) humans have taken over.
 if [ "$state" != "open" ]; then
     refuse "#$ISSUE is closed"
 fi
@@ -257,12 +271,12 @@ if has_label "status:review-stuck"; then
     refuse "$(label_side status:review-stuck) carries status:review-stuck"
 fi
 
-# (c) blocked is a report-and-stop, not a wait.
+# (d) blocked is a report-and-stop, not a wait.
 if has_label "blocked"; then
     refuse "$(label_side blocked) carries blocked"
 fi
 
-# (d) more than one status:* is a corrupted state machine. Report the
+# (e) more than one status:* is a corrupted state machine. Report the
 #     labels and stop: never guess which is true, and never apply `hold`
 #     either — the stage advancer is the single writer of the circuit
 #     breaker, and two writers is two circuit breakers (#4, D1).
@@ -336,7 +350,7 @@ persona_for_login() { # <login> -> persona name, or empty
     return 0
 }
 
-# (e) in-progress held by somebody else. The holder is the AUTHOR of the
+# (g) in-progress held by somebody else. The holder is the AUTHOR of the
 #     last claim comment, mapped through the identity table in
 #     personas/*.yaml — never a name read out of the comment body. A body
 #     is an unauthenticated string, and reading an actor out of it lets
@@ -353,7 +367,7 @@ persona_for_login() { # <login> -> persona name, or empty
 #     work and proceeds; when `--as` names one owner the mutex binds
 #     against that actor alone, since atlas holding the claim is a
 #     different actor from argus even though both own review. `--as` is
-#     itself validated against the stage's owners by (f) below, which
+#     itself validated against the stage's owners by (h) below, which
 #     leaves D5's refusal ORDER as written.
 #     The label alone is enough to stop: `in-progress` whose thread
 #     carries no structured claim is a mutex that names nobody, and
@@ -392,7 +406,7 @@ if has_label "in-progress"; then
         || refuse "in-progress on $held_on is held by $claim_holder"
 fi
 
-# (f) --as must name an owner of the stage the labels say is current.
+# (h) --as must name an owner of the stage the labels say is current.
 if [ -n "$AS" ] && ! grep -Fxq "$AS" <<<"$owners"; then
     refuse "$AS does not own stage $stage (owners: $(tr '\n' ' ' <<<"$owners"))"
 fi
@@ -886,6 +900,7 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
         export "GIT_CONFIG_KEY_$((base + 3))=url.https://github.com/.insteadOf"
         export "GIT_CONFIG_VALUE_$((base + 3))=git@github.com:"
         export GIT_CONFIG_COUNT=$((base + 4))
+        export WORK_DISPATCHED_ISSUE="$ISSUE"
         exec "${LAUNCH[@]}"
     )
 }
