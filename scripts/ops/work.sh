@@ -748,6 +748,17 @@ identity_of() { # <persona> -> the App login it posts as, or empty
     [ -f "$file" ] || return 0
     sed -n 's/^[[:space:]]*identity:[[:space:]]*"\(.*\)".*/\1/p' "$file" | head -1
 }
+
+# The NAME of the variable holding the App's private key — never its
+# value, which this script reads only by handing the name to the minter.
+# Unquoted in the persona files (`token: ARGUS_APP_PRIVATE_KEY`), so the
+# pattern is deliberately not identity_of's.
+token_var_of() { # <persona> -> the env var name of its App private key, or empty
+    local file="$PERSONA_DIR/$1.yaml"
+    [ -f "$file" ] || return 0
+    sed -n 's/^[[:space:]]*token:[[:space:]]*"\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+        "$file" | head -1
+}
 echo "    identity: $(identity_of "$launch_persona") (token minted at launch; not printed)"
 
 if [ "$DRY_RUN" = "1" ]; then
@@ -876,6 +887,19 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
     local base="${GIT_CONFIG_COUNT:-0}"
     case "$base" in ''|*[!0-9]*) base=0 ;; esac
     (
+        # The child gets the one-hour installation token and NEVER the
+        # App's private key. By the time this runs the mint has already
+        # happened, so the PEM has no remaining use inside the session —
+        # while its blast radius is every installation of the App and
+        # its rotation is a human clicking in the GitHub UI, against the
+        # token's one hour and single repository. Argus found it holding
+        # the live key in its own environment on a runner (#164 R1-1),
+        # which is only reachable at all because the harness permission
+        # gate is bypassed there (#163); this is the half of that grant
+        # a launcher can take back unilaterally, and it costs nothing.
+        local key_var
+        key_var="$(token_var_of "$launch_persona")"
+        [ -z "$key_var" ] || unset "$key_var"
         export GH_TOKEN="$tok" GITHUB_TOKEN="$tok"
         export "GIT_CONFIG_KEY_$base=credential.helper"
         export "GIT_CONFIG_VALUE_$base="

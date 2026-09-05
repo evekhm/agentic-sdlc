@@ -780,8 +780,23 @@ script with `resolve`, `install` and `check`, cached by version, the
 same command an operator runs on a new machine) and it authenticates
 through workload identity federation — the job's one grant beyond read
 is `id-token: write`, no cloud key is stored, and the credential file
-the auth step writes is moved out of the checkout before any persona
-can read it. Federation is provisioned once per repository by
+the auth step writes is moved out of the checkout.
+
+A persona launched on a runner runs with its harness's permission gate
+bypassed, because a gate whose only answer is a prompt has nobody to
+prompt and denies every read the persona was dispatched to make — down
+to the `hold` re-read that trusted posting requires before any write,
+so a gated reviewer cannot review AND must not post. What bounds the
+persona instead is what the runner holds: the job's own token cannot
+write, the App installation token is the single write credential and
+lives an hour, the persona's App private key is unset before the launch
+so a session inherits the hour and not the App, and the placement is
+the boundary of the grant — the bypass is the `gh-actions` adapter's,
+never `HEADLESS`'s, because a headless session on an operator's machine
+has a human at the keyboard. Moving the credential file out of the
+checkout is a defence against the workspace, not against the persona:
+a bypassed session reads any path the runner can, and the file's value
+is that it is short-lived and predict-only, not that it is hidden. Federation is provisioned once per repository by
 `scripts/setup/wif_setup.sh` (pool, provider, least-privilege service
 account, predict-only role, the repository-scoped impersonation binding,
 and the repository variables the workflow reads), idempotently and with
