@@ -422,7 +422,8 @@ tokens-per-message. It prices both Claude and Gemini models against
 official list rates (Anthropic and Google Cloud Vertex AI rates effective
 2026-09-04), ingests Antigravity dispatch JSON envelopes alongside
 Claude transcript logs, and reports unpriced models with explicit
-warnings and non-zero unpriced token counts (PR #161).
+warnings and non-zero unpriced token counts, suppresses the TOTAL spend
+line, and exits with a non-zero status to fail loudly (PR #177).
 Tests: `scripts/ops/tests/session_spend_test.sh`.
 
 ### ops.dispatch
