@@ -47,6 +47,14 @@ if [ "${1:-}" = "api" ] && [ "$#" -eq 2 ]; then
   exit 0
 fi
 printf '%s\n' "$*" >> "$WRITES"
+if [ "$1" = "api" ]; then
+  if [[ "$*" == *"/comments"* && "$*" == *"--method POST"* ]]; then
+    if [ -f "$FIXTURES/post_response.json" ]; then
+      cat "$FIXTURES/post_response.json"
+      exit 0
+    fi
+  fi
+fi
 echo '{}'
 STUB
 chmod +x "$WORK/bin/gh"
@@ -270,3 +278,42 @@ no_writes "bad arguments never reach GitHub"
 
 echo
 echo "claim_test.sh: all scenarios passed"
+
+banner "identity tests: human fallback warns loudly"
+mkdir -p "$PRIMARY/personas"
+mkdir -p "$PRIMARY/scripts/auth"
+cat > "$PRIMARY/scripts/auth/mint_app_token.py" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$PRIMARY/scripts/auth/mint_app_token.py"
+echo '{"login": "human-login"}' > "$FIXTURES/user.json"
+issue 113 open "" "Human issue"
+: > "$WRITES"
+DRY=0 run 0 "human fallback warns loudly" -- 113
+has "warning: no persona credentials available for tester; claiming as human-login" "human fallback: warns loudly"
+has "warning: unattended reviewers will refuse this PR!" "human fallback: gives the warning about reviewers"
+rm "$FIXTURES/user.json"
+
+banner "identity tests: author mismatch fails closed"
+cat > "$PRIMARY/personas/tester.yaml" <<'YAML'
+authority:
+  identity: "expected-bot"
+YAML
+cat > "$PRIMARY/scripts/auth/mint_app_token.py" <<'STUB'
+#!/usr/bin/env bash
+echo "v1.minted-token"
+STUB
+echo '{"user": {"login": "wrong-bot"}, "html_url": "https://github.com/test/repo/issues/114#issuecomment-123"}' > "$FIXTURES/post_response.json"
+issue 114 open "" "Mismatch issue"
+: > "$WRITES"
+DRY=0 run 1 "mismatch fails closed" -- 114
+has "the comment on #114 was posted by 'wrong-bot', but CLAIM_ACTOR says 'tester', whose personas/tester.yaml names 'expected-bot'" "mismatch: fails with expected message"
+
+banner "identity tests: persona path posts as the App identity"
+echo '{"user": {"login": "expected-bot"}, "html_url": "https://github.com/test/repo/issues/115#issuecomment-124"}' > "$FIXTURES/post_response.json"
+issue 115 open "" "Match issue"
+: > "$WRITES"
+DRY=0 run 0 "match succeeds" -- 115
+grep -qF 'api --method POST repos/test/repo/issues/115/comments -f body=Claim: tester (test-session), stage: implement. Worktree: .claude/worktrees/tester-115-match-issue' "$WRITES" \
+  && pass "match: comment was posted" || fail "match: comment was not posted"
