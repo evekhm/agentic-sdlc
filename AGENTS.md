@@ -87,6 +87,14 @@ document.
    session.* The persona's compiled instructions for this harness
    govern role behavior (protocol, authority, tier); this file still
    binds everything else.
+6. **docs/PLAYBOOK.md** — *how the current backlog-closeout exercise
+   is run and where to pick up.* The operating loop (dispatch prompt
+   files, independent verification, fix rounds), which issues to pick
+   when resuming, the YOLO on/off target, and the field notes behind
+   the rules. Read it before choosing work in any session joining the
+   exercise. Not the same document as docs/BLOG.md below: BLOG.md is
+   the design narrative this system implements; PLAYBOOK.md is the
+   hands-on operating guide.
 
 Reference material, read on demand rather than at session start:
 docs/BLOG.md (the playbook this system implements) and
