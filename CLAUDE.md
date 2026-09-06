@@ -49,7 +49,12 @@ tracker"). This harness adds the tooling:
   on top of `git worktree list` and the issue's claim comment. If a
   peer already holds the issue, SendMessage that session and stand
   down; report to the user instead of duplicating.
-- **Claim and worktree:** run `scripts/ops/claim.sh <issue> "<actor> (<session-name>)"`. This verifies the issue, claims it (include your session name from ListAgents so peers can find and message you), and creates your worktree. Subagents
+- **Claim and worktree:** run `CLAIM_ACTOR=<persona> CLAIM_SESSION=<name>
+  scripts/ops/claim.sh <issue> [<slug>]`. This verifies the issue, claims it
+  (include your session name from ListAgents so peers can find and message
+  you), and creates your worktree. **By-hand fallback:** launch the session
+  with `claude -w <name>`, call EnterWorktree, or run the by-hand command
+  from AGENTS.md. Subagents
   dispatched with `isolation: "worktree"` get their own worktree
   automatically; do not point them at yours. A subagent's worktree
   shows as `locked:pid-live` in the report while it runs and
