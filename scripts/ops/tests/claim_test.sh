@@ -22,11 +22,13 @@ trap 'rm -rf "$WORK"' EXIT
 
 FIXTURES="$WORK/fixtures"
 WRITES="$WORK/writes.log"
+CALLS="$WORK/calls.log"
 mkdir -p "$FIXTURES" "$WORK/bin"
 : > "$WRITES"
+: > "$CALLS"
 
 export GITHUB_REPO="test/repo"
-export FIXTURES WRITES
+export FIXTURES WRITES CALLS
 export PATH="$WORK/bin:$PATH"
 export CLAIM_ACTOR=tester CLAIM_SESSION=test-session CLAIM_STAGE=implement
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
@@ -40,6 +42,7 @@ cat > "$WORK/bin/gh" <<'STUB'
 # `gh api <path>` is a read and is answered from a fixture. Anything
 # else is a write: it is logged verbatim and reported as success, so a
 # test can assert on exactly what would have reached GitHub.
+printf '%s\n' "$*" >> "$CALLS"
 if [ "${1:-}" = "api" ] && [ "$#" -eq 2 ]; then
   file="$FIXTURES/${2//\//_}.json"
   [ -f "$file" ] || { echo "stub gh: no fixture for $2" >&2; exit 1; }
@@ -47,6 +50,14 @@ if [ "${1:-}" = "api" ] && [ "$#" -eq 2 ]; then
   exit 0
 fi
 printf '%s\n' "$*" >> "$WRITES"
+if [ "$1" = "api" ]; then
+  if [[ "$*" == *"/comments"* && "$*" == *"--method POST"* ]]; then
+    if [ -f "$FIXTURES/post_response.json" ]; then
+      cat "$FIXTURES/post_response.json"
+      exit 0
+    fi
+  fi
+fi
 echo '{}'
 STUB
 chmod +x "$WORK/bin/gh"
@@ -270,3 +281,37 @@ no_writes "bad arguments never reach GitHub"
 
 echo
 echo "claim_test.sh: all scenarios passed"
+
+banner "identity tests: human fallback is silent and skips read-back"
+mkdir -p "$PRIMARY/personas"
+rm -f "$PRIMARY/personas/tester.yaml"
+issue 113 open "" "Human issue"
+: > "$WRITES"
+: > "$CALLS"
+DRY=0 run 0 "human fallback is silent" -- 113
+hasnt "warning: no persona credentials" "human fallback: no warning"
+if grep -qF "api user" "$CALLS"; then
+  cat "$CALLS" >&2; fail "human fallback: user API call made"
+else
+  pass "human fallback: no user API call"
+fi
+
+banner "identity tests: author mismatch fails closed"
+cat > "$PRIMARY/personas/tester.yaml" <<'YAML'
+authority:
+  identity: "expected-bot"
+YAML
+echo '{"user": {"login": "wrong-bot"}, "html_url": "https://github.com/test/repo/issues/114#issuecomment-123"}' > "$FIXTURES/post_response.json"
+issue 114 open "" "Mismatch issue"
+: > "$WRITES"
+DRY=0 run 1 "mismatch fails closed" -- 114
+has "the comment on #114 was posted by 'wrong-bot', but CLAIM_ACTOR says 'tester', whose personas/tester.yaml names 'expected-bot'" "mismatch: fails with expected message"
+has "remove the in-progress label" "mismatch: instructions name the label"
+
+banner "identity tests: persona path posts as the App identity"
+echo '{"user": {"login": "expected-bot"}, "html_url": "https://github.com/test/repo/issues/115#issuecomment-124"}' > "$FIXTURES/post_response.json"
+issue 115 open "" "Match issue"
+: > "$WRITES"
+DRY=0 run 0 "match succeeds" -- 115
+grep -qF 'api --method POST repos/test/repo/issues/115/comments -f body=Claim: tester (test-session), stage: implement. Worktree: .claude/worktrees/tester-115-match-issue' "$WRITES" \
+  && pass "match: comment was posted" || fail "match: comment was not posted"

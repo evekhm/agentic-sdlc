@@ -240,8 +240,29 @@ echo "==> #$NUMBER · $title"
 echo "    claim:    $COMMENT"
 echo "    branch:   $BRANCH"
 
-run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$LABEL"
-run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" -f "body=$COMMENT"
+PERSONA_DIR="$ROOT/personas"
+if [ "$DRY_RUN" = 1 ]; then
+    run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$LABEL"
+    run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" -f "body=$COMMENT"
+else
+    run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$LABEL"
+    response="$(gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" -f "body=$COMMENT")" \
+        || die "the claim comment on #$NUMBER was not posted"
+
+    if [ -f "$PERSONA_DIR/$ACTOR.yaml" ]; then
+        expected="$(sed -n '/^authority:/,/^[^[:space:]#]/p' "$PERSONA_DIR/$ACTOR.yaml" \
+            | sed -n 's/^[[:space:]][[:space:]]*identity:[[:space:]]*//p' \
+            | head -1 | tr -d '"' | sed 's/[[:space:]]*$//')"
+        actual="$(jq -r '.user.login // ""' <<<"$response")"
+        url="$(jq -r '.html_url // ""' <<<"$response")"
+
+        if [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
+            echo "$url"
+            die "the comment on #$NUMBER was posted by '$actual', but CLAIM_ACTOR says '$ACTOR', whose personas/$ACTOR.yaml names '$expected'; GH_TOKEN does not belong to that persona. Delete $url and remove the $LABEL label, then re-run with the right credential"
+        fi
+    fi
+fi
+
 run git -C "$ROOT" fetch -q origin
 run git -C "$ROOT" worktree add -q -b "$BRANCH" "$WT_REL" origin/main
 
