@@ -24,24 +24,31 @@ The tracker loop (detailed under "Working the tracker" below), in the
 order it happens. Every session, every harness, before the first
 edit. The never-list at the end is absolute.
 
-1. **Issue open and claimable.** Verify the issue is *open*, has no
-   `in-progress`, no `hold`, and closed dependencies. Pointed at a
-   closed issue? It is not a work item: file a follow-up ("Before
-   filing an issue" below) and work that. Never reuse a closed
-   issue's number for a branch, a PR or a handoff.
-2. **Claim.** Add `in-progress` and post the one-line claim comment:
-   who, which session, which stage, which worktree path.
-3. **Your own worktree.** Create it from `origin/main` on
-   `<actor>/<issue>-<slug>` and do every edit and commit there. The
-   primary checkout is read-only reference — except its `runs/`,
-   which is the one shared run root for every session ("Outputs go
-   in timestamped run folders" below); never write `runs/` inside a
-   worktree.
-4. **Read the chain.** AGENTS.md → INTENT.md → docs/SPEC.md → the
+1. **Claim and create worktree.** Run
+   `CLAIM_ACTOR=<persona> CLAIM_SESSION=<name> scripts/ops/claim.sh <issue> [<slug>]`.
+   This verifies the issue is claimable, posts the claim comment, and creates
+   your worktree. Pass the `<slug>` explicitly if an `intent/<issue>-<slug>/`
+   folder exists. **By-hand fallback** (if the script fails):
+   - *Verify:* The issue must be open, have no `in-progress`, no `hold`, and
+     closed dependencies. Pointed at a closed issue? It is not a work item:
+     file a follow-up ("Before filing an issue" below) and work that. Never
+     reuse a closed issue's number.
+   - *Claim:* Add `in-progress` and post the one-line claim comment: who,
+     which session, which stage, which worktree path.
+   - *Worktree:* Create it from `origin/main` on `<actor>/<issue>-<slug>`.
+     If an `intent/<issue>-*/` folder exists, the branch slug MUST be that
+     folder's slug. Do every edit and commit there. The primary checkout is
+     read-only reference — except its `runs/`, which is the one shared run
+     root for every session ("Outputs go in timestamped run folders" below);
+     never write `runs/` inside a worktree.
+2. **Read the chain.** AGENTS.md → INTENT.md → docs/SPEC.md → the
    issue thread bottom-up.
-5. **Produce the stage's artifact, commit by path, open a PR.** A
-   bare push is not a delivery; a human merges.
-6. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
+3. **Produce the stage's artifact, commit by path, open a PR.** A
+   bare push is not a delivery; a human merges. After a workflow-file
+   change merges, failed PR checks need a rebase onto main, never
+   `gh run rerun` (a `pull_request` run executes against the head+base
+   merge ref, so the stale ref reruns identically).
+4. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
    pausing, drop `in-progress`; after the merge, remove your worktree.
 
 Never: commit, stage, stash or checkout in the primary checkout; work
@@ -141,12 +148,11 @@ resumable cold.
    never a work item, whoever or whatever pointed you at it: search
    the tracker ("Before filing an issue"), file the follow-up naming
    the closed issue as the one it extends, and work the follow-up.
-2. **Claim.** Add `in-progress` and comment one line: who (persona or
-   human+harness, with the session name where the harness has one),
-   what stage is being worked, and the worktree path you are about to
-   create. The claim is the mutex: **the issue is the unit of
-   parallelism** — two sessions never work the same issue, and any
-   number of sessions may work different claimable issues
+2. **Claim and create worktree.** Run
+   `CLAIM_ACTOR=<persona> CLAIM_SESSION=<name> scripts/ops/claim.sh <issue> [<slug>]`
+   to claim the issue and create your worktree. The claim is the mutex: **the
+   issue is the unit of parallelism** — two sessions never work the same issue,
+   and any number of sessions may work different claimable issues
    concurrently. Scope issues to disjoint paths so parallel PRs don't
    collide.
 3. **Read.** Walk the document chain (above), then the issue thread
@@ -178,9 +184,10 @@ one machine at the same time. Git worktrees are the mechanism on
 every harness; only the tooling around them differs, and the harness
 file names it.
 
-- **Look before claiming.** Run `git worktree list` (a locked or dirty
-  worktree is someone's live work) and read the issue's last claim
-  comment; the harness file adds its own peer check. If a peer already
+- **Look before claiming.** `scripts/ops/claim.sh` will refuse to claim if a
+  peer already holds the issue. If claiming by hand, run `git worktree list` (a
+  locked or dirty worktree is someone's live work) and read the issue's last
+  claim comment; the harness file adds its own peer check. If a peer already
   holds the issue, stand down and report instead of duplicating.
 - **The primary checkout** (the directory the repo was cloned into,
   wherever that is on the machine) is read-only reference and stays
@@ -194,12 +201,11 @@ file names it.
   whose working tree is the primary checkout. It is a last-line check
   on the one moment that's interceptable — the commit itself — not a
   substitute for entering a worktree before the first edit.
-- **Enter your own worktree before the first edit**, created from
-  `origin/main`:
-  `git fetch origin && git worktree add -b <actor>/<n>-<slug>
-  .claude/worktrees/<actor>-<n>-<slug> origin/main`.
-  The `.claude/worktrees/` location is shared by every harness so one
-  report covers them all.
+- **Enter your own worktree before the first edit**. `scripts/ops/claim.sh`
+  creates the worktree for you. If doing it by hand, create it from
+  `origin/main`: `git fetch origin && git worktree add -b <actor>/<n>-<slug>
+  .claude/worktrees/<actor>-<n>-<slug> origin/main`. The `.claude/worktrees/`
+  location is shared by every harness so one report covers them all.
 - **Work only there.** All reads for editing, all commits, and the
   push, PR and merge for the issue happen from your worktree and
   touch only files your issue owns. Commit by path, never `git add .`
