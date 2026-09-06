@@ -200,6 +200,7 @@ LIFECYCLE_KEYS = (
     "stage",
     "label",
     "artifact",
+    "advances_on",
     "advances_to",
     "advance_message",
     "dispatch_brief",
@@ -213,6 +214,10 @@ def load_lifecycle(root: Path) -> list[dict]:
     is data every actor shares: the advancer applies it, the dispatcher
     routes on it, and this compiler renders it into the prompts. There is
     no second copy anywhere, which is the whole point of the file.
+
+    Validates stage names against schema.json's stage enum, label uniqueness,
+    terminal and non-terminal advances_to values, and the four advances_on
+    invariants (#52 AT-3, #57 D10, Argus F12).
     """
     path = root / "personas" / "lifecycle.json"
     if not path.is_file():
@@ -224,6 +229,23 @@ def load_lifecycle(root: Path) -> list[dict]:
     stages = data.get("stages") if isinstance(data, dict) else None
     if not isinstance(stages, list) or not stages:
         raise BuildError(f"{path}: expected a non-empty 'stages' array.")
+
+    schema_path = root / "personas" / "schema.json"
+    if not schema_path.is_file():
+        raise BuildError(f"{schema_path}: missing — nothing to validate lifecycle against.")
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise BuildError(f"{schema_path}: not valid JSON — {exc}") from exc
+
+    valid_stages = schema.get("properties", {}).get("stage", {}).get("items", {}).get("enum", [])
+    if not valid_stages:
+        raise BuildError(f"{schema_path}: no valid stage enum found in schema.")
+
+    valid_advances_on = schema.get("$defs", {}).get("advances_on", {}).get("enum", [])
+    if not valid_advances_on:
+        raise BuildError(f"{schema_path}: no valid advances_on enum found in schema $defs.")
+
     for index, row in enumerate(stages):
         if not isinstance(row, dict):
             raise BuildError(f"{path}: stages[{index}] is not an object.")
@@ -232,10 +254,75 @@ def load_lifecycle(root: Path) -> list[dict]:
             raise BuildError(
                 f"{path}: stages[{index}] is missing {', '.join(missing)}."
             )
+
     names = [str(row["stage"]) for row in stages]
     duplicates = sorted({n for n in names if names.count(n) > 1})
     if duplicates:
         raise BuildError(f"{path}: duplicate stage rows {duplicates}.")
+
+    for index, row in enumerate(stages):
+        stage_val = row["stage"]
+        if stage_val not in valid_stages:
+            raise BuildError(
+                f"{path}: stages[{index}] stage '{stage_val}' is not one of {valid_stages} ({schema_path})."
+            )
+
+    labels = [row.get("label") for row in stages]
+    duplicate_labels = sorted({l for l in labels if labels.count(l) > 1 and l is not None})
+    if duplicate_labels:
+        raise BuildError(f"{path}: duplicate label rows {duplicate_labels}.")
+
+    for index, row in enumerate(stages):
+        is_last = (index == len(stages) - 1)
+        adv_to = row.get("advances_to")
+        if is_last:
+            if adv_to is not None:
+                raise BuildError(
+                    f"{path}: stages[{index}] last rung must have advances_to null, got '{adv_to}'."
+                )
+        else:
+            if adv_to is None:
+                raise BuildError(
+                    f"{path}: stages[{index}] non-terminal rung cannot have advances_to null."
+                )
+
+        adv_on = row.get("advances_on")
+        if adv_on not in valid_advances_on:
+            raise BuildError(
+                f"{path}: stages[{index}] invalid advances_on {json.dumps(adv_on)}, "
+                f"must be one of {valid_advances_on}."
+            )
+
+        art = row.get("artifact")
+        if adv_on == "artifact":
+            if art is None:
+                raise BuildError(
+                    f"{path}: stages[{index}] advances_on is 'artifact' but artifact is null."
+                )
+        else:
+            if art is not None:
+                raise BuildError(
+                    f"{path}: stages[{index}] advances_on is {json.dumps(adv_on)} "
+                    f"but artifact is non-null '{art}'."
+                )
+
+        if is_last:
+            if adv_on is not None:
+                raise BuildError(
+                    f"{path}: stages[{index}] last rung must have advances_on null, got {json.dumps(adv_on)}."
+                )
+        else:
+            if adv_on is None:
+                raise BuildError(
+                    f"{path}: stages[{index}] non-terminal rung cannot have advances_on null."
+                )
+
+    merge_count = sum(1 for row in stages if row.get("advances_on") == "merge")
+    if merge_count != 1:
+        raise BuildError(
+            f"{path}: expected exactly one rung with advances_on 'merge', found {merge_count}."
+        )
+
     return stages
 
 
