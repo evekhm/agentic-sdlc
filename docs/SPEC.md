@@ -191,7 +191,7 @@ drift gate (`ci.gates`).
 
 ### personas.resume
 `personas/lifecycle.json` is the single source of the label↔stage
-relation (#36, `intent/36-dispatch/`): five rungs — plan, design,
+relation (#36, `intent/36-dispatch/`; PR #67): five rungs — plan, design,
 build, implement, review — each row carrying `stage`, `label`,
 `artifact`, `advances_on`, `advances_to`, `advance_message` and
 `dispatch_brief`.
@@ -264,8 +264,8 @@ ladder on every push to `main` by running
 deterministic bash + `gh` + `jq` with no model call and is runnable
 locally by the same command (`DRY_RUN=1` prints every mutation instead
 of executing it). WHAT fires each rung is the `advances_on` column of
-`personas/lifecycle.json` (`personas.resume`, #36), read and never
-inferred (PR #67). Three rungs advance on an added file: the script
+`personas/lifecycle.json` (`personas.resume`, #36 (PR #67)), read and never
+inferred. Three rungs advance on an added file: the script
 reads the pushed range for ADDED files matching
 `intent/<issue>-<slug>/{intent,spec,plan}.md` and mirrors the merge
 gate into the label — intent.md → `status:spec`, spec.md →
