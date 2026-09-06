@@ -75,7 +75,7 @@ between 10 and 11 when it lands; that PR extends this list.)
 - Exactly one fenced diagram block (D4; the line and section-length
   caps were lifted 2026-09-03).
 - `grep -c '^|' README.md` is 0; README contains no per-label
-  semantics, no severity-tier list, and no `status:*` → `status:*`
+  semantics (except the halt labels required by D10), no severity-tier list, and no `status:*` → `status:*`
   mapping; it names all five stages in ladder order (D3, D7).
 - Exactly one fenced shell block exists and its only command line is
   `scripts/ops/work.sh <n>`; no harness executable, vendor, product,
