@@ -153,17 +153,24 @@ die()     { echo "smoke_launch: $*" >&2; exit 1; }
 # YAML subset, not a YAML parser, so the claim it makes is bounded and
 # measured rather than universal: on the forms this repository's schema
 # actually uses — the inline `{ harness: x }` form, the two-line block
-# form, comment lines, and extra keys inside a persona's own mapping —
-# it agrees with the repository's other two readers,
-# `scripts/sync_agents.py`'s `yaml.safe_load` and `scripts/ops/work.sh`'s
-# `harness_of`. Outside that set it must fail CLOSED, never quietly
-# differently, and one input is known to sit outside it: a quoted scalar
-# (`harness: "claude-code"`) is not unquoted here, and is not unquoted by
-# `work.sh harness_of` either — so the two shell readers agree with each
-# other, both diverge from `yaml.safe_load`, and the divergence is exit 1
-# ("with no harness this script can read") rather than a wrong arm
-# (Argus R2-15). Unquoting here alone would be worse than the refusal: it
-# would derive an arm that the launcher then cannot resolve.
+# form, and comment lines — it agrees with the repository's other two
+# readers, `scripts/sync_agents.py`'s `yaml.safe_load` and
+# `scripts/ops/work.sh`'s `harness_of`.
+#
+# Caveats on parser divergences:
+# 1. Extra keys inside a persona mapping: `pins()` agrees with
+#    `yaml.safe_load` regardless of key order, but parity with
+#    `work.sh harness_of` holds only when `harness:` is the first key
+#    in the mapping; if another key precedes it, `harness_of`
+#    (`work.sh:452-453`) returns empty, which `work.sh:677` turns into
+#    a die naming the persona (failing closed on the launcher side).
+# 2. Quoted scalars (`harness: "claude-code"`): neither `pins()` nor
+#    `work.sh harness_of` unquotes scalars; both diverge from
+#    `yaml.safe_load` by carrying the quotes verbatim into the harness
+#    name (`"claude-code"`), resolving an arm named with quotes rather
+#    than failing closed with exit 1 or selecting a wrong arm.
+#    Unquoting here alone would derive an arm that the launcher then
+#    cannot resolve.
 #
 # The first version of this function read
 # `harness:` only when it sat on the SAME line as the persona key, so a
@@ -508,15 +515,27 @@ done
 # quoted: a review ledger row, a finding, or a paragraph like this one.
 SCRATCH_MARKER='SMOKE TEST — not a unit of work.'
 
+has_scratch_marker() { # <body> -> rc 0 if marker appears at line start outside code fences
+    awk -v m="$SCRATCH_MARKER" '
+        /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+        !fence {
+            line = $0
+            sub(/^[[:space:]]*(\*\*)?/, "", line)
+            if (substr(line, 1, length(m)) == m) { found = 1; exit }
+        }
+        END { exit !found }
+    ' <<<"$1"
+}
+
 scratch_refusal() { # <is-pull-request: 1|0> <labels, one per line> <body> -> the reason, or empty
     local is_pr="$1" labels="$2" body="$3" found
     if [ "$is_pr" = "1" ]; then
         echo "it is a PULL REQUEST, not an issue — the issues endpoint serves both and \`gh issue edit\` resolves a pull-request number, so this would have overwritten the pull request's own body"
         return 0
     fi
-    case "$body" in
-        *"$SCRATCH_MARKER"*) return 0 ;;
-    esac
+    if has_scratch_marker "$body"; then
+        return 0
+    fi
     found="$(printf '%s\n' "$labels" | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//')"
     if [ -n "$found" ]; then
         echo "it carries labels ($found) and its body has no \"$SCRATCH_MARKER\" marker, so it is a unit of work, not a fixture"
@@ -738,8 +757,8 @@ check_comment() { # <persona> <iso-8601-before-the-launch>
 # stdout for a 404, so `|| true` alone would hand a JSON blob to the
 # assertion and call a missing branch a pass.
 declare -A VERIFIED_REF=()
-check_pushed_artifact() { # <persona> <ref>
-    local persona="$1" ref="$2" pushed want author size
+check_pushed_artifact() { # <persona> <ref> [pre_sha]
+    local persona="$1" ref="$2" pre_sha="${3:-}" pushed want author size
     pushed="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" \
                   --jq '.object.sha' 2>/dev/null || true)"
     case "$pushed" in
@@ -748,6 +767,10 @@ check_pushed_artifact() { # <persona> <ref>
     esac
     if [ -z "$pushed" ]; then
         bad "$persona pushed no $ref — the persona did not load, or the token did not authenticate"
+        return
+    fi
+    if [ -n "$pre_sha" ] && [ "$pushed" = "$pre_sha" ]; then
+        bad "$persona left $ref unchanged at pre-run commit $pre_sha — reset was refused and no new commit was pushed"
         return
     fi
     ok "$ref exists on origin ($pushed)"
@@ -832,17 +855,32 @@ clear_smoke_refs() {
 # so the operator retries instead of hunting a session that overwrote
 # nothing.
 recheck_verified_refs() {
-    local ref now attempt read_ok
+    local ref now attempt read_ok out is_404
     [ "${#VERIFIED_REF[@]}" -gt 0 ] || { note "no push observable held, so there is none to re-read"; return 0; }
     for ref in "${!VERIFIED_REF[@]}"; do
         read_ok=0
+        is_404=0
+        now=""
         for attempt in 1 2 3; do
-            if now="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" \
-                          --jq '.object.sha' 2>/dev/null)"; then
-                read_ok=1; break
-            fi
+            out="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$ref" 2>&1)" && {
+                now="$(jq -r '.object.sha // ""' <<<"$out" 2>/dev/null || true)"
+                if [ -n "$now" ]; then
+                    read_ok=1
+                    break
+                fi
+            }
+            case "$out" in
+                *404*|*"Not Found"*)
+                    is_404=1
+                    break
+                    ;;
+            esac
             [ "$attempt" = "3" ] || sleep 2
         done
+        if [ "$is_404" = "1" ]; then
+            bad "$ref moved after this run verified it: ${VERIFIED_REF[$ref]} -> deleted. A session this gate did not launch wrote over the observable, so the evidence above is not reproducible."
+            continue
+        fi
         if [ "$read_ok" = "0" ]; then
             bad "could not re-read $ref after 3 attempts, so this run cannot confirm it still points at ${VERIFIED_REF[$ref]}. This is a FAILED READ, not a moved ref: the evidence above is unverified rather than known stale."
             continue
@@ -869,12 +907,18 @@ for arm in "${ARMS[@]}"; do
     check_token "$persona"
     clear_claim
     relabel "$(relabel_of "$persona")"
+    pre_sha="$(gh_as "$HOUSEKEEPER" api "/repos/$GITHUB_REPO/git/ref/heads/$branch" \
+                  --jq '.object.sha' 2>/dev/null || true)"
     # Cleared through the API, not through the launcher's own git: this
     # script must never push with whatever credentials the operator's
     # shell happens to carry — that is the identity confusion #43 exists
     # to end.
-    gh_as "$HOUSEKEEPER" api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$branch" \
-        >/dev/null 2>&1 || true
+    out="$(gh_as "$HOUSEKEEPER" api -X DELETE "/repos/$GITHUB_REPO/git/refs/heads/$branch" 2>&1)" || {
+        case "$out" in
+            *404*|*"Not Found"*|*"does not exist"*) : ;;
+            *) note "could not delete fixture ref $branch as $HOUSEKEEPER: ${out%%$'\n'*}" ;;
+        esac
+    }
     # The local side of the same reset. The errand has the arm push from a
     # throwaway worktree at /tmp/smoke-<issue>-<persona> on a branch of
     # that name; both survive the run, and on the NEXT run against the
@@ -902,7 +946,7 @@ for arm in "${ARMS[@]}"; do
                     || bad "work.sh exited $rc, not 0"
     check_local_artifact  "$persona"
     check_comment         "$persona" "$before"
-    check_pushed_artifact "$persona" "$branch"
+    check_pushed_artifact "$persona" "$branch" "$pre_sha"
 done
 
 # --- verdict -------------------------------------------------------------------

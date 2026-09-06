@@ -444,4 +444,53 @@ grep -q "issue edit" "$WRITES" \
     || fail "R2-2: the opted-in issue did not reach the body write: $(cat "$WRITES")"
 pass "R2-2/AT-R2-5 · a fresh issue whose body carries the marker is accepted — the opt-in works on first use"
 
+# --- R3-6 / AT-R3-2: marker admission requires line-start, refusing fences and mid-line quotes
+# Red at origin/main: unanchored substring matched inside code fences or mid-line.
+out="$(run_guard '{"body":"Discussion of marker:\n```\nSMOKE TEST — not a unit of work.\n```\n","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R3-6/AT-R3-2: an issue quoting the marker inside a code fence was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R3-6/AT-R3-2: the guard wrote before refusing fenced marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R3-6/AT-R3-2: the guard launched before refusing fenced marker: $(cat "$LAUNCHES")"
+pass "R3-6/AT-R3-2 · marker inside a code fence is refused, with nothing written"
+
+out="$(run_guard '{"body":"Discussion mentioning SMOKE TEST — not a unit of work. in mid-line prose","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R3-6/AT-R3-2: an issue quoting the marker mid-line in prose was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R3-6/AT-R3-2: the guard wrote before refusing mid-line marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R3-6/AT-R3-2: the guard launched before refusing mid-line marker: $(cat "$LAUNCHES")"
+pass "R3-6/AT-R3-2 · marker quoted mid-line in prose is refused, with nothing written"
+
+# --- Argus R3-3 / Atlas AT-R3-6: 404 is reported as deleted, not failed read
+# Red at origin/main: gh api exits 1 on 404, so recheck_verified_refs took the retry
+# loop and reported "FAILED READ, not a moved ref" after 3 attempts.
+(
+    eval "$(sed -n '/^recheck_verified_refs() {/,/^}/p' "$SMOKE_SH")"
+    declare -A VERIFIED_REF=( ["test-ref"]="1111222233334444555566667777888899990000" )
+    GITHUB_REPO="test/repo"
+    HOUSEKEEPER="athena"
+    bad()  { echo "BAD: $*"; }
+    ok()   { echo "OK: $*"; }
+    note() { echo "NOTE: $*"; }
+
+    # Sub-case A: 404 response
+    gh_as() {
+        echo "gh: Not Found (HTTP 404)" >&2
+        return 1
+    }
+    out="$(recheck_verified_refs)"
+    contains "-> deleted" "$out" || fail "AT-R3-6: 404 was not reported as deleted: $out"
+    refutes "FAILED READ" "$out" || fail "AT-R3-6: 404 was misreported as failed read: $out"
+
+    # Sub-case B: 500 transient failure (retried, reported as failed read)
+    sleep() { :; }
+    gh_as() {
+        echo "gh: Internal Server Error (HTTP 500)" >&2
+        return 1
+    }
+    out="$(recheck_verified_refs)"
+    contains "FAILED READ" "$out" || fail "AT-R3-6: 500 was not reported as failed read: $out"
+    refutes "-> deleted"  "$out" || fail "AT-R3-6: 500 was misreported as deleted: $out"
+)
+pass "R3-3/AT-R3-6 · recheck distinguishes deleted ref (404) from transient read failure (500)"
+
 echo "smoke_launch_test.sh: all $passes scenarios passed"
