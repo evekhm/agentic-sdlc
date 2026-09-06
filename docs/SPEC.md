@@ -200,7 +200,8 @@ from the `stage` list of every `kind: persona` source, so adding an
 owner is an edit to that persona and to nothing else. It has three
 readers and no fourth copy — `scripts/ci/lifecycle_advance.sh`
 matches on `advances_on`, then on `artifact` or on the issue's
-current `label`, to pick a transition (`lifecycle.labels`),
+current `label`, to pick a transition, read directly and never
+inferred (PR #67) (`lifecycle.labels`),
 `scripts/ops/work.sh` matches on `label` to pick a stage
 (`ops.dispatch`), and the compiler renders the whole ladder, with
 each rung's derived owners, into a generated `## Lifecycle stages`

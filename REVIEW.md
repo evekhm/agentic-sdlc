@@ -201,7 +201,8 @@ that caps the bill.
 
 - Finding IDs are namespaced by reviewer so reconciliation is
   unambiguous: Argus files `R<round>-<n>` on PR rounds (`R1-3`) and
-  `R<issue>-<n>` on issues (`R13-2`); Atlas files `AT<item>-<n>, or AT-R<round>-<n> on pull requests,` (`AT-1`).
+  `R<issue>-<n>` on issues (`R13-2`); Atlas files `AT<item>-<n>` on
+  issues (`AT74-3`) and `AT-R<round>-<n>` on pull requests (`AT-R1-3`).
 - An ID is **stable from its first appearance** and is never reused
   or renumbered, so both reviewers can reference it across rounds.
 - The shared memory is a single ledger comment per PR or issue. It

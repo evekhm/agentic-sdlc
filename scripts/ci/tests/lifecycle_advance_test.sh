@@ -109,7 +109,7 @@ if [ "${1:-}" = "api" ]; then
         echo '[]'
       fi
       exit 0;;
-    repos/*/*)
+    repos/*/pulls/*/files)
       [ "$#" -eq 3 ] || exit 2
       # D15 conjunct (2): the pull request's OWN file list. A fixture
       # is required — a pull request nobody described has no file list
@@ -123,6 +123,11 @@ if [ "${1:-}" = "api" ]; then
       echo "no files fixture for pull request $n" >&2
       exit 1;;
     repos/*)
+      # The bare default-branch read: `gh api repos/<owner>/<repo>`, two
+      # args and no `--paginate` (AT-3). This arm is last and least
+      # specific on purpose — the two reads above name enough of their
+      # own path to never fall through to it.
+      [ "$#" -eq 2 ] || exit 2
       echo '{"default_branch":"main"}'
       exit 0;;
   esac
@@ -1200,9 +1205,6 @@ banner "nothing was written"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "a gh write was attempted under DRY_RUN=1"; }
 pass "no gh write was attempted in any scenario"
 
-echo
-echo "lifecycle_advance_test.sh: all scenarios passed"
-
 banner "S36 · #74 Regressions"
 
 # 1. Direct POST
@@ -1211,12 +1213,22 @@ grep -q "gh api repos/evekhm/agentic-sdlc/issues/999/comments -X POST -f body=fo
 pass "S36: direct gh api POST lands in WRITES"
 
 # 2. pulls_fixture with merged_at: null
+reset_fixtures
 pulls_fixture "$CM" 4310 odyssey/999-test "Merged at null." "$CM" null
+issue_fixture 999 OPEN status:implementing
 run "$C4" "$CM" "S36: merged_at null range exits 0"
 has "nothing to advance" "S36: merged_at null is no candidate"
 pass "S36: merged_at null is no candidate"
 
+# 3. base.ref not the default branch — intentionally not a regression scenario here:
+# lifecycle_advance.sh:339-343 deliberately does not filter on base branch (D1 as
+# amended by PR #67/#102) — containment of the merge commit in the pushed range is
+# the trunk test, not which branch the pull request merged into. There is nothing
+# left for this scenario to regress against.
+
 # 4. Two pull requests reported for one commit: the later one wins
+reset_fixtures
+issue_fixture 999 OPEN status:implementing
 jq -n '[{"number": 4312, "merged_at": "2026-01-01T00:00:00Z", "state": "closed", "merge_commit_sha": "'"$CM"'", "base": {"ref": "main"}, "head": {"ref": "odyssey/999-test", "repo": {"full_name": "'"$TESTREPO"'"}}, "body": "First"}, {"number": 4313, "merged_at": "2026-01-01T00:00:00Z", "state": "closed", "merge_commit_sha": "'"$CM"'", "base": {"ref": "main"}, "head": {"ref": "odyssey/999-test", "repo": {"full_name": "'"$TESTREPO"'"}}, "body": "Second"}]' > "$FIXTURES/pulls-$CM.json"
 files_fixture 4312 docs/SPEC.md
 files_fixture 4313 docs/SPEC.md
@@ -1232,4 +1244,25 @@ pass "S36: personas.resume cites (PR #67)"
 # 6. A grep asserting scripts/setup/bootstrap_tracker.sh no longer describes status:in-review as written by #8/#9
 grep -q "Stage: reviewers hold it (written by lifecycle.yml on the implementing PR's merge)" "$REPO/scripts/setup/bootstrap_tracker.sh" || fail "S36: bootstrap_tracker.sh still describes in-review as written by #8/#9"
 pass "S36: bootstrap_tracker.sh updated"
+
+# 7. AT-13: the implement-rung idempotency marker is keyed on the pull
+# request's own merge commit (MERGE_SHA[$issue]), not on the pushed
+# range's end ($AFTER). A range that extends past the merge commit —
+# BEFORE=$C4, AFTER=$C5, with #999's merge at $CM strictly between them
+# — pins the discriminating case: under the pre-AT-13 code the marker
+# was `<!-- lifecycle:in-review:$AFTER -->`, i.e. keyed on $C5 here, so
+# a later, wider range containing the same already-handled merge would
+# never match the marker it left the first time and would re-post the
+# comment.
+reset_fixtures
+pulls_fixture "$CM" 4242 odyssey/999-test "Implements the plan. See #999."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$C5" "S36: AT-13 a range extending past the merge commit exits 0"
+has "<!-- lifecycle:in-review:$CM -->" "S36: AT-13 the marker is keyed on the pull request's own merge commit"
+hasnt "<!-- lifecycle:in-review:$C5 -->" "S36: AT-13 the marker is not keyed on the range end"
+
+reset_fixtures
+
+echo
+echo "lifecycle_advance_test.sh: all scenarios passed"
 
