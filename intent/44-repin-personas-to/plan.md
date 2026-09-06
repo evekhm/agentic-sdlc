@@ -605,8 +605,9 @@ file, `docs/SPEC.md`); no new file and no new input surface.
    yields `-` and is exit 1 naming it. The header's parity claim is
    softened to the forms actually covered, and records the quoted-scalar
    divergence explicitly: `work.sh harness_of` does not unquote either,
-   so the two shell readers agree and the case is exit 1 — unquoting
-   here alone would derive an arm the launcher then could not resolve.
+   so the two shell readers agree and the case is exit 0 (resolving an
+   arm named with quotes) — unquoting here alone would derive an arm the
+   launcher then could not resolve.
 3. **`clear_smoke_refs` no longer swallows a refused delete** (Argus
    **R2-14**). A delete that fails for any reason other than "no such
    ref" is now a `note`, so the litter R1-9 named cannot persist in

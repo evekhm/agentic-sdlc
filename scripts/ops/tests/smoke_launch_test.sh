@@ -493,4 +493,54 @@ pass "R3-6/AT-R3-2 · marker quoted mid-line in prose is refused, with nothing w
 )
 pass "R3-3/AT-R3-6 · recheck distinguishes deleted ref (404) from transient read failure (500)"
 
+# --- Argus R3-4 / AT-R3-? (Row 5): pre_sha guard and delete-error note
+(
+    eval "$(sed -n '/^check_pushed_artifact() {/,/^}/p' "$SMOKE_SH")"
+    eval "test_delete_note() { $(sed -n '/^    out="$(gh_as "$HOUSEKEEPER" api -X DELETE "\/repos\/\$GITHUB_REPO\/git\/refs\/heads\/\$branch" 2>&1)"/,/^    }/p' "$SMOKE_SH") }"
+    
+    GITHUB_REPO="test/repo"
+    HOUSEKEEPER="athena"
+    branch="test-branch"
+    bad()  { echo "BAD: $*"; }
+    ok()   { echo "OK: $*"; }
+    note() { echo "NOTE: $*"; }
+    identity_of() { echo "want"; }
+
+    # Sub-case A: pre_sha guard
+    gh_as() {
+        if [ "$3" = "/repos/$GITHUB_REPO/git/ref/heads/test-ref" ]; then
+            echo '1111222233334444555566667777888899990000'
+            return 0
+        fi
+        return 1
+    }
+    
+    out="$(check_pushed_artifact "test-persona" "test-ref" "1111222233334444555566667777888899990000")"
+    contains "BAD: test-persona left test-ref unchanged at pre-run commit" "$out" \
+        || fail "Row 5: pre_sha guard did not fire when pushed SHA matches pre_sha: $out"
+
+    # Sub-case B: delete-error note fires on non-404 error
+    gh_as() {
+        if [ "$3" = "-X" ] && [ "$4" = "DELETE" ]; then
+            echo "gh: Internal Server Error (HTTP 500)" >&2
+            return 1
+        fi
+        return 0
+    }
+    out="$(test_delete_note)"
+    contains "NOTE: could not delete fixture ref test-branch as athena" "$out" \
+        || fail "Row 5: delete-error note did not fire on 500: $out"
+
+    # Sub-case C: delete-error note swallows 404
+    gh_as() {
+        if [ "$3" = "-X" ] && [ "$4" = "DELETE" ]; then
+            echo "gh: Not Found (HTTP 404)" >&2
+            return 1
+        fi
+        return 0
+    }
+    out="$(test_delete_note)"
+    refutes "NOTE:" "$out" || fail "Row 5: delete-error note fired on 404: $out"
+)
+pass "Row 5 · check_pushed_artifact checks against pre_sha and housekeeping delete errors are noted"
 echo "smoke_launch_test.sh: all $passes scenarios passed"

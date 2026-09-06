@@ -162,7 +162,7 @@ die()     { echo "smoke_launch: $*" >&2; exit 1; }
 #    `yaml.safe_load` regardless of key order, but parity with
 #    `work.sh harness_of` holds only when `harness:` is the first key
 #    in the mapping; if another key precedes it, `harness_of`
-#    (`work.sh:452-453`) returns empty, which `work.sh:677` turns into
+#    (`work.sh:479-480`) returns empty, which `work.sh:704-706` turns into
 #    a die naming the persona (failing closed on the launcher side).
 # 2. Quoted scalars (`harness: "claude-code"`): neither `pins()` nor
 #    `work.sh harness_of` unquotes scalars; both diverge from
