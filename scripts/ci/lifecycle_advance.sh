@@ -209,7 +209,6 @@ declare -A NEAR_EXPECT # issue -> the dispatch branch D15 expected instead
 # merge path can leave BEST_STAGE entirely empty.
 CANDIDATES=""
 NEAR_LIST=""
-n_crossings=0
 n_candidates=0
 n_near=0
 while IFS=$'\t' read -r _status path; do
@@ -224,7 +223,6 @@ while IFS=$'\t' read -r _status path; do
     rank="$(jq -r --arg a "$stage.md" \
         '([.stages[].artifact] | index($a) // -1) + 1' "$LIFECYCLE_JSON")"
     if [ -z "${ALL_FILES[$issue]:-}" ]; then
-        n_crossings=$((n_crossings + 1))
         n_candidates=$((n_candidates + 1))
         CANDIDATES="${CANDIDATES}${issue}"$'\n'
     fi
@@ -815,7 +813,11 @@ Bootstrap compression: this push added \`$files\` for #$issue. Only the furthest
     # A row with no advance_message posts nothing at all: an empty
     # message would otherwise render a body with a blank line where the
     # sentence belongs (D10).
-    marker="<!-- lifecycle:${marker_stage}:${AFTER} -->"
+    if [ "$kind" = "merge" ]; then
+        marker="<!-- lifecycle:${marker_stage}:${MERGE_SHA[$issue]} -->"
+    else
+        marker="<!-- lifecycle:${marker_stage}:${AFTER} -->"
+    fi
     if [ -z "$message" ]; then
         log "    #$issue has no advance_message for this row — no comment"
     elif grep -Fq "$marker" <<<"$recent"; then
