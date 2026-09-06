@@ -407,11 +407,12 @@ for value in "" "0" "true" "yes"; do
 done
 pass "R1-1: only the literal 1 downgrades — '', 0, true and yes stay strict"
 
-banner "R1-1/R1-2 the trigger workflow sets the flag and interpolates nothing into a run body"
+banner "#131/R1-2 unattended.yml does not set UNSET_CREDENTIAL_IS_SKIP and interpolates nothing into a run body"
 WF="$REPO/.github/workflows/unattended.yml"
-grep -q "UNSET_CREDENTIAL_IS_SKIP: '1'" "$WF" \
-  || fail "R1-1: unattended.yml does not set UNSET_CREDENTIAL_IS_SKIP, so a missing secret is red"
-pass "R1-1: unattended.yml sets the flag for the dispatch step"
+if grep -q "UNSET_CREDENTIAL_IS_SKIP" "$WF"; then
+  fail "#131: unattended.yml sets UNSET_CREDENTIAL_IS_SKIP; now that secrets are loaded, a missing secret must fail loudly"
+fi
+pass "#131: unattended.yml does not set UNSET_CREDENTIAL_IS_SKIP (missing secrets fail loudly)"
 grep -q 'GITHUB_STEP_SUMMARY' "$WF" \
   || fail "R1-1: a refusal is not written to the run summary, so the skip is only in the log"
 pass "R1-1: a refusal is copied into the run summary"

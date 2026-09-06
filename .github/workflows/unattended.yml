@@ -302,18 +302,6 @@ jobs:
           # right one here and the launcher refuses outright without
           # this (#159). Antigravity is headless whatever this says.
           HEADLESS: '1'
-          # The Apps' private keys are loaded as repository secrets by a
-          # human, once, in #7 — and this workflow merges before that
-          # happens. Without this flag, every pull request in the
-          # repository would carry one red check per reviewer until then,
-          # for a condition that is "not configured yet", not "broken".
-          # The adapter turns the missing secret into a NAMED refusal
-          # (exit 2) instead of an error, and the exit-2 arm below writes
-          # it to the step summary: green, but never silent. Deleting
-          # this line restores the strict behaviour — the missing
-          # credential becomes a red job again — and that is the right
-          # edit once the secrets are loaded (Argus R1-1).
-          UNSET_CREDENTIAL_IS_SKIP: '1'
         run: |
           set -euo pipefail
           # `export NAME=value` as a builtin, never `env NAME=value cmd`:
