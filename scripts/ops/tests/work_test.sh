@@ -44,7 +44,6 @@ MINTS="$WORK/mints.log"
 mkdir -p "$FIXTURES" "$WORK/bin"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
   echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 
 export GITHUB_REPO="test/repo"
 export FIXTURES WRITES LAUNCHES MINTS
@@ -56,6 +55,10 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # --- the stubs ----------------------------------------------------------------
 cat > "$WORK/bin/git" <<'STUB'
 #!/usr/bin/env bash
+if [ "${1:-}" = "-C" ] && [ "${3:-}" = "cat-file" ] && [ "${4:-}" = "-e" ]; then
+    if [ "${5:-}" = "origin/does-not-exist^{commit}" ]; then exit 1; fi
+    exit 0
+fi
 if [ "${1:-}" = "cat-file" ] && [ "${2:-}" = "-e" ]; then
     if [ "${3:-}" = "origin/does-not-exist^{commit}" ]; then exit 1; fi
     exit 0
@@ -721,6 +724,16 @@ has "unknown flag" "D7: a flag naming a stage is refused outright"
 run 1 "D7: a non-numeric argument exits 1" -- not-a-number
 has "is not an issue or pull-request number" "D7: it says why"
 
+banner "#165 Preflight tests"
+: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+rm -f "$FIXTURES/repos_test_repo.json"
+run 1 "#165: missing GitHub read path exits 1" -- 108
+has "environment cannot run: cannot read test/repo from GitHub" "#165: the missing read is named"
+
+echo "{}" > "$FIXTURES/repos_test_repo.json"
+GITHUB_BASE_REF="does-not-exist" run 1 "#165: missing base object exits 1" -- 108
+has "environment cannot run: no base object origin/does-not-exist" "#165: the missing base object is named"
+
 banner "nothing above this line launched or wrote"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "a write or launch was attempted"; }
 [ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "a session was launched"; }
@@ -743,8 +756,6 @@ sed -i 's/^  daedalus:  { harness: antigravity }/  daedalus:  { harness: nonesuc
 grep -q 'harness: nonesuch' "$T/config/deployments.yaml" \
   || fail "T4: the fixture repin did not take"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 TREE="$T" DRY=0 run 0 "D10: a harness this script cannot start exits 0" -- 113
 has "harness:  nonesuch" "D10: the pinned harness is printed"
 has "(no compiled target known for harness nonesuch)" \
@@ -762,8 +773,6 @@ banner "#43 D3 a missing compiled target is exit 1, before any model call"
 # place to notice.
 mv "$T/.agents/agents/daedalus/agent.md" "$T/.agents/agents/daedalus/agent.md.away"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 TREE="$T" DRY=0 run 1 "D3: a missing agent.md exits 1" -- 113
 has ".agents/agents/daedalus/agent.md" "D3: the refusal names the missing path"
 has "sync_agents.py" "D3: it says how to fix it"
@@ -802,9 +811,8 @@ banner "#43 D3/D8 a harness binary that is not installed is exit 1, before any m
 # else, and /usr/bin:/bin supplies jq, timeout and env.
 mkdir -p "$WORK/bin-noharness"
 cp "$WORK/bin/gh" "$WORK/bin-noharness/gh"
+cp "$WORK/bin/git" "$WORK/bin-noharness/git"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 saved_path="$PATH"
 PATH="$WORK/bin-noharness:/usr/bin:/bin"
 TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 \
@@ -841,16 +849,14 @@ done
 # `rm -f` first: these three are symlinks into /usr/bin at this point,
 # and `cp` would follow them and try to overwrite the REAL binaries.
 rm -f "$WORK/bin-notimeout/timeout" "$WORK/bin-notimeout/gh" \
-      "$WORK/bin-notimeout/agy" "$WORK/bin-notimeout/claude"
-cp "$WORK/bin/gh" "$WORK/bin/agy" "$WORK/bin/claude" "$WORK/bin-notimeout/"
+      "$WORK/bin-notimeout/agy" "$WORK/bin-notimeout/claude" "$WORK/bin-notimeout/git"
+cp "$WORK/bin/gh" "$WORK/bin/agy" "$WORK/bin/claude" "$WORK/bin/git" "$WORK/bin-notimeout/"
 for _b in bash env jq gh agy; do
   [ -e "$WORK/bin-notimeout/$_b" ] \
     || fail "N1: the mirrored PATH is missing $_b — the fixture, not the code"
 done
 [ ! -e "$WORK/bin-notimeout/timeout" ] || fail "N1: the fixture still has a timeout on PATH"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 saved_path="$PATH"
 PATH="$WORK/bin-notimeout"
 TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 \
@@ -864,8 +870,6 @@ pass "N1: zero mints and zero launches behind a missing timeout"
 
 banner "#43 D12 a failed mint is fatal and nothing is launched"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 TREE="$T" DRY=0 MINT_FAIL=1 LAUNCH_OK=1 \
   run 1 "D12: a mint that fails exits 1" -- 113
 has "cannot mint an App token for daedalus" "D12: the refusal names the persona"
@@ -875,8 +879,6 @@ pass "D12: no session ran without an attributable identity"
 
 banner "#43 D12/D13 the child gets the MINTED token, never the ambient one"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 # Snapshotted, not asserted absent: this machine's ~/.gitconfig already
 # carries a credential helper, which is precisely why D13's reset exists.
 # What must hold is that work.sh CHANGED nothing here.
@@ -1004,8 +1006,6 @@ banner "#43 D16(c)/Acceptance 14 the interactive row refuses when there is no te
 # step, a subagent's bash. The refusal is BEFORE the mint: a session that
 # cannot start must not leave a live one-hour credential behind (D11).
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
-  echo "{}" > "$FIXTURES/repos_test_repo.json"
 TREE="$T" DRY=0 LAUNCH_OK=1 \
   run 1 "D16(c): the interactive row with no tty exits 1" -- 130
 has "HEADLESS=1" "D16(c): the refusal names the mode that would work"
@@ -1202,18 +1202,4 @@ pass "D4: work.sh opens no CLI log and names no home directory"
 
 echo
 echo "work_test.sh: all scenarios passed"
-
-banner "#165 Preflight tests"
-rm -f "$FIXTURES/repos_test_repo.json"
-out="$(bash "$WORK_SH" 108 2>&1 || echo "exit $?")"
-grep -q "environment cannot run: cannot read test/repo from GitHub" <<<"$out" \
-  || fail "missing github read check (exit 1) did not fail properly"
-pass "Preflight: missing GitHub read path exits 1"
-
-echo "{}" > "$FIXTURES/repos_test_repo.json"
-
-out="$(GITHUB_BASE_REF="does-not-exist" bash "$WORK_SH" 108 2>&1 || echo "exit $?")"
-grep -q "environment cannot run: no base object origin/does-not-exist" <<<"$out" \
-  || fail "missing base object check (exit 1) did not fail properly"
-pass "Preflight: missing base object exits 1"
 

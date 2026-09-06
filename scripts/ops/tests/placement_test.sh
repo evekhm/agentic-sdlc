@@ -34,6 +34,7 @@ WRITES="$WORK/writes.log"
 LAUNCHES="$WORK/launches.log"
 mkdir -p "$FIXTURES" "$WORK/bin"
 : > "$WRITES"; : > "$LAUNCHES"
+  echo "{}" > "$FIXTURES/repos_test_repo.json"
 
 export GITHUB_REPO="test/repo"
 export FIXTURES WRITES LAUNCHES

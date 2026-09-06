@@ -182,7 +182,7 @@ gh api "repos/$GITHUB_REPO" >/dev/null 2>&1 \
     || die "environment cannot run: cannot read $GITHUB_REPO from GitHub"
 
 base="${GITHUB_BASE_REF:-main}"
-git cat-file -e "origin/$base^{commit}" >/dev/null 2>&1 \
+git -C "$REPO_ROOT" cat-file -e "origin/$base^{commit}" >/dev/null 2>&1 \
     || die "environment cannot run: no base object origin/$base (reviewer cannot compute a diff)"
 
 # The pull-request resolver and has_label live here rather than in this
