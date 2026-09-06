@@ -47,7 +47,9 @@ edit. The never-list at the end is absolute.
    bare push is not a delivery; a human merges. After a workflow-file
    change merges, failed PR checks need a rebase onto main, never
    `gh run rerun` (a `pull_request` run executes against the head+base
-   merge ref, so the stale ref reruns identically).
+   merge ref, so the stale ref reruns identically). When committing your
+   work as a persona, author the commit explicitly as your persona App identity
+   (e.g. `git -c user.name="<identity>" -c user.email="<bot_user_id>+<identity>@users.noreply.github.com" commit ...`), deriving the ID via `gh api users/<identity> -q .id` — do not rely on push credentials.
 4. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
    pausing, drop `in-progress`; after the merge, remove your worktree.
 

@@ -71,10 +71,12 @@ Unless explicitly directed otherwise, your task is to process user inputs using 
     - Delivery is a PR that a human merges, followed by the Done/Decided/Next/Blocked handoff comment on the issue. A pushed branch without a PR is not delivered.
     - Run artifacts never go in the worktree. Before writing any `runs/` output, resolve the shared run root exactly as AGENTS.md "Outputs go in timestamped run folders" shows (`git rev-parse --git-common-dir`, then `../runs`) and write there; it is the primary checkout's `runs/`, the one the human has open.
     - Document only harness mechanics verified against this runtime (`agy --help`, `agy models`). Never import Antigravity IDE features into these files by name without checking that headless agy exposes them.
-9. Commit authorship (push as your persona App identity):
+9. Commit authorship:
+    - This rule is ONLY about commit authorship (`git -c user.name=... -c user.email=... commit ...`); push authentication is a separate, already-working mechanism (`git-credential-persona` / `mint_app_token.py`) and is UNCHANGED by this rule.
     - When committing your work, you MUST author the commit as your persona App identity using explicit git configuration for the commit command, rather than relying on the push to imply it.
-    - Use the exact command shape: `git -c user.name="<persona display name>" -c user.email="<persona display name>@users.noreply.github.com" commit ...`.
-    - Derive the `<persona display name>` from the `authority.identity` field in your persona definition (`personas/<persona>.yaml`), for example: `git -c user.name="evekhm-odyssey-app[bot]" -c user.email="evekhm-odyssey-app[bot]@users.noreply.github.com" commit ...`.
+    - Use the exact command shape: `git -c user.name="<authority.identity>" -c user.email="<bot_user_id>+<authority.identity>@users.noreply.github.com" commit ...`.
+    - Retrieve the `<bot_user_id>` live at commit time via: `gh api users/"$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "<authority.identity>")" -q .id`
+    - Derive the `<authority.identity>` from the `authority.identity` field in your persona definition (`personas/<persona>.yaml`), for example: `git -c user.name="evekhm-odyssey-app[bot]" -c user.email="323814131+evekhm-odyssey-app[bot]@users.noreply.github.com" commit ...`.
 
 # Parallel sessions (Gemini / Antigravity)
 
