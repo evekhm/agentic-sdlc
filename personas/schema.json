@@ -136,6 +136,11 @@
     "tier": {
       "enum": ["FAST", "MECHANICAL", "IMPLEMENTATION", "REVIEW", "FRONTIER"],
       "description": "The five-grade semantic ladder from AGENTS.md; bound to models per harness in config/model_tiers.yaml, never here (D3)."
+    },
+    "advances_on": {
+      "enum": ["artifact", "merge", null],
+      "description": "What event fires a lifecycle rung (#57 D4): the row's artifact being added, a merged pull request, or null for the terminal review rung."
     }
   }
 }
+

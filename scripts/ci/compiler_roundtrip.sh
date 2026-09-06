@@ -14,6 +14,8 @@
 #                     tree (pinned harness only, generated fallback for
 #                     an optional capability the harness cannot map)
 #   6. sanitizer    — a source carrying a home path is REFUSED
+#   7. lifecycle    — invalid rungs, duplicate labels, and advances_on
+#                     invariants are refused
 #
 # Exit 0 means the compiler is honest about its own output. This is the
 # script CI (#6) runs; nothing here touches the working tree.
@@ -220,4 +222,157 @@ grep -q "denied local string" "$TMP/deny.log" \
   || fail "build failed, but not because of the run-time deny list"
 echo "  ok: SYNC_AGENTS_DENY refuses site-specific strings at run time"
 
-printf '\nPASS: compiler roundtrip green (%s target files, 6 checks).\n' "$count"
+# --- 7. lifecycle validation: invalid rungs and advances_on invariants are refused ---
+step "7. lifecycle: invalid stages, duplicate labels, and advances_on invariants are refused"
+LIFECYCLE_TEST_DIR="$TMP/lifecycle-test"
+mkdir -p "$LIFECYCLE_TEST_DIR"
+cp -r "$REPO/personas" "$REPO/config" "$LIFECYCLE_TEST_DIR/"
+LF_JSON="$LIFECYCLE_TEST_DIR/personas/lifecycle.json"
+
+assert_lifecycle_refused() {
+  local what="$1"
+  local needle="$2"
+  if python3 "$COMPILER" --root "$LIFECYCLE_TEST_DIR" --check >"$TMP/lc.log" 2>&1; then
+    fail "lifecycle validation: compiler succeeded unexpectedly for $what"
+  fi
+  grep -qF "$needle" "$TMP/lc.log" \
+    || fail "lifecycle validation: $what failed, but error did not match '$needle'. Output: $(cat "$TMP/lc.log")"
+  echo "  ok: refused $what ('$needle')"
+}
+
+# 1. invalid stage name not in schema.json's stage enum
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["stage"] = "bogus_stage"
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "invalid stage name" "stage 'bogus_stage' is not one of"
+
+# 2. duplicate stage label
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["stage"] = "plan"
+d["stages"][1]["label"] = d["stages"][0]["label"]
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "duplicate stage label" "duplicate label rows"
+
+# 3. missing advances_on
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][1]["label"] = "status:spec"
+del d["stages"][0]["advances_on"]
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "missing advances_on" "missing advances_on"
+
+# 4. invalid advances_on value
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["advances_on"] = "invalid_trigger"
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "invalid advances_on" 'invalid advances_on "invalid_trigger"'
+
+# 5. artifact mismatch (advances_on=artifact but artifact=null)
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["advances_on"] = "artifact"
+d["stages"][0]["artifact"] = None
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "artifact null when advances_on is artifact" "advances_on is 'artifact' but artifact is null"
+
+# 6. artifact mismatch (advances_on!=artifact but artifact non-null)
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["artifact"] = "intent.md"
+d["stages"][3]["artifact"] = "unexpected.md"
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "artifact non-null when advances_on is merge" 'advances_on is "merge" but artifact is non-null'
+
+# 7. non-terminal null advances_on
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][3]["artifact"] = None
+d["stages"][0]["advances_on"] = None
+d["stages"][0]["artifact"] = None
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "non-terminal null advances_on" "non-terminal rung cannot have advances_on null"
+
+# 8. terminal non-null advances_on
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["advances_on"] = "artifact"
+d["stages"][0]["artifact"] = "intent.md"
+d["stages"][4]["advances_on"] = "merge"
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "terminal non-null advances_on" "last rung must have advances_on null"
+
+# 9. non-terminal null advances_to
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][4]["advances_on"] = None
+d["stages"][0]["advances_to"] = None
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "non-terminal null advances_to" "non-terminal rung cannot have advances_to null"
+
+# 10. terminal non-null advances_to
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["advances_to"] = "status:spec"
+d["stages"][4]["advances_to"] = "status:done"
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "terminal non-null advances_to" "last rung must have advances_to null"
+
+# 11. multiple merges
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][4]["advances_to"] = None
+d["stages"][0]["advances_on"] = "merge"
+d["stages"][0]["artifact"] = None
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "multiple merges" "expected exactly one rung with advances_on 'merge', found 2"
+
+# 12. zero merges
+python3 -c '
+import json
+p = "'"$LF_JSON"'"
+d = json.loads(open(p).read())
+d["stages"][0]["advances_on"] = "artifact"
+d["stages"][0]["artifact"] = "intent.md"
+d["stages"][3]["advances_on"] = "artifact"
+d["stages"][3]["artifact"] = "code.patch"
+open(p, "w").write(json.dumps(d))
+'
+assert_lifecycle_refused "zero merges" "expected exactly one rung with advances_on 'merge', found 0"
+
+printf '\nPASS: compiler roundtrip green (%s target files, 7 checks).\n' "$count"
