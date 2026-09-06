@@ -227,6 +227,7 @@ step "7. lifecycle: invalid stages, duplicate labels, and advances_on invariants
 LIFECYCLE_TEST_DIR="$TMP/lifecycle-test"
 mkdir -p "$LIFECYCLE_TEST_DIR"
 cp -r "$REPO/personas" "$REPO/config" "$LIFECYCLE_TEST_DIR/"
+python3 "$COMPILER" --root "$LIFECYCLE_TEST_DIR" >/dev/null
 LF_JSON="$LIFECYCLE_TEST_DIR/personas/lifecycle.json"
 
 assert_lifecycle_refused() {
