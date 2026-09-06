@@ -115,7 +115,7 @@ has "$no_slash" "main" "R1-1 baseline: a top-level transcript is classified main
 if [ "$no_slash" = "$with_slash" ]; then
   pass "R1-1: a trailing slash on the target produces an identical roll-up"
 else
-  diff <(printf '%s\n' "$no_slash") <(printf '%s\n' "$with_slash") >&2 || true
+  diff <(printf '%s\n' "$no_slash") <(printf '%s\n' "$with_slash") >&2 || [ $? -eq 1 ]
   fail "R1-1: trailing slash changed the roll-up"
 fi
 # And the classification itself, not just that the two runs agree.
@@ -125,7 +125,7 @@ has "$main_line" "1000000" "R1-1: the top-level file's tokens land under main"
 has "$sub_line" "1000000" "R1-1: the subdirectory file's tokens land under sub"
 
 # Aimed one level too high, the tool says so instead of mislabelling silently.
-parent_err=$("$SCRIPT" "$WORK" --out "$WORK/o3" 2>&1 >/dev/null || true)
+parent_err=$("$SCRIPT" "$WORK" --out "$WORK/o3" 2>&1 >/dev/null || [ $? -eq 1 ])
 has "$parent_err" "no top-level" "R1-1: a parent-of-projects target warns about classification"
 
 # ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ has "$parent_err" "no top-level" "R1-1: a parent-of-projects target warns about 
 #    spelling of $HOME walked past it and scanned the whole home directory.
 # ---------------------------------------------------------------------------
 for spelling in "$HOME" "$HOME/" "$HOME/."; do
-  out=$("$SCRIPT" "$spelling" --out "$WORK/oh" 2>&1 || true)
+  out=$("$SCRIPT" "$spelling" --out "$WORK/oh" 2>&1 || [ $? -eq 1 ])
   has "$out" "refusing to scan" "R1-2: '$spelling' is refused as \$HOME"
 done
 
@@ -184,7 +184,7 @@ for m in claude-opus-4-20250514 claude-opus-4-0 claude-opus-4-1-20250805 \
          claude-fable-5-1 opus; do
   msg "$T3b/$m.jsonl" 2026-08-20T10:00:00.000Z "$m" 1000000 0 0 0 1000000
 done
-r2=$("$SCRIPT" "$T3b" --out "$WORK/o4b")
+r2=$("$SCRIPT" "$T3b" --out "$WORK/o4b" || [ $? -eq 1 ])
 # Opus 4 and 4.1: 15 + 75 = 90. The two undated/dated Opus 4 spellings are the
 # regression R5-1 and AT-6 named; 4.1 was already correct and must stay so.
 is_usd "$r2" claude-opus-4-20250514 90.00 "R5-1/AT-6: claude-opus-4-20250514 prices at 15/75, not the Opus 5 tier"
@@ -210,7 +210,7 @@ has "$r2" "no rate for model opus — 2000000 tokens" "AT-6: the bare alias is r
 # future tense: claude-opus-9 must warn rather than inherit the Opus 5 rate.
 T3x="$WORK/rates3"; mkdir -p "$T3x"
 msg "$T3x/future.jsonl" 2026-08-20T10:00:00.000Z claude-opus-9 1000000 0 0 0 1000000
-r3=$("$SCRIPT" "$T3x" --out "$WORK/o4c")
+r3=$("$SCRIPT" "$T3x" --out "$WORK/o4c" || [ $? -eq 1 ])
 is_usd "$r3" claude-opus-9 0.00 "R5-1: an unknown Opus version is unpriced, not given a neighbouring tier"
 has "$r3" "no rate for model claude-opus-9 — 2000000 tokens" "R5-1: the unknown version is reported"
 
@@ -243,7 +243,7 @@ has "$legacy" "$(printf '%-18s %14d %12.2f' 'cache write 5m' 1000000 6.25)" "ass
 T5="$WORK/unknown"; mkdir -p "$T5"
 msg "$T5/u1.jsonl" 2026-08-20T10:00:00.000Z some-future-model-a 1000 0 0 0 0
 msg "$T5/u2.jsonl" 2026-08-20T10:00:00.000Z some-future-model-b 7000 0 0 0 0
-unk=$("$SCRIPT" "$T5" --out "$WORK/o6")
+unk=$("$SCRIPT" "$T5" --out "$WORK/o6" || [ $? -eq 1 ])
 has "$unk" "no rate for model some-future-model-a — 1000 tokens" "R1-8: each unknown model reports its own token count"
 has "$unk" "no rate for model some-future-model-b — 7000 tokens" "R1-8: the second unknown model is not given the first's total"
 has "$unk" "* unpriced" "R1-8: unpriced rows are marked in the per-model table"
@@ -303,11 +303,11 @@ has "$chk" "tokens/message" "--check: the volume axis is reported"
 # ---------------------------------------------------------------------------
 # 9. Argument handling: a bad date and an unknown flag both fail closed.
 # ---------------------------------------------------------------------------
-bad_date=$("$SCRIPT" "$T1" --since 2026-8-1 --out "$WORK/o11" 2>&1 || true)
+bad_date=$("$SCRIPT" "$T1" --since 2026-8-1 --out "$WORK/o11" 2>&1 || [ $? -eq 1 ])
 has "$bad_date" "bad date" "args: a malformed --since is rejected"
-bad_flag=$("$SCRIPT" "$T1" --nope --out "$WORK/o12" 2>&1 || true)
+bad_flag=$("$SCRIPT" "$T1" --nope --out "$WORK/o12" 2>&1 || [ $? -eq 1 ])
 has "$bad_flag" "unknown argument" "args: an unknown flag is rejected"
-no_match=$("$SCRIPT" "$T1" --since 2030-01-01 --out "$WORK/o13" 2>&1 || true)
+no_match=$("$SCRIPT" "$T1" --since 2030-01-01 --out "$WORK/o13" 2>&1 || [ $? -eq 1 ])
 has "$no_match" "no assistant messages matched" "args: an empty window is reported, not printed as zero spend"
 
 # ---------------------------------------------------------------------------
@@ -326,7 +326,7 @@ msg "$T10/g_pro_15.jsonl" 2026-08-20T10:00:00.000Z gemini-1.5-pro 1000000 0 0 0 
 msg "$T10/g_unk.jsonl" 2026-08-20T10:00:00.000Z gemini-9.9-flash 1000000 0 0 0 0
 msg "$T10/g_bare.jsonl" 2026-08-20T10:00:00.000Z gemini 1000000 0 0 0 0
 
-gemini_out=$("$SCRIPT" "$T10" --out "$WORK/o14")
+gemini_out=$("$SCRIPT" "$T10" --out "$WORK/o14" || [ $? -eq 1 ])
 is_usd "$gemini_out" gemini-3.8-flash-high 0.79 "Gemini 3.8 Flash High prices at 0.15/0.60/0.0375 (1M in + 1M out + 1M read = 0.79)"
 is_usd "$gemini_out" gemini-3.8-flash-medium 0.15 "Gemini 3.8 Flash Medium prices 1M input at 0.15"
 is_usd "$gemini_out" gemini-1.5-flash 0.15 "Gemini 1.5 Flash prices 1M input at 0.15"
@@ -357,8 +357,22 @@ T12="$WORK/pipeline"; mkdir -p "$T12"
 for i in $(seq 1 600); do
   msg "$T12/big.jsonl" 2026-08-20T10:00:00.000Z gemini-3.8-flash-high 100 0 0 0 10
 done
-pipe_out=$("$SCRIPT" "$T12" --out "$WORK/o16")
+pipe_out=$("$SCRIPT" "$T12" --out "$WORK/o16") || die "Pipeline failed with status $?"
 has "$pipe_out" "metered messages: 600" "Pipeline processes 600 messages without SIGPIPE 141"
+
+# ---------------------------------------------------------------------------
+# 13. Exit status (#109): success is 0, unpriced model is non-zero
+# ---------------------------------------------------------------------------
+T13="$WORK/exitstatus"; mkdir -p "$T13"
+msg "$T13/ok.jsonl" 2026-08-20T10:00:00.000Z "claude-3-5-sonnet-20240620" 100 0 0 0 10
+"$SCRIPT" "$T13" --out "$WORK/o17" >/dev/null || fail "#109: script exited non-zero on success"
+pass "#109: script exits 0 on success"
+
+msg "$T13/unpriced.jsonl" 2026-08-20T10:00:00.000Z "unknown-model" 100 0 0 0 10
+if "$SCRIPT" "$T13" --out "$WORK/o18" >/dev/null 2>&1; then
+  fail "#109: script exited 0 despite unpriced model"
+fi
+pass "#109: script exits non-zero on unpriced model"
 
 echo
 echo "session_spend_test.sh: all scenarios passed"
