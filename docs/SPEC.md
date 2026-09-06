@@ -665,10 +665,8 @@ only, and a run that launches nothing — a dry run, a multi-owner
 stage, a harness with no row — mints nothing. A mint that fails is
 fatal: the launcher refuses rather than falling back to whatever
 credentials the shell carries. `scripts/ops/claim.sh` enforces the same
-discipline: it mints the App token for `CLAIM_ACTOR` before posting the
-claim, reads back the created comment, and fails if the author mismatches
-the expected persona; human claims without an App token warn loudly that
-reviewers will refuse the PR (PR #179). The token reaches the child through the
+discipline: it reads back the created comment, and fails if the author
+mismatches the expected persona (PR #183). The token reaches the child through the
 environment of a subshell that `export`s it and then `exec`s — never an
 argument (`env VAR=… ` would put it in a world-readable argv), never a
 file, never a log line — and it overwrites `GH_TOKEN`/`GITHUB_TOKEN`

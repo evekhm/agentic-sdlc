@@ -240,23 +240,7 @@ echo "==> #$NUMBER · $title"
 echo "    claim:    $COMMENT"
 echo "    branch:   $BRANCH"
 
-# Resolve persona's App token
-if tok="$("$ROOT/scripts/auth/mint_app_token.py" "$ACTOR" --quiet 2>/dev/null)"; then
-    if [ -n "$tok" ]; then
-        export GH_TOKEN="$tok"
-    fi
-fi
-
-human_login=""
-if current_user="$(gh api user 2>/dev/null)"; then
-    human_login="$(jq -r '.login // ""' <<<"$current_user")"
-fi
-
-if [ -n "$human_login" ]; then
-    echo "warning: no persona credentials available for $ACTOR; claiming as $human_login." >&2
-    echo "warning: unattended reviewers will refuse this PR!" >&2
-fi
-
+PERSONA_DIR="$ROOT/personas"
 if [ "$DRY_RUN" = 1 ]; then
     run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$LABEL"
     run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" -f "body=$COMMENT"
@@ -264,18 +248,17 @@ else
     run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$LABEL"
     response="$(gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" -f "body=$COMMENT")" \
         || die "the claim comment on #$NUMBER was not posted"
-        
-    PERSONA_DIR="$ROOT/personas"
+
     if [ -f "$PERSONA_DIR/$ACTOR.yaml" ]; then
         expected="$(sed -n '/^authority:/,/^[^[:space:]#]/p' "$PERSONA_DIR/$ACTOR.yaml" \
             | sed -n 's/^[[:space:]][[:space:]]*identity:[[:space:]]*//p' \
             | head -1 | tr -d '"' | sed 's/[[:space:]]*$//')"
         actual="$(jq -r '.user.login // ""' <<<"$response")"
         url="$(jq -r '.html_url // ""' <<<"$response")"
-        
+
         if [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
             echo "$url"
-            die "the comment on #$NUMBER was posted by '$actual', but CLAIM_ACTOR says '$ACTOR', whose personas/$ACTOR.yaml names '$expected'; GH_TOKEN does not belong to that persona. Delete $url and re-run with the right credential"
+            die "the comment on #$NUMBER was posted by '$actual', but CLAIM_ACTOR says '$ACTOR', whose personas/$ACTOR.yaml names '$expected'; GH_TOKEN does not belong to that persona. Delete $url and remove the $LABEL label, then re-run with the right credential"
         fi
     fi
 fi
