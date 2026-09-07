@@ -977,7 +977,7 @@ printf '%s\n' "$raw"
 # directory tree, so a dispatch inside a worktree writes its usage
 # somewhere a caller scanning the main tree will never look, and the
 # ceiling silently never trips.
-if [ -n "$WORK_COST_FILE" ]; then
+if [ -n "$WORK_COST_FILE" ] || { [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ]; }; then
     cost="$(printf '%s' "$raw" | jq -r '.total_cost_usd // empty' 2>/dev/null)" || cost=""
     case "$cost" in ''|*[!0-9.]*) cost="" ;; esac
     if [ -n "$cost" ]; then
@@ -990,7 +990,6 @@ if [ -n "$WORK_COST_FILE" ]; then
         # first line.
         models="$(printf '%s' "$raw" \
             | jq -r '(.modelUsage // {}) | keys | join(",")' 2>/dev/null)" || models=""
-        printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
     elif [ "$launch_harness" = "antigravity" ]; then
         models="${launch_model:-$(model_of "$launch_persona" 2>/dev/null)}" || models=""
         models="${models:-$(printf '%s' "$raw" | jq -r '.model // empty' 2>/dev/null)}"
@@ -1035,18 +1034,29 @@ if [ -n "$WORK_COST_FILE" ]; then
               printf "%.6f\n", (inp*p[1] + cr*p[4] + out*p[5]) / 1e6
             }')" || cost=""
         fi
+    fi
+
+    if [ -n "$WORK_COST_FILE" ]; then
         if [ -n "$cost" ]; then
             printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
-        else
+        elif [ "$launch_harness" = "antigravity" ]; then
             : > "$WORK_COST_FILE"
             echo "==> no total_cost_usd or unpriced .usage in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
+        else
+            # Truncate rather than guess. A caller that reads an empty cost
+            # must refuse; one that reads a fabricated 0 would keep spending.
+            : > "$WORK_COST_FILE"
+            echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
         fi
-    else
-        # Truncate rather than guess. A caller that reads an empty cost
-        # must refuse; one that reads a fabricated 0 would keep spending.
-        : > "$WORK_COST_FILE"
-        echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
     fi
+
+    if [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ] && [ -n "$cost" ]; then
+        if awk -v c="$cost" -v m="$WORK_MAX_USD" 'BEGIN { if (c > m) exit 0; else exit 1 }'; then
+            echo "==> $launch_persona exceeded the \$${WORK_MAX_USD} spend ceiling: session cost \$${cost}. The Antigravity harness cannot enforce ceilings pre-emptively; overrun was detected post-hoc." >&2
+            exit 1
+        fi
+    fi
+
     denials="$(printf '%s' "$raw" | jq -r '(.permission_denials // []) | length' 2>/dev/null)" || denials=0
     [ "${denials:-0}" = "0" ] \
         || echo "==> $launch_persona hit $denials permission denial(s); set WORK_PERMISSION_MODE if it needs to act." >&2

@@ -542,7 +542,9 @@ cover — a launch with no operator watching it — and each is opt-in, so
 an unset variable leaves argv and behaviour exactly as an attended run
 has them. A spend ceiling is passed to the harness itself, so that an
 unattended run is bounded by the thing spending the money rather than
-by a number a config file merely declares. A permission mode is passed
+by a number a config file merely declares (PR #172: pre-emptive for
+Claude Code; detected post-hoc by the dispatcher for Antigravity, which
+cannot enforce it during execution). A permission mode is passed
 through, because the default mode denies a persona the file and tracker
 writes its stage exists to make, and an unattended persona that cannot
 act spends its whole prompt preamble to say so. The run's own reported
