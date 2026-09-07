@@ -20,5 +20,5 @@ harnesses:
     FAST: gemini-3.7-flash-medium   # or -low; `agy models` lists runtime
     MECHANICAL: gemini-3.7-flash-high
     IMPLEMENTATION: gemini-3.7-flash-high
-    REVIEW: gemini-3.1-pro-high
-    FRONTIER: gemini-3.1-pro-high
+    REVIEW: gemini-3.1-pro-low-thinking
+    FRONTIER: gemini-3.1-pro-low-thinking

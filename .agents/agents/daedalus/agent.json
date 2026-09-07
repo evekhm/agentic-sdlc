@@ -5,6 +5,6 @@
     "max_turns": 80,
     "timeout_mins": 45
   },
-  "model": "gemini-3.1-pro-high",
+  "model": "gemini-3.1-pro-low-thinking",
   "name": "daedalus"
 }
