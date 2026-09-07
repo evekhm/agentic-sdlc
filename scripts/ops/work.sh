@@ -653,6 +653,32 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
             LAUNCH_ARGV+=( agy -p "$PROMPT" --agent "$persona"
                            --add-dir "$REPO_ROOT" --model "$model"
                            --output-format json --print-timeout "${mins}m" )
+            # The antigravity half of WORK_PERMISSION_MODE. Headless agy
+            # cannot prompt, so it AUTO-DENIES every tool that needs the
+            # `command` permission and then exits 0 having produced
+            # nothing — "no output produced — a tool required the
+            # 'command' permission that headless mode cannot prompt
+            # for". A reviewer that cannot run a command cannot read a
+            # diff, so this is not a degraded review, it is no review.
+            #
+            # Measured on the first runner dispatch that reached a model
+            # at all (#167): SUCCESS, 380 output tokens, empty response.
+            #
+            # The caller's vocabulary is claude-code's, because that is
+            # what the workflow already sets; only `bypassPermissions`
+            # maps, and anything else is refused rather than silently
+            # ignored — a permission mode that does not reach the
+            # harness is exactly the failure above. The scope, and the
+            # objection to its width, are the same as the claude-code
+            # branch's: see .github/workflows/unattended.yml and #168.
+            case "${WORK_PERMISSION_MODE:-}" in
+                '') ;;
+                bypassPermissions)
+                    LAUNCH_ARGV+=( --dangerously-skip-permissions ) ;;
+                *)
+                    echo "refused: WORK_PERMISSION_MODE=$WORK_PERMISSION_MODE has no antigravity equivalent; agy accepts only the bypass (#167)" >&2
+                    exit 1 ;;
+            esac
             ;;
     esac
 }
