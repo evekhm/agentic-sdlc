@@ -24,9 +24,14 @@ succeeding and a review posted by the runner itself. Evidence: run
 34093599471 on PR #188, job "argus via gh-actions", success,
 07:03:34 to 07:12:04 UTC on 2026-09-07; the log ends in a real
 `end_turn` result and the round-1 review comment is by
-`evekhm-argus-app[bot]` at 07:11:23. Atlas failed in the same run on the
-old model pin and has since posted a real BLOCK on PR #211 after the
-re-pin, so both reviewers have now reviewed unattended at least once.
+`evekhm-argus-app[bot]` at 07:11:23. The loop also closes: run
+34096818383 on the same PR (argus job 07:43:01 to 07:47:27) posted the
+round-2 verdict at 07:46:50, "no open blocking rows, merge-ready from my
+side", the first unattended AGREE. Atlas failed in both runs with
+"invalid model selection" on the dead pin; the atlas BLOCK on PR #211
+at 07:44 came from a local session holding the app token, not from the
+runner (no runner job on that branch produced it), so atlas has not yet
+reviewed unattended.
 
 **1b, not met:** the runner reviews every rung's pull request, not only
 a bug-fix branch outside the ladder. Every ladder PR is refused at the
@@ -36,7 +41,7 @@ proof of mechanism, not of coverage. Order matters.
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | 1 | #207 | The claim mutex refuses every ladder PR's review for its whole open window, and the derived stage is never `review`. Two walls; 1b is measurable only after this lands. | spec merged (PR #212); plan PR #218 open; implement rung follows |
-| 2 | #167 | atlas cannot see its model on the runner. The re-pin landed; sufficiency is measured by the next status-labelled PR's atlas log, which #207 unblocks. | open, in-progress |
+| 2 | #167 | atlas cannot see its model on the runner: every atlas job fails at launch with "invalid model selection (--model gemini-3.1-pro-low-thinking)", last measured in run 34096818383 at 07:43. The re-pin is PR #215, open with merge conflicts; nothing has landed on main. Gate 1a stands on argus alone until this merges and a status-labelled PR's atlas log shows a model call. | open, in-progress; PR #215 open, conflicting |
 | 3 | #169 | jsonschema is missing on the runner, so a persona cannot run the compiler gate. | done: PR #214 merged 07:50, issue closed |
 | 4 | #168 | Permission posture for a persona on a CI runner: bypass or allowlist. An operator decision, not a build. | open, intent:new |
 | 5 | #191 | Claims land under the bare human login. Identity as a hard claim-time parameter; needed before any board reading is trustworthy. | open |
