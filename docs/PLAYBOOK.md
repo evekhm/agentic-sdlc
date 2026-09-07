@@ -101,8 +101,8 @@ order:
    --delete-branch`), verify the commit reached main and the issue
    closed **by this PR's own keyword** — an issue can also close from
    a stray `Closes #n` trailer on a cherry-picked commit riding an
-   unrelated PR (#167 closed that way under #164 with nothing fixed;
-   reopened by hand). BLOCK → write a **self-contained fix prompt
+   unrelated PR (#167 closed that way under #164 with its re-pin not
+   yet verified live; reopened by hand). BLOCK → write a **self-contained fix prompt
    file** and hand the path to the operator; a FRESH agy session
    fixes on the same branch. Repeat until merged. The one legitimate
    merge with an open row is the operator's explicit call, and the
@@ -225,7 +225,7 @@ only distrusts the model ships the other two layers' lies.**
 - **Trailer closes**: a `Closes #n` trailer on a cherry-picked commit
   closes issue n the moment any PR carrying that commit merges, with
   `COMPLETED` as the reason (#167 via commit 11b88aa inside #164). The
-  tracker then says fixed; nothing was. The advisor first wrote "#184"
+  tracker then says fixed; the fix was not yet verified live. The advisor first wrote "#184"
   here and in the #167 thread from the thread's narrative instead of
   `git merge-base --is-ancestor`; the verifier caught it. A prompt
   author's unverified attribution is the same defect class as an
