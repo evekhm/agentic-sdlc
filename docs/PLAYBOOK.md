@@ -154,7 +154,12 @@ order:
    advisor's FRONTIER tier, `claude --model opus` for the verifier's
    REVIEW tier) and the one-line file pointer; the dated
    `~/handoff-plan-*.txt` the previous advisor left is the execution
-   state on top of this document.
+   state on top of this document. **Verify every seat holder live**
+   before acting on it — ListAgents AND a reply to a SendMessage —
+   never from a name in a handoff or observations file: a handoff
+   once named a verifier session that had already ended and caused a
+   double launch. A seat named in a file is a claim; a reply is
+   evidence.
 
 ## Field notes: what the waves taught us
 
@@ -268,9 +273,16 @@ Final scoring lands in the wave observations file when batch 2 merges.
    Then the prompt-minimalism A/B: dispatch a well-specified issue
    with only "work issue #N per GEMINI.md" and score rounds-to-merge
    vs the wave-1 baseline.
-2. **Kill the fake-greens** — #191 (identity as a hard claim-time
+2. **Kill the fake-greens** — first #207: the claim mutex in work.sh
+   refuses an unattended review of a ladder PR for the whole
+   PR-open-to-merge window because the rung's own claim still holds
+   `in-progress`. That is a fifth cause of "no real review", green
+   and by design, and invisible to every runner fix below — with all
+   four runner fixes landed, the reviewer would still be refused on
+   every ladder PR. Recommendation on the thread: exempt the review
+   stage from the mutex. Then #191 (identity as a hard claim-time
    parameter; never trust a board without the job log), plus the
-   runner-reviewer cluster (#162 and #165 done; #163/#168/#169 open),
+   runner-reviewer cluster (#162, #163 and #165 done; #168/#169 open),
    #167 (runner model access: the re-pin landed, sufficiency is
    measured by the next status-labelled PR's atlas log), #198 (CI gate
    for `distinct_model_families`, so a re-pin cannot silently collapse
@@ -292,13 +304,21 @@ structural — in files, gates, and an independent reviewer — rather
 than in anyone's attention.
 
 ---
-Status snapshot (2026-09-07): wave-1 core track merged and closed
-(#131 #53 #92 #109 #180 #179). Batch 2: #187 (#52), #184 (#172) and
-#189 (#165) merged after fix rounds; #164 (#162) merged per operator
-direction with one security row deferred to #168. Still open with a
-fix prompt written and not yet fired: #188 (#137, round 2), #196
-(#195, round 1), #185 (#74, round 2; no closing keyword by design —
-whether it closes #74 is the operator's call at AGREE). #167 reopened
-(trailer close). New trackers: #197 (branch-switch guard), #198
-(reviewer-family CI gate), #199 (advisor/verifier seats). Systemic
-trackers open: #191, #181, #167, #163/#168/#169, #82.
+Status snapshot (2026-09-07, ~07:30 UTC): wave-1 core track merged and
+closed (#131 #53 #92 #109 #180 #179). Batch 2: #187 (#52), #184
+(#172), #189 (#165) and #196 (#195, after one fix round) merged;
+#164 (#162, also closing #163) merged per operator direction with
+one security row deferred to #168. Fix round 2 fired and awaiting
+the verifier: #188 (#137) and #185 (#74; no closing keyword by
+design — whether it closes #74 is the operator's call at AGREE).
+#167 reopened (trailer close). The two standing seats are on the
+ladder: #199 (advisor persona `nestor`) has intent (PR #201) and spec
+(PR #205) merged and its plan PR #208 in review; #204 (verifier as
+the review stage of `argus`) has intent PR #206 merged and its spec
+in drafting. Filed since the last snapshot: #203 (claim.sh checks
+identity after posting), #207 (claim mutex blocks unattended review
+of ladder PRs — now first in roadmap item 2, ahead of the runner
+cluster, and the operator's stated next priority over #199's
+implementation dispatch). #181 kickoff prompts are written, not yet
+fired. Systemic trackers open: #191, #181, #167, #168/#169, #82,
+#198.
