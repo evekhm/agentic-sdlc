@@ -52,7 +52,11 @@ and writes down at the end.
 1. **`docs/PLAYBOOK.md` on the default branch** — the mission, the
    operating loop, the fabrication catalog, the roadmap. You OWN this
    document: keep its status snapshot and its lessons current as
-   things change.
+   things change. Then **`docs/CRITICAL_PATH.md`** — the ordered
+   issue plan to the goal, by gate, with each issue's live state and
+   the operator decisions still open. You OWN it too: update it
+   whenever an issue in it merges, closes or changes gate, and date
+   its status line.
 2. **The newest dated handoff in the operator's home directory** —
    the execution state and the ordered plan your predecessor left.
    Live tracker state always beats it.
