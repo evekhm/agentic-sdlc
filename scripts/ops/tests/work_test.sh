@@ -58,6 +58,7 @@ LAUNCHES="$WORK/launches.log"
 MINTS="$WORK/mints.log"
 mkdir -p "$FIXTURES" "$WORK/bin"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
+  echo "{}" > "$FIXTURES/repos_test_repo.json"
 
 export GITHUB_REPO="test/repo"
 export FIXTURES WRITES LAUNCHES MINTS
@@ -67,6 +68,20 @@ pass() { echo "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # --- the stubs ----------------------------------------------------------------
+cat > "$WORK/bin/git" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-C" ] && [ "${3:-}" = "cat-file" ] && [ "${4:-}" = "-e" ]; then
+    if [ "${5:-}" = "origin/does-not-exist^{commit}" ]; then exit 1; fi
+    exit 0
+fi
+if [ "${1:-}" = "cat-file" ] && [ "${2:-}" = "-e" ]; then
+    if [ "${3:-}" = "origin/does-not-exist^{commit}" ]; then exit 1; fi
+    exit 0
+fi
+exec /usr/bin/git "$@"
+STUB
+chmod +x "$WORK/bin/git"
+
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 # Canned reads only. Anything that is not `gh api [--paginate] <path>`
@@ -734,6 +749,19 @@ banner "nothing above this line launched or wrote"
 [ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "a token was minted"; }
 pass "no GitHub write, no launch and no token exchange in any resolve-only scenario"
 
+banner "#165 preflight checks — missing GitHub read or missing base object exits 1"
+rm -f "$FIXTURES/repos_test_repo.json"
+run 1 "#165: missing GitHub read path exits 1" -- 108
+has "environment cannot run: cannot read test/repo from GitHub" "#165: the missing read is named"
+
+echo "{}" > "$FIXTURES/repos_test_repo.json"
+GITHUB_BASE_REF="does-not-exist" run 1 "#165: missing base object exits 1" -- 108
+has "environment cannot run: no base object origin/does-not-exist" "#165: the missing base object is named"
+[ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "#165: a write was attempted on preflight failure"; }
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "#165: a session was launched on preflight failure"; }
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "#165: a token was minted on preflight failure"; }
+pass "#165: preflight failures exit 1 and attempt zero writes, launches, or mints"
+
 # =============================================================================
 # #43 — the launching half. Everything below runs against a fixture_tree:
 # work.sh resolves the mint script by absolute path from BASH_SOURCE, so
@@ -805,6 +833,7 @@ banner "#43 D3/D8 a harness binary that is not installed is exit 1, before any m
 # else, and /usr/bin:/bin supplies jq, timeout and env.
 mkdir -p "$WORK/bin-noharness"
 cp "$WORK/bin/gh" "$WORK/bin-noharness/gh"
+cp "$WORK/bin/git" "$WORK/bin-noharness/git"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
 saved_path="$PATH"
 PATH="$WORK/bin-noharness:/usr/bin:/bin"
@@ -842,8 +871,8 @@ done
 # `rm -f` first: these three are symlinks into /usr/bin at this point,
 # and `cp` would follow them and try to overwrite the REAL binaries.
 rm -f "$WORK/bin-notimeout/timeout" "$WORK/bin-notimeout/gh" \
-      "$WORK/bin-notimeout/agy" "$WORK/bin-notimeout/claude"
-cp "$WORK/bin/gh" "$WORK/bin/agy" "$WORK/bin/claude" "$WORK/bin-notimeout/"
+      "$WORK/bin-notimeout/agy" "$WORK/bin-notimeout/claude" "$WORK/bin-notimeout/git"
+cp "$WORK/bin/gh" "$WORK/bin/agy" "$WORK/bin/claude" "$WORK/bin/git" "$WORK/bin-notimeout/"
 for _b in bash env jq gh agy; do
   [ -e "$WORK/bin-notimeout/$_b" ] \
     || fail "N1: the mirrored PATH is missing $_b — the fixture, not the code"
@@ -1260,3 +1289,4 @@ has "must be numeric" "#184: string fallback prevented"
 
 echo
 echo "work_test.sh: all scenarios passed"
+

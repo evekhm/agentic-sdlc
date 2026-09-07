@@ -179,10 +179,19 @@ esac
 esac
 
 # --- Preflight ----------------------------------------------------------------
-for cmd in gh jq; do
+for cmd in gh jq git; do
     command -v "$cmd" >/dev/null || die "$cmd is not installed"
 done
 [ -r "$GITHUB_LIB" ] || die "cannot read $GITHUB_LIB"
+
+gh api "repos/$GITHUB_REPO" >/dev/null 2>&1 \
+    || die "environment cannot run: cannot read $GITHUB_REPO from GitHub"
+
+base="${GITHUB_BASE_REF:-main}"
+git -C "$REPO_ROOT" cat-file -e "origin/$base^{commit}" >/dev/null 2>&1 \
+    || die "environment cannot run: no base object origin/$base (reviewer cannot compute a diff)"
+
+
 # The pull-request resolver and has_label live here rather than in this
 # file so that D14's "the same way work.sh resolves it" is ONE
 # implementation: scripts/ops/post.sh gates its writes on the issues a

@@ -34,6 +34,7 @@ WRITES="$WORK/writes.log"
 LAUNCHES="$WORK/launches.log"
 mkdir -p "$FIXTURES" "$WORK/bin"
 : > "$WRITES"; : > "$LAUNCHES"
+  echo "{}" > "$FIXTURES/repos_test_repo.json"
 
 export GITHUB_REPO="test/repo"
 export FIXTURES WRITES LAUNCHES
@@ -63,7 +64,15 @@ echo "stub $harness: a session was launched by a test that forbids it" >&2
 exit 1
 STUB
 done
-chmod +x "$WORK/bin/gh" "$WORK/bin/claude" "$WORK/bin/agy"
+cat > "$WORK/bin/git" <<'STUB'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-C" ] && [ "${3:-}" = "cat-file" ] && [ "${4:-}" = "-e" ]; then
+  exit 0
+fi
+exec /usr/bin/git "$@"
+STUB
+
+chmod +x "$WORK/bin/gh" "$WORK/bin/claude" "$WORK/bin/agy" "$WORK/bin/git"
 
 # issue <n> <state> <labels-csv> <title>
 issue() {
