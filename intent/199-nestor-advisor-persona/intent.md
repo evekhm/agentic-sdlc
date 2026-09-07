@@ -43,7 +43,7 @@ This intent covers the advisor seat only. The verifier seat (the
 issue's "Seat 2": review stage executed by the existing reviewer
 persona plus separable process powers, or a persona of its own) is a
 different decision with a different owner and is split out to its own
-issue; see "Open questions" 7.
+issue; see "Open questions" 8.
 
 ## Proposed outcome
 
@@ -163,11 +163,22 @@ reference to `~/persona-advisor.txt`.
    this deployment, not about the persona. Persona brief, deployment
    config, or PLAYBOOK, with the brief pointing at it? Decide in
    spec.md.
-6. **Capability vocabulary.** Whether personas/schema.json's existing
-   capability and tool fields can express judgment-only plus
-   delegation, or a field is missing. The spec answers this from the
-   schema as it is, not from memory.
-7. **The verifier issue.** Seat 2 of #199 is filed separately (issue
+6. **Capability vocabulary and the persona-only fields.** Whether
+   personas/schema.json's existing capability and `delegates_to`
+   fields can express judgment-only plus delegation, or a field is
+   missing; and what a persona that is never dispatched declares for
+   the fields the schema requires of every `kind: persona` (at least
+   one stage, `limits.max_turns`, `limits.timeout_mins`). The spec
+   answers this from the schema as it is, not from memory.
+7. **Identity and authority.** Every persona declares
+   `authority.github_write`, `authority.identity` and
+   `authority.token`. The seat writes today under two identities: the
+   operator's bot for PLAYBOOK PRs and thread comments, athena's App
+   at the gate. Does Nestor get its own App identity (the schema
+   allows `TBD` until one exists) and a `branch:nestor/*` write path,
+   or does the brief prescribe which existing identity the seat uses
+   for which act? Decide in spec.md.
+8. **The verifier issue.** Seat 2 of #199 is filed separately (issue
    number recorded on the #199 thread when it exists). The spec for
    Nestor must name the one launch-line convention both seats share
    and must not decide the verifier's stage-versus-persona question.
