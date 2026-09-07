@@ -30,12 +30,24 @@ harnesses:
     # offers exactly one Pro-tier id — this one. `gemini-3.1-pro-high`
     # resolves on a laptop and on no runner.
     #
-    # This pin is necessary and NOT sufficient: atlas's 17-second deaths
-    # (#167) are the catalog FETCH failing outright, because Cloud Code
-    # Private API is disabled on the project, and with no catalog `agy`
-    # rejects every id. Enabling that API is a human action. Verify an
-    # antigravity re-pin by a live dispatch; no gate here can see either
-    # failure. FRONTIER moves with REVIEW because daedalus is
+    # This pin is necessary and NOT sufficient, and the earlier note here
+    # named the wrong cause. Atlas's 17-second deaths (#167) are the
+    # catalog FETCH returning nothing, and that is a property of the
+    # IDENTITY, not of the project: cloudcode-pa.googleapis.com serves a
+    # catalog per Antigravity entitlement, a federated service account
+    # holds none, and with no catalog `agy` rejects every id. Measured
+    # 2026-09-07 on a runner — WIF service account: 0 models; the same
+    # runner shape with an `authorized_user` ADC credential: 15 models
+    # and a successful call. Both projects behaved identically, and
+    # granting `roles/serviceusage.serviceUsageConsumer` changed nothing.
+    # The sufficient half is therefore the credential, provisioned as
+    # the ANTIGRAVITY_ADC_JSON secret and swapped in by work.sh on the
+    # antigravity branch only.
+    #
+    # Every id above and below is present in that ADC catalog, verified
+    # the same day. Verify an antigravity re-pin by a live dispatch; no
+    # gate here can see either failure. FRONTIER moves with REVIEW
+    # because daedalus is
     # `tier: FRONTIER` on this same harness (personas/daedalus.yaml),
     # NOT because of deployments.yaml's distinct_model_families rule,
     # which reaches REVIEW and only REVIEW.

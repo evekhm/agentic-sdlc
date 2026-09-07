@@ -946,6 +946,37 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
         export "GIT_CONFIG_VALUE_$((base + 3))=git@github.com:"
         export GIT_CONFIG_COUNT=$((base + 4))
         export WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:+$WORK_DISPATCHED_ISSUE:}$ISSUE"
+        # agy needs a DIFFERENT cloud credential than claude-code, and
+        # this is the only place that knows which harness is about to
+        # launch — the workflow is harness-blind by design (D18), so it
+        # cannot make this choice for us (#167).
+        #
+        # Why a second credential at all. agy ships no built-in model
+        # list: it fetches its catalog at startup from
+        # cloudcode-pa.googleapis.com, which serves that catalog per
+        # IDENTITY ENTITLEMENT, not per project. A federated service
+        # account has no Antigravity entitlement, so under WIF the fetch
+        # returns nothing ("timed out waiting for available models") and
+        # agy then rejects EVERY --model value with "not recognized as a
+        # known model" — which is why re-pinning the model never fixed
+        # this and no IAM role can. Measured on a runner: WIF service
+        # account 0 models; an authorized_user ADC credential, same
+        # runner shape, 15 models and a successful Pro call.
+        #
+        # claude-code is untouched: it talks to Vertex, where the WIF
+        # service account works and stays least-privilege. Only the
+        # antigravity branch swaps the credential, and only when the
+        # operator has provisioned one.
+        if [ "$launch_harness" = "antigravity" ] \
+           && [ -n "${AGY_GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+            if [ -r "$AGY_GOOGLE_APPLICATION_CREDENTIALS" ]; then
+                export GOOGLE_APPLICATION_CREDENTIALS="$AGY_GOOGLE_APPLICATION_CREDENTIALS"
+            else
+                echo "==> WARNING: AGY_GOOGLE_APPLICATION_CREDENTIALS is set but not readable;" >&2
+                echo "    agy will fall back to the default credential and will very likely" >&2
+                echo "    report every model as unrecognized (#167)." >&2
+            fi
+        fi
         exec "${LAUNCH[@]}"
     )
 }

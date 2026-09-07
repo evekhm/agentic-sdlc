@@ -48,7 +48,8 @@ Environment:
                           enabled on Vertex AI.
   GITHUB_REPO             <owner>/<repo>. Default: `gh repo view --json nameWithOwner`.
   ANTIGRAVITY_PROJECT_ID  Billing project the agy CLI is told about under ADC auth.
-                          Default: $GCP_PROJECT.
+                          Default: $GCP_PROJECT. NOTE: it does not decide which
+                          models agy can see — the calling identity does (#167).
   POOL_ID                 Default: github-actions
   PROVIDER_ID             Default: github-provider
   SA_ID                   Default: unattended-personas
@@ -573,6 +574,56 @@ ensure_variable WIF_PROVIDER "$WIF_PROVIDER_FULL"
 ensure_variable WIF_SERVICE_ACCOUNT "$SA_EMAIL"
 ensure_variable CLAUDE_VERTEX_PROJECT_ID "$GCP_PROJECT"
 ensure_variable ANTIGRAVITY_PROJECT_ID "$ANTIGRAVITY_PROJECT_ID"
+
+# --- agy's second credential (#167) ---------------------------------------------
+#
+# Everything above provisions ONE credential: workload identity
+# federation to $SA_EMAIL. That is all claude-code needs, because it
+# calls Vertex. It is not enough for agy, and no amount of IAM makes it
+# enough.
+#
+# agy ships no built-in model list. It fetches its catalog at startup
+# from cloudcode-pa.googleapis.com, and that catalog is served per
+# ANTIGRAVITY ENTITLEMENT of the calling identity — not per project and
+# not per role. A federated service account holds no such entitlement,
+# so the fetch returns nothing and agy then rejects every --model value
+# with "not recognized as a known model". Measured 2026-09-07 on a
+# GitHub-hosted runner: WIF service account -> 0 models ("timed out
+# waiting for available models"); the same runner shape with an
+# `authorized_user` ADC credential -> 15 models and a successful Pro
+# call. ANTIGRAVITY_PROJECT_ID made no difference either way, and
+# granting roles/serviceusage.serviceUsageConsumer made no difference.
+#
+# This script therefore cannot create it — it needs an interactive
+# Google login by an entitled account. This block only reports it.
+if gh secret list --repo "$GITHUB_REPO" --json name --jq '.[].name' 2>/dev/null \
+     | grep -qx ANTIGRAVITY_ADC_JSON; then
+  ok "secret ANTIGRAVITY_ADC_JSON (agy's user-entitled credential)"
+else
+  ABSENT+=("secret ANTIGRAVITY_ADC_JSON — antigravity personas resolve no model without it")
+  cat <<EOF
+
+==> MISSING: the repository secret ANTIGRAVITY_ADC_JSON.
+    Until it is set, every antigravity persona (config/deployments.yaml)
+    dies in ~17s on a runner with "model ... is not recognized" (#167).
+    claude-code personas are unaffected.
+
+    Provision it with an account entitled to Antigravity — preferably a
+    dedicated one and NOT a human's daily account, because the file holds
+    a long-lived refresh token:
+
+      gcloud auth application-default login
+      gh secret set ANTIGRAVITY_ADC_JSON --repo "$GITHUB_REPO" \\
+        < "\$HOME/.config/gcloud/application_default_credentials.json"
+
+    Check that the account actually sees a catalog BEFORE uploading:
+
+      AGY_ADC_AUTH=true ANTIGRAVITY_PROJECT_ID=$ANTIGRAVITY_PROJECT_ID agy models
+
+    An empty list there means the account is not entitled and the secret
+    will not help.
+EOF
+fi
 
 # --- Summary -------------------------------------------------------------------
 echo

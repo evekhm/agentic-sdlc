@@ -250,6 +250,51 @@ jobs:
             echo "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE=$DEST"
           } >> "$GITHUB_ENV"
 
+      # The second credential, for agy only (#167). This file stays
+      # harness-blind: it does not know which harness will launch, it
+      # only makes the credential AVAILABLE under a name work.sh reads
+      # on the antigravity branch and nowhere else. If the secret is
+      # unset the step writes nothing, AGY_GOOGLE_APPLICATION_CREDENTIALS
+      # stays empty, and antigravity dispatches keep the WIF credential
+      # and keep failing the way #167 documents — a missing secret is a
+      # provisioning gap, not a reason to fail a review job that may be
+      # dispatching claude-code anyway.
+      #
+      # WHY this cannot be the WIF credential. agy has no built-in model
+      # list; it fetches its catalog from cloudcode-pa.googleapis.com,
+      # which serves per IDENTITY ENTITLEMENT rather than per project. A
+      # federated service account holds no Antigravity entitlement, so
+      # the catalog comes back empty and agy rejects every --model value.
+      # Measured on this runner: WIF service account -> 0 models
+      # ("timed out waiting for available models"); an authorized_user
+      # ADC credential -> 15 models and a successful Pro call. No IAM
+      # role changes this; `roles/serviceusage.serviceUsageConsumer` was
+      # granted and re-measured at 0.
+      #
+      # The secret is therefore an `authorized_user` ADC json — the file
+      # `gcloud auth application-default login` writes — for an account
+      # entitled to Antigravity. It carries a long-lived refresh token,
+      # so prefer a dedicated account over a human's daily one; see
+      # scripts/setup/wif_setup.sh for provisioning.
+      - name: Provide agy's user-entitled credential (antigravity only)
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          AGY_ADC_JSON: ${{ secrets.ANTIGRAVITY_ADC_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AGY_ADC_JSON:-}" ]; then
+            echo "::notice::ANTIGRAVITY_ADC_JSON is not set — agy dispatches will have no usable model catalog (#167)."
+            exit 0
+          fi
+          # Outside the workspace, same reasoning as the step above: a
+          # launched persona can read any path in the checkout.
+          DEST="$RUNNER_TEMP/agy-adc.json"
+          # printf, not echo: the value never reaches an argv or a here-doc
+          # the log could echo, and the file is created before it is filled.
+          install -m 600 /dev/null "$DEST"
+          printf '%s' "$AGY_ADC_JSON" > "$DEST"
+          echo "AGY_GOOGLE_APPLICATION_CREDENTIALS=$DEST" >> "$GITHUB_ENV"
+
       # Three calls into one script, so the toolchain a runner gets is the
       # one scripts/ops/tests/placement_test.sh checks and an operator can
       # reproduce by hand. `resolve` runs first because the cache key must
@@ -384,3 +429,11 @@ jobs:
             exit 0
           fi
           exit "$rc"
+
+      # LAST step, and `always()`: agy's credential is user-entitled and
+      # long-lived, and the auth action's own post-job cleanup only
+      # knows about GOOGLE_GHA_CREDS_PATH. Nothing else deletes this
+      # file, so nothing else may run after this (#167).
+      - name: Remove agy's credential
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/agy-adc.json"
