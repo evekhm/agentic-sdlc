@@ -197,8 +197,13 @@ for adapter in "${adapters[@]}"; do
   if grep -qiE 'Work issue|--agent |-p "' "$adapter"; then
     fail "D16: $rel composes a prompt"
   fi
-  # No model, tier or cost literal (D8, D15).
-  if grep -qE '\b(opus|sonnet|haiku|flash|pro-high|FRONTIER|REVIEW|IMPLEMENTATION)\b' "$adapter"; then
+  # No model, tier or cost literal (D8, D15). The vendor families are
+  # matched by PREFIX, not by pinned id: an enumeration of ids owes this
+  # line an edit on every re-pin, and the re-pin in this PR walked
+  # straight through the old one — `gemini-3.1-pro-low-thinking` matched
+  # no alternative in it (#164, Argus R4-1). `gemini-`, `claude-` and
+  # `gpt-` catch any future id in those families without another edit.
+  if grep -qE '\b(opus|sonnet|haiku|flash|pro-high|gemini-[0-9]|claude-[a-z0-9]|gpt-[0-9]|FRONTIER|REVIEW|IMPLEMENTATION)\b' "$adapter"; then
     fail "D16/D15: $rel names a model or a tier"
   fi
   pass "D16: $rel dispatches exactly once, through the one work.sh line"
@@ -354,7 +359,13 @@ pass "D16: a flag naming a stage or a prompt is refused outright"
 banner "T5/D3 gh-actions refuses BY NAME when the key variable is unset"
 : > "$WRITES"
 set +e
-OUT="$(env -u ARGUS_APP_PRIVATE_KEY STUB_REPOS="evekhm/agentic-sdlc" DRY_RUN=1 \
+# `UNSET_CREDENTIAL_IS_SKIP` is scrubbed alongside the key, or this
+# scenario is not hermetic: the workflow exports it into every
+# unattended session (`unattended.yml`), so a suite run from inside one
+# takes the adapter's SKIP branch and sees exit 2 where this asserts the
+# strict 1. Pre-existing, but this PR makes that the reviewer's normal
+# environment (#164, Argus R4-6) — same class as the GIT_CONFIG_* scrub.
+OUT="$(env -u ARGUS_APP_PRIVATE_KEY -u UNSET_CREDENTIAL_IS_SKIP STUB_REPOS="evekhm/agentic-sdlc" DRY_RUN=1 \
   "$T/scripts/placement/gh-actions/run.sh" 25 --as argus 2>&1)"
 rc=$?
 set -e

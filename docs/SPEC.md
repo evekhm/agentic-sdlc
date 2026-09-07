@@ -510,6 +510,33 @@ a launch against a target that is not there is a session running as the
 harness's stock agent under a persona's name — and so is a harness
 binary, or `timeout` itself, that is not on `PATH`.
 
+An unattended runner has no interactive login, so it authenticates
+`agy` by ADC (`AGY_ADC_AUTH=true`), and `agy` does not carry a model
+list: it FETCHES its catalog at startup from
+`cloudcode-pa.googleapis.com`, an API distinct from the Vertex
+endpoint the models themselves are served on. Both must therefore
+work, and today only one does. The runner's federated service account
+holds `aiplatform.endpoints.predict`, which is why argus runs; the
+catalog call returns `403 SERVICE_DISABLED` because Cloud Code Private
+API is not enabled on the project, `agy` reports `timed out waiting
+for available models`, and with an empty catalog it rejects EVERY
+`--model` value as "not recognized as a known model or custom model in
+settings". That is why atlas died in seventeen seconds on every review
+round it was ever dispatched for (#167), and no pin fixes it: with no
+catalog there is no id that resolves. Enabling that API is a human
+action — it needs `servicemanagement.services.bind`, which neither the
+runner nor a maintainer account here holds.
+
+The pin still matters, for the case where the catalog is reachable:
+`agy` serves a narrower list under ADC than under an account login,
+and where it answers at all it offers exactly one Pro-tier id, so an
+antigravity binding in `config/model_tiers.yaml` that names anything
+else resolves on a laptop and not on a runner. Both properties are
+invisible to every gate short of one that actually launches the
+harness — a schema check sees a well-formed string, and a placement
+check sees no model literal — so an antigravity re-pin is verified by
+a live dispatch or it is not verified.
+
 Every MODE is an environment variable, for the same reason argv is
 closed: `DRY_RUN=1` prints the resolved launch command instead of
 executing it (the reads and every guard still run, and nothing is
@@ -784,8 +811,34 @@ script with `resolve`, `install` and `check`, cached by version, the
 same command an operator runs on a new machine) and it authenticates
 through workload identity federation — the job's one grant beyond read
 is `id-token: write`, no cloud key is stored, and the credential file
-the auth step writes is moved out of the checkout before any persona
-can read it. Federation is provisioned once per repository by
+the auth step writes is moved out of the checkout.
+
+A persona launched on a runner runs with its harness's permission gate
+bypassed, because a gate whose only answer is a prompt has nobody to
+prompt and denies every read the persona was dispatched to make — down
+to the `hold` re-read that trusted posting requires before any write,
+so a gated reviewer cannot review AND must not post. What bounds the
+persona is therefore not the gate but what the runner holds: the job's
+own token cannot write, the App installation token is the single write
+credential and lives an hour, and the placement is the boundary of the
+grant — the bypass is the `gh-actions` adapter's, never `HEADLESS`'s,
+because a headless session on an operator's machine has a human at the
+keyboard.
+
+Two things a bypassed session can reach anyway, both stated because
+they are measured rather than feared. The cloud credential file is
+moved out of the checkout as a defence against the workspace, not
+against the persona: a bypassed session reads any path the runner can,
+and the file's value is that it is short-lived and predict-only, not
+that it is hidden. The persona's App private key is unset before the
+launch, so the session does not INHERIT it — but `/proc/<pid>/environ`
+is fixed at `exec` and no later unset can reach it, so the key stays
+readable from the launcher's own live process for as long as it runs.
+Withholding it in full needs the mint to happen in a process that has
+exited before the session starts; until it does, the bound on the key
+is the runner's lifetime, and this paragraph does not claim otherwise.
+
+Federation is provisioned once per repository by
 `scripts/setup/wif_setup.sh` (pool, provider, least-privilege service
 account, predict-only role, the repository-scoped impersonation binding,
 and the repository variables the workflow reads), idempotently and with
