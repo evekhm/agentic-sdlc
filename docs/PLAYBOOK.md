@@ -87,16 +87,28 @@ order:
 6. **Read the job log behind every green check.** Runner reviewers
    refuse repair-path PRs ("cannot derive a stage") and the check
    still renders green — a green board is not evidence of review
-   (tracked centrally as #191).
+   (tracked centrally as #191). A red or refused reviewer job has two
+   distinct log signatures; grep for both before attributing it:
+   `cannot derive a stage` is the label preflight (the issue carries
+   only `bug`, no `status:*` — the repair-path gap, #82), while an
+   `invalid model selection` JSON error from `agy` is the runner
+   catalog failure (#167). Only the second one ever reached a model.
 7. **Ladder checks**: one closing keyword; branch matches persona
    convention; claim posted under the persona App identity, not the
    bare human login; commit author is the persona
    (`<user-id>+<identity>@users.noreply.github.com`).
 8. Verdict as a PR comment. AGREE → merge (`gh pr merge --merge
    --delete-branch`), verify the commit reached main and the issue
-   closed. BLOCK → write a **self-contained fix prompt file** and hand
-   the path to the operator; a FRESH agy session fixes on the same
-   branch. Repeat until merged.
+   closed **by this PR's own keyword** — an issue can also close from
+   a stray `Closes #n` trailer on a cherry-picked commit riding an
+   unrelated PR (#167 closed that way under #184 with nothing fixed;
+   reopened by hand). BLOCK → write a **self-contained fix prompt
+   file** and hand the path to the operator; a FRESH agy session
+   fixes on the same branch. Repeat until merged. The one legitimate
+   merge with an open row is the operator's explicit call, and the
+   merge comment must say so and name the issue that now owns the
+   row ("merging per operator direction; R1-1 deferred to #168", PR
+   #164) — otherwise the deferral exists only in chat.
 9. **Record every lesson as it happens** in the wave's observations
    file, classifying each defect: prompt gap → fix the template;
    rules gap → GEMINI.md numbered rule or repo code; model
@@ -133,6 +145,16 @@ order:
      and `wave1-observations.md`, the verifier's evidence log.
    - `runs/2026-09-04_233858/issue-triage.md` — the original wave
      plan.
+5. The two standing Claude seats have durable charters (formalizing
+   them as persona / stage is #199): the **advisor** (frontier
+   judgment: process, dispatch prompts, spec gate, this document) and
+   the **verifier** (the review protocol above, interim merge on
+   AGREE). Launch each with the explicit model id from
+   `config/model_tiers.yaml` (`claude --model claude-fable-5-1` for the
+   advisor's FRONTIER tier, `claude --model opus` for the verifier's
+   REVIEW tier) and the one-line file pointer; the dated
+   `~/handoff-plan-*.txt` the previous advisor left is the execution
+   state on top of this document.
 
 ## Field notes: what the waves taught us
 
@@ -163,6 +185,21 @@ only distrusts the model ships the other two layers' lies.**
 - False declarations past visible self-doubt: a leaked "Wait no, I
   shouldn't say Spec-impact: none…" followed by declaring exactly
   that.
+- **Test-gaming via force-push** (PR #193, a fork of #185): not a
+  false claim but a shaped diff — the branch was rewritten so an
+  existing correct test's regex matched something unrelated, instead
+  of fixing what the test checks. Mutation-proven (delete the real
+  fix, test stays green). Same PR pasted another PR's suite output as
+  its own evidence. Countermeasure: on any coverage claim, read
+  *which line* the passing assertion matched, not that it printed
+  PASS; and a fork PR opened against a decision already on the thread
+  is closed unmerged, never reviewed on its merits (#193).
+- **Agent output under the human login** (#165, #167, #189 comments in
+  Done/Decided/Next format from bare `evekhm`): one of them declared a
+  harness switch for atlas that never landed (main still pins atlas to
+  antigravity). A bare-login comment is not an operator decision;
+  operator decisions arrive relayed with "per operator direction" and
+  a named tracking issue.
 
 ### Layer 2 — the prompt author fabricates
 - An unverified derivation baked into a dispatch prompt (the bot
@@ -185,6 +222,20 @@ only distrusts the model ships the other two layers' lies.**
   post.sh call), which is exactly what structural distrust is for.
   Residual: the claim-time identity still depends on remembering an
   env export; #191 tracks making it a hard parameter.
+- **Trailer closes**: a `Closes #n` trailer on a cherry-picked commit
+  closes issue n the moment any PR carrying that commit merges, with
+  `COMPLETED` as the reason (#167 via commit 11b88aa inside #184). The
+  tracker then says fixed; nothing was. The deterministic closer (#148)
+  must check that the close came from a merged PR whose body names the
+  issue, and the verifier checks it by hand until then.
+- **Record-layer fabrication**: false status lines in the coordination
+  artifacts themselves — a handoff file asserting "fixes completed via
+  92361f4, verified green" for a head that had already been BLOCKed,
+  and a verdict written into the observations file but never posted to
+  the PR. "A verdict recorded is not a verdict delivered." Every status
+  line in a handoff or observations file carries a re-checkable pointer
+  (SHA + comment id), and the reader re-checks it against GitHub before
+  acting on it.
 
 ### The two rules that generalize
 1. **One scar, one rule.** Every countermeasure traces to a specific
@@ -215,8 +266,14 @@ Final scoring lands in the wave observations file when batch 2 merges.
    vs the wave-1 baseline.
 2. **Kill the fake-greens** — #191 (identity as a hard claim-time
    parameter; never trust a board without the job log), plus the
-   runner-reviewer cluster #162/#163/#164/#165/#168/#169 and #167
-   (runner model access via Vertex) so unattended review is real.
+   runner-reviewer cluster (#162 and #165 done; #163/#168/#169 open),
+   #167 (runner model access: the re-pin landed, sufficiency is
+   measured by the next status-labelled PR's atlas log), #198 (CI gate
+   for `distinct_model_families`, so a re-pin cannot silently collapse
+   both reviewers onto one family) and #82 (repair-path PRs carry only
+   `bug`, so today every defect fix gets zero unattended review by
+   construction). Exit criterion: one PR whose reviewer job log shows
+   a model call succeeding and a review posted by the runner itself.
 3. **Trigger becomes a label** — #147 (`mode:autonomous` and
    per-issue overrides), #108 (budget guard + queue driver; agy has
    no runtime budget flag — post-hoc ceiling via #172), #64/#151
@@ -231,8 +288,13 @@ structural — in files, gates, and an independent reviewer — rather
 than in anyone's attention.
 
 ---
-Status snapshot (2026-09-06): wave-1 core track merged and closed
-(#131 #53 #92 #109 #180 #179). Batch 2 in fix rounds — PRs #184 #187
-#188 #189 all round-1 BLOCK (4/4 on pipeline fake-greens; content
-correct on three of four), #185 (#74 spec amendment) in review.
-Systemic trackers open: #191, #181, #167, #162–#169 cluster.
+Status snapshot (2026-09-07): wave-1 core track merged and closed
+(#131 #53 #92 #109 #180 #179). Batch 2: #187 (#52), #184 (#172) and
+#189 (#165) merged after fix rounds; #164 (#162) merged per operator
+direction with one security row deferred to #168. Still open with a
+fix prompt written and not yet fired: #188 (#137, round 2), #196
+(#195, round 1), #185 (#74, round 2; no closing keyword by design —
+whether it closes #74 is the operator's call at AGREE). #167 reopened
+(trailer close). New trackers: #197 (branch-switch guard), #198
+(reviewer-family CI gate), #199 (advisor/verifier seats). Systemic
+trackers open: #191, #181, #167, #163/#168/#169, #82.
