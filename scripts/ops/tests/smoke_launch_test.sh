@@ -444,4 +444,134 @@ grep -q "issue edit" "$WRITES" \
     || fail "R2-2: the opted-in issue did not reach the body write: $(cat "$WRITES")"
 pass "R2-2/AT-R2-5 · a fresh issue whose body carries the marker is accepted — the opt-in works on first use"
 
+# --- R3-6 / AT-R3-2: marker admission requires line-start, refusing fences and mid-line quotes
+# Red at origin/main: unanchored substring matched inside code fences or mid-line.
+out="$(run_guard '{"body":"Discussion of marker:\n```\nSMOKE TEST — not a unit of work.\n```\n","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R3-6/AT-R3-2: an issue quoting the marker inside a code fence was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R3-6/AT-R3-2: the guard wrote before refusing fenced marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R3-6/AT-R3-2: the guard launched before refusing fenced marker: $(cat "$LAUNCHES")"
+pass "R3-6/AT-R3-2 · marker inside a code fence is refused, with nothing written"
+
+out="$(run_guard '{"body":"Discussion mentioning SMOKE TEST — not a unit of work. in mid-line prose","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R3-6/AT-R3-2: an issue quoting the marker mid-line in prose was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R3-6/AT-R3-2: the guard wrote before refusing mid-line marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R3-6/AT-R3-2: the guard launched before refusing mid-line marker: $(cat "$LAUNCHES")"
+pass "R3-6/AT-R3-2 · marker quoted mid-line in prose is refused, with nothing written"
+
+# --- #137 R1-1: indented marker is refused, column-0 is admitted
+out="$(run_guard '{"body":"    SMOKE TEST — not a unit of work.","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R1-1: 4-space-indented marker was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R1-1: the guard wrote before refusing 4-space-indented marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R1-1: the guard launched before refusing 4-space-indented marker: $(cat "$LAUNCHES")"
+pass "R1-1 · 4-space-indented marker line is refused"
+
+out="$(run_guard '{"body":"\tSMOKE TEST — not a unit of work.","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R1-1: tab-indented marker was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R1-1: the guard wrote before refusing tab-indented marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R1-1: the guard launched before refusing tab-indented marker: $(cat "$LAUNCHES")"
+pass "R1-1 · tab-indented marker line is refused"
+
+out="$(run_guard '{"body":"SMOKE TEST — not a unit of work.","labels":[]}')"
+refutes "is not a scratch issue" "$out" \
+    || fail "R1-1: plain column-0 marker line was refused: $out"
+grep -q "issue edit" "$WRITES" \
+    || fail "R1-1: plain column-0 marker did not reach the body write: $(cat "$WRITES")"
+pass "R1-1 · plain column-0 marker line is admitted"
+
+out="$(run_guard '{"body":"**SMOKE TEST — not a unit of work.**","labels":[]}')"
+refutes "is not a scratch issue" "$out" \
+    || fail "R1-1: **-bolded unindented marker line was refused: $out"
+grep -q "issue edit" "$WRITES" \
+    || fail "R1-1: **-bolded unindented marker did not reach the body write: $(cat "$WRITES")"
+pass "R1-1 · **-bolded unindented marker is admitted"
+
+# --- Argus R3-3 / Atlas AT-R3-6: 404 is reported as deleted, not failed read
+# Red at origin/main: gh api exits 1 on 404, so recheck_verified_refs took the retry
+# loop and reported "FAILED READ, not a moved ref" after 3 attempts.
+(
+    eval "$(sed -n '/^recheck_verified_refs() {/,/^}/p' "$SMOKE_SH")"
+    declare -A VERIFIED_REF=( ["test-ref"]="1111222233334444555566667777888899990000" )
+    GITHUB_REPO="test/repo"
+    HOUSEKEEPER="athena"
+    bad()  { echo "BAD: $*"; }
+    ok()   { echo "OK: $*"; }
+    note() { echo "NOTE: $*"; }
+
+    # Sub-case A: 404 response
+    gh_as() {
+        echo "gh: Not Found (HTTP 404)" >&2
+        return 1
+    }
+    out="$(recheck_verified_refs)"
+    contains "-> deleted" "$out" || fail "AT-R3-6: 404 was not reported as deleted: $out"
+    refutes "FAILED READ" "$out" || fail "AT-R3-6: 404 was misreported as failed read: $out"
+
+    # Sub-case B: 500 transient failure (retried, reported as failed read)
+    sleep() { :; }
+    gh_as() {
+        echo "gh: Internal Server Error (HTTP 500)" >&2
+        return 1
+    }
+    out="$(recheck_verified_refs)"
+    contains "FAILED READ" "$out" || fail "AT-R3-6: 500 was not reported as failed read: $out"
+    refutes "-> deleted"  "$out" || fail "AT-R3-6: 500 was misreported as deleted: $out"
+)
+pass "R3-3/AT-R3-6 · recheck distinguishes deleted ref (404) from transient read failure (500)"
+
+# --- Argus R3-4 / AT-R3-? (Row 5): pre_sha guard and delete-error note
+(
+    eval "$(sed -n '/^check_pushed_artifact() {/,/^}/p' "$SMOKE_SH")"
+    eval "test_delete_note() { $(sed -n '/^    out="$(gh_as "$HOUSEKEEPER" api -X DELETE "\/repos\/\$GITHUB_REPO\/git\/refs\/heads\/\$branch" 2>&1)"/,/^    }/p' "$SMOKE_SH") }"
+    declare -A VERIFIED_REF=()
+    ISSUE=999
+    
+    GITHUB_REPO="test/repo"
+    HOUSEKEEPER="athena"
+    branch="test-branch"
+    bad()  { echo "BAD: $*"; }
+    ok()   { echo "OK: $*"; }
+    note() { echo "NOTE: $*"; }
+    identity_of() { echo "want"; }
+
+    # Sub-case A: pre_sha guard
+    gh_as() {
+        if [ "$3" = "/repos/$GITHUB_REPO/git/ref/heads/test-ref" ]; then
+            echo '1111222233334444555566667777888899990000'
+            return 0
+        fi
+        return 1
+    }
+    
+    out="$(check_pushed_artifact "test-persona" "test-ref" "1111222233334444555566667777888899990000")"
+    contains "BAD: test-persona left test-ref unchanged at pre-run commit" "$out" \
+        || fail "Row 5: pre_sha guard did not fire when pushed SHA matches pre_sha: $out"
+
+    # Sub-case B: delete-error note fires on non-404 error
+    gh_as() {
+        if [ "$3" = "-X" ] && [ "$4" = "DELETE" ]; then
+            echo "gh: Internal Server Error (HTTP 500)" >&2
+            return 1
+        fi
+        return 0
+    }
+    out="$(test_delete_note)"
+    contains "NOTE: could not delete fixture ref test-branch as athena" "$out" \
+        || fail "Row 5: delete-error note did not fire on 500: $out"
+
+    # Sub-case C: delete-error note swallows 404
+    gh_as() {
+        if [ "$3" = "-X" ] && [ "$4" = "DELETE" ]; then
+            echo "gh: Not Found (HTTP 404)" >&2
+            return 1
+        fi
+        return 0
+    }
+    out="$(test_delete_note)"
+    refutes "NOTE:" "$out" || fail "Row 5: delete-error note fired on 404: $out"
+)
+pass "Row 5 · check_pushed_artifact checks against pre_sha and housekeeping delete errors are noted"
 echo "smoke_launch_test.sh: all $passes scenarios passed"
