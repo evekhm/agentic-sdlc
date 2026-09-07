@@ -460,6 +460,35 @@ contains "#999 is not a scratch issue" "$out" \
 [ ! -s "$LAUNCHES" ] || fail "R3-6/AT-R3-2: the guard launched before refusing mid-line marker: $(cat "$LAUNCHES")"
 pass "R3-6/AT-R3-2 · marker quoted mid-line in prose is refused, with nothing written"
 
+# --- #137 R1-1: indented marker is refused, column-0 is admitted
+out="$(run_guard '{"body":"    SMOKE TEST — not a unit of work.","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R1-1: 4-space-indented marker was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R1-1: the guard wrote before refusing 4-space-indented marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R1-1: the guard launched before refusing 4-space-indented marker: $(cat "$LAUNCHES")"
+pass "R1-1 · 4-space-indented marker line is refused"
+
+out="$(run_guard '{"body":"\tSMOKE TEST — not a unit of work.","labels":[{"name":"status:build"}]}')"
+contains "#999 is not a scratch issue" "$out" \
+    || fail "R1-1: tab-indented marker was accepted: $out"
+[ ! -s "$WRITES" ]   || fail "R1-1: the guard wrote before refusing tab-indented marker: $(cat "$WRITES")"
+[ ! -s "$LAUNCHES" ] || fail "R1-1: the guard launched before refusing tab-indented marker: $(cat "$LAUNCHES")"
+pass "R1-1 · tab-indented marker line is refused"
+
+out="$(run_guard '{"body":"SMOKE TEST — not a unit of work.","labels":[]}')"
+refutes "is not a scratch issue" "$out" \
+    || fail "R1-1: plain column-0 marker line was refused: $out"
+grep -q "issue edit" "$WRITES" \
+    || fail "R1-1: plain column-0 marker did not reach the body write: $(cat "$WRITES")"
+pass "R1-1 · plain column-0 marker line is admitted"
+
+out="$(run_guard '{"body":"**SMOKE TEST — not a unit of work.**","labels":[]}')"
+refutes "is not a scratch issue" "$out" \
+    || fail "R1-1: **-bolded unindented marker line was refused: $out"
+grep -q "issue edit" "$WRITES" \
+    || fail "R1-1: **-bolded unindented marker did not reach the body write: $(cat "$WRITES")"
+pass "R1-1 · **-bolded unindented marker is admitted"
+
 # --- Argus R3-3 / Atlas AT-R3-6: 404 is reported as deleted, not failed read
 # Red at origin/main: gh api exits 1 on 404, so recheck_verified_refs took the retry
 # loop and reported "FAILED READ, not a moved ref" after 3 attempts.

@@ -520,7 +520,7 @@ has_scratch_marker() { # <body> -> rc 0 if marker appears at line start outside 
         /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
         !fence {
             line = $0
-            sub(/^[[:space:]]*(\*\*)?/, "", line)
+            sub(/^(\*\*)?/, "", line)
             if (substr(line, 1, length(m)) == m) { found = 1; exit }
         }
         END { exit !found }
