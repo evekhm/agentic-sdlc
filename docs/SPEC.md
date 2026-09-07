@@ -125,6 +125,29 @@ credentials: `scripts/ops/work.sh` mints the launched persona's token
 in the one step between the last refusal and the launch and hands it
 to the child alone (`ops.identity`).
 
+Cloud model access is a second credential axis, and the two harnesses
+do not share one (`ops.model-credential`, #167). claude-code calls
+Vertex, where a federated service account is sufficient and stays
+least-privilege, so an unattended runner reaches it by workload
+identity federation with no key at rest. antigravity cannot use that
+credential at all: `agy` holds no built-in model list and fetches its
+catalog from Google's Cloud Code private endpoint, which serves that
+catalog per Antigravity ENTITLEMENT of the calling identity — not per
+project and not per IAM role. A service account holds no entitlement,
+receives an empty catalog, and `agy` then rejects every model id it is
+given, which no re-pin and no role grant can repair. An antigravity
+persona therefore requires a user-entitled credential, provisioned as
+a repository secret and carried to the launch as a path. The launcher
+is the only component that resolves this: it substitutes that
+credential for the federated one in the child's environment on the
+antigravity branch and nowhere else, because it is the only component
+that knows which harness is about to run — the workflow stays
+harness-blind, and an absent credential degrades that persona alone
+rather than failing the dispatch. Because the credential is
+user-entitled and long-lived, it belongs to a dedicated account rather
+than an operator's own, it never enters the workspace, and it is
+deleted at the end of the job whatever the outcome.
+
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
 appear (#2, `intent/2-config/`): `model_tiers.yaml` binds the five

@@ -613,8 +613,8 @@ else
     a long-lived refresh token:
 
       gcloud auth application-default login
-      gh secret set ANTIGRAVITY_ADC_JSON --repo "$GITHUB_REPO" \\
-        < "\$HOME/.config/gcloud/application_default_credentials.json"
+      adc="\$(gcloud info --format='value(config.paths.global_config_dir)')/application_default_credentials.json"
+      gh secret set ANTIGRAVITY_ADC_JSON --repo "$GITHUB_REPO" < "\$adc"
 
     Check that the account actually sees a catalog BEFORE uploading:
 
