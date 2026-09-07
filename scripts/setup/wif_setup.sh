@@ -601,6 +601,10 @@ if gh secret list --repo "$GITHUB_REPO" --json name --jq '.[].name' 2>/dev/null 
   ok "secret ANTIGRAVITY_ADC_JSON (agy's user-entitled credential)"
 else
   ABSENT+=("secret ANTIGRAVITY_ADC_JSON — antigravity personas resolve no model without it")
+  # Without this, --check prints the secret under "Missing:" and still
+  # exits 0, which is the one thing a verify mode must never do
+  # (argus/atlas R1-2 on PR #221).
+  CHECK_FAILED=1
   cat <<EOF
 
 ==> MISSING: the repository secret ANTIGRAVITY_ADC_JSON.

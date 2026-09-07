@@ -990,19 +990,19 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
         # runner shape, 15 models and a successful Pro call.
         #
         # claude-code is untouched: it talks to Vertex, where the WIF
-        # service account works and stays least-privilege. Only the
-        # antigravity branch swaps the credential, and only when the
-        # operator has provisioned one.
-        if [ "$launch_harness" = "antigravity" ] \
-           && [ -n "${AGY_GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
-            if [ -r "$AGY_GOOGLE_APPLICATION_CREDENTIALS" ]; then
-                export GOOGLE_APPLICATION_CREDENTIALS="$AGY_GOOGLE_APPLICATION_CREDENTIALS"
-            else
-                echo "==> WARNING: AGY_GOOGLE_APPLICATION_CREDENTIALS is set but not readable;" >&2
-                echo "    agy will fall back to the default credential and will very likely" >&2
-                echo "    report every model as unrecognized (#167)." >&2
-            fi
-        fi
+        # service account works and stays least-privilege.
+        #
+        # The VALUE never reaches this environment and the FILE is never
+        # written for a claude-code dispatch (argus/atlas R1-1 on PR
+        # #221): materialise_agy_credential ran only on the antigravity
+        # branch, and the raw secret is unset here for every harness the
+        # same way the App private key is above — a session launched
+        # with the permission gate bypassed can read anything its
+        # environment carries, so it carries neither.
+        unset ANTIGRAVITY_ADC_JSON
+        [ -z "${AGY_CREDENTIAL_FILE:-}" ] \
+            || export GOOGLE_APPLICATION_CREDENTIALS="$AGY_CREDENTIAL_FILE"
+        unset AGY_CREDENTIAL_FILE
         exec "${LAUNCH[@]}"
     )
 }
@@ -1014,6 +1014,45 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
 # than the one whose personas, labels and targets it just resolved.
 # Measured: the first smoke run wrote its artifact into a sibling clone.
 cd "$REPO_ROOT"
+
+# agy's credential, materialised HERE and only for antigravity (#167).
+#
+# Why here and not in the workflow. The value is a user-entitled,
+# long-lived refresh token, and the workflow is harness-blind by design
+# (D18) — a step there would write the file on every runner, including
+# the claude-code dispatches that have no use for it and run with the
+# permission gate bypassed. This is the first point in the chain that
+# knows which harness is about to launch, so it is the last point at
+# which the file can be withheld from the ones that must not see it.
+#
+# Why the file at all: agy ships no built-in model list. It fetches its
+# catalog from cloudcode-pa.googleapis.com, which serves that catalog
+# per IDENTITY ENTITLEMENT — not per project and not per IAM role. A
+# federated service account holds none, gets an empty catalog, and agy
+# then rejects EVERY --model value with "not recognized as a known
+# model". Measured on a runner: WIF service account 0 models; the same
+# runner shape with an authorized_user ADC credential, 15 models and a
+# successful Pro call. No re-pin and no role grant reaches this.
+#
+# NOT in $REPO_ROOT: a session can read any path in its own checkout.
+AGY_CREDENTIAL_FILE=""
+cleanup_agy_credential() {
+    [ -z "$AGY_CREDENTIAL_FILE" ] || rm -f "$AGY_CREDENTIAL_FILE"
+}
+if [ "$launch_harness" = "antigravity" ] && [ -n "${ANTIGRAVITY_ADC_JSON:-}" ]; then
+    AGY_CREDENTIAL_FILE="$(mktemp "${TMPDIR:-/tmp}/agy-adc.XXXXXXXX.json")"
+    chmod 600 "$AGY_CREDENTIAL_FILE"
+    trap cleanup_agy_credential EXIT INT TERM
+    # printf into an already-created file: the value never appears in an
+    # argv, and never exists at a path another user could have created
+    # first (D11).
+    printf '%s' "$ANTIGRAVITY_ADC_JSON" > "$AGY_CREDENTIAL_FILE"
+elif [ "$launch_harness" = "antigravity" ]; then
+    echo "==> WARNING: ANTIGRAVITY_ADC_JSON is unset, so $launch_persona has no" >&2
+    echo "    entitled credential and agy will report every model as unrecognized." >&2
+    echo "    Provision it with scripts/setup/wif_setup.sh --check (#167)." >&2
+fi
+export AGY_CREDENTIAL_FILE
 
 if [ "$(headless_for "$launch_harness")" != "1" ]; then
     # D15 and D23, both as amended (PR #60, AT-5): the interactive row

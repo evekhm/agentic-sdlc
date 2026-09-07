@@ -137,16 +137,17 @@ project and not per IAM role. A service account holds no entitlement,
 receives an empty catalog, and `agy` then rejects every model id it is
 given, which no re-pin and no role grant can repair. An antigravity
 persona therefore requires a user-entitled credential, provisioned as
-a repository secret and carried to the launch as a path. The launcher
-is the only component that resolves this: it substitutes that
-credential for the federated one in the child's environment on the
-antigravity branch and nowhere else, because it is the only component
-that knows which harness is about to run — the workflow stays
-harness-blind, and an absent credential degrades that persona alone
-rather than failing the dispatch. Because the credential is
-user-entitled and long-lived, it belongs to a dedicated account rather
-than an operator's own, it never enters the workspace, and it is
-deleted at the end of the job whatever the outcome.
+a repository secret. The launcher is the only component that resolves
+this, because it is the only component that knows which harness is
+about to run: it materialises that credential and substitutes it for
+the federated one on the antigravity branch and nowhere else, and an
+absent credential degrades that persona alone rather than failing the
+dispatch. Because the credential is user-entitled and long-lived it is
+withheld from every dispatch that does not need it — a claude-code
+session never sees the value or a file holding it — it belongs to a
+dedicated account rather than an operator's own, it is never written
+inside the checkout, and it is deleted when the launcher exits
+whatever the outcome.
 
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
