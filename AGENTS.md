@@ -95,6 +95,12 @@ document.
    exercise. Not the same document as docs/BLOG.md below: BLOG.md is
    the design narrative this system implements; PLAYBOOK.md is the
    hands-on operating guide.
+7. **docs/CRITICAL_PATH.md** — *what lands next, and what it waits
+   on.* The ordered issue plan to the autonomous loop, by gate, with
+   each issue's live state and the operator decisions still open.
+   PLAYBOOK's roadmap gives the shape; this file gives the order.
+   The advisor seat owns it and updates it whenever an issue in it
+   merges, closes or changes gate.
 
 Reference material, read on demand rather than at session start:
 docs/BLOG.md (the playbook this system implements) and
