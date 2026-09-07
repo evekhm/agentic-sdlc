@@ -497,6 +497,8 @@ pass "R3-3/AT-R3-6 · recheck distinguishes deleted ref (404) from transient rea
 (
     eval "$(sed -n '/^check_pushed_artifact() {/,/^}/p' "$SMOKE_SH")"
     eval "test_delete_note() { $(sed -n '/^    out="$(gh_as "$HOUSEKEEPER" api -X DELETE "\/repos\/\$GITHUB_REPO\/git\/refs\/heads\/\$branch" 2>&1)"/,/^    }/p' "$SMOKE_SH") }"
+    declare -A VERIFIED_REF=()
+    ISSUE=999
     
     GITHUB_REPO="test/repo"
     HOUSEKEEPER="athena"
