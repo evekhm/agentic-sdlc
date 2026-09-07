@@ -324,7 +324,11 @@ END {
   printf "%-18s %14d %12.2f\n", "cache write 5m", t_c5,  u_c5
   printf "%-18s %14d %12.2f\n", "cache write 1h", t_c1,  u_c1
   printf "%-18s %14d %12.2f\n", "output",         t_out, u_out
-  printf "%-18s %14d %12.2f\n", "TOTAL", t_in+t_cr+t_c5+t_c1+t_out, t_usd
+  has_unpriced = 0
+  for (m in unpriced) { has_unpriced = 1; break }
+  if (has_unpriced == 0) {
+    printf "%-18s %14d %12.2f\n", "TOTAL", t_in+t_cr+t_c5+t_c1+t_out, t_usd
+  }
   if (assumed_5m > 0) printf "note: %d cache-write tokens lacked a 5m/1h breakdown and were priced as 5m\n", assumed_5m
   for (m in unpriced) printf "WARNING: no rate for model %s — %d tokens unpriced (its USD column reads 0)\n", m, unpriced[m]
   printf "\n== Per day ==\n%-12s %14s %12s %12s\n", "day", "tokens", "output", "USD"
@@ -363,6 +367,8 @@ END {
       printf "NOTE: %d cache-write tokens in this window ALREADY used the 1-hour TTL. The\n      counterfactual reprices 5m->1h, so those turns compare against themselves\n      and the change column understates the real difference.\n", t_c1
   }
 
+  if (has_unpriced == 1) exit 1
+
   if (check != "1") exit
 
   # Two independent axes. Axis 1 is the price paid per re-sent token; axis 2 is
@@ -393,9 +399,11 @@ END {
     printf "  NOTE: price is optimal and volume is not. The remedy is fan-out or\n        a fresh session, NOT a caching change.\n"
   if (hit < 70 && t_c1 == 0)
     printf "  NOTE: the 1-hour TTL was never used. If turns are >5 min apart by\n        design (a polling loop), that is the first thing to change.\n"
-}' | tee "$SUMMARY"
+}' | tee "$SUMMARY" || status=$?
 
 echo >&2
 echo "wrote: $TSV" >&2
 echo "wrote: $SUMMARY" >&2
+
+exit "${status:-0}"
 

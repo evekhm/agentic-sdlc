@@ -422,7 +422,8 @@ tokens-per-message. It prices both Claude and Gemini models against
 official list rates (Anthropic and Google Cloud Vertex AI rates effective
 2026-09-04), ingests Antigravity dispatch JSON envelopes alongside
 Claude transcript logs, and reports unpriced models with explicit
-warnings and non-zero unpriced token counts (PR #161).
+warnings and non-zero unpriced token counts, suppresses the TOTAL spend
+line, and exits with a non-zero status to fail loudly (PR #177).
 Tests: `scripts/ops/tests/session_spend_test.sh`.
 
 ### ops.dispatch
@@ -444,24 +445,24 @@ first `:` or `;`, lowercased, runs of other characters to `-`, ≤24
 characters at a word boundary); the branch `<persona>/<n>-<slug>`;
 and the harness from `config/deployments.yaml`. There is deliberately
 no flag naming a stage, folder, artifact or branch — one would let a
-session work a stage the labels say is not current. Seven refusals,
+session work a stage the labels say is not current. Eight refusals,
 checked in order before anything is dispatched and each exiting 2
-with the condition named: `hold`; closed, or `status:review-stuck`;
-`blocked`; more than one `status:*` (reported, never guessed, and
-never `hold`-ed — the advancer is the single writer of the circuit
-breaker); a number on no rung at all — no `status:*` and no
-`intent:new`, which is every defect-repair issue, whose fix pull
-request is the final stage and has no reviewer rung before merge
-(#129; it was an error before, one red reviewer check per fix pull
-request); `in-progress` claimed by another actor; and `--as` naming a
-persona that does not own the stage. When the number given is a pull
-request, those refusals read the UNION of the pull request's own labels
-and the resolved issue's — a `hold` on either side refuses, and the
-message names the side that carries it, or both sides when both do,
-because the circuit breaker is
-placed where the operator is looking and resolving to the issue must
-not discard it (#50, Atlas AT-1, PR #95; both sides, PR #99). The
-stage is not part of that
+with the condition named: `hold`; a dispatch targeting any issue in
+the session's dispatch chain (re-entrant self-dispatch, #134);
+closed, or `status:review-stuck`; `blocked`; more than one
+`status:*` (reported, never guessed, and never `hold`-ed — the
+advancer is the single writer of the circuit breaker); a number on no
+rung at all — no `status:*` and no `intent:new`, which is every
+defect-repair issue, whose fix pull request is the final stage and has
+no reviewer rung before merge (#129; it was an error before, one red
+reviewer check per fix pull request); `in-progress` claimed by another
+actor; and `--as` naming a persona that does not own the stage. When
+the number given is a pull request, those refusals read the UNION of the
+pull request's own labels and the resolved issue's — a `hold` on either
+side refuses, and the message names the side that carries it, or both
+sides when both do, because the circuit breaker is placed where the
+operator is looking and resolving to the issue must not discard it (#50,
+Atlas AT-1, PR #95; both sides, PR #99). The stage is not part of that
 union:
 it is derived from the issue's labels alone, since the state machine
 belongs to the unit of work and a `status:*` label on a pull request
@@ -566,9 +567,10 @@ start the row rather than a decision about the number.
 Four further environment variables exist for the case the MODEs do not
 cover — a launch with no operator watching it — and each is opt-in, so
 an unset variable leaves argv and behaviour exactly as an attended run
-has them. A spend ceiling is passed to the harness itself, so that an
-unattended run is bounded by the thing spending the money rather than
-by a number a config file merely declares. A permission mode is passed
+has them. The spend ceiling requires two enforcement paths (PR #184):
+Claude Code enforces the ceiling pre-emptively during execution, while
+for Antigravity the dispatcher reads the run's final `.usage` report and
+exits 1 if the session exceeded the ceiling. A permission mode is passed
 through, because the default mode denies a persona the file and tracker
 writes its stage exists to make, and an unattended persona that cannot
 act spends its whole prompt preamble to say so. The run's own reported
@@ -690,7 +692,9 @@ the one step between the last refusal and the launch, for that persona
 only, and a run that launches nothing — a dry run, a multi-owner
 stage, a harness with no row — mints nothing. A mint that fails is
 fatal: the launcher refuses rather than falling back to whatever
-credentials the shell carries. The token reaches the child through the
+credentials the shell carries. `scripts/ops/claim.sh` enforces the same
+discipline: it reads back the created comment, and fails if the author
+mismatches the expected persona (PR #183). The token reaches the child through the
 environment of a subshell that `export`s it and then `exec`s — never an
 argument (`env VAR=… ` would put it in a world-readable argv), never a
 file, never a log line — and it overwrites `GH_TOKEN`/`GITHUB_TOKEN`

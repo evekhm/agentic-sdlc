@@ -57,8 +57,8 @@
 #      (a dry run, an unlaunchable harness, or a multi-owner stage that
 #      deliberately launches nothing)
 #   2  the number was NOT WORKED, BY DESIGN — either this script refused
-#      (one of the six D5 conditions, or a number on no rung, #129) or
-#      the launched persona itself
+#      (one of the eight refusal conditions: re-entrancy #134, the six D5
+#      conditions, or a number on no rung #129) or the launched persona itself
 #      reported `WORK-RESULT: refused|blocked`. One code, because a
 #      caller asks whether the number was worked, not which layer
 #      declined (#43, D23).
@@ -74,19 +74,30 @@ set -euo pipefail
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
 HEADLESS="${HEADLESS:-0}"
-# Unattended-run controls (#108). All three are opt-in and claude-code
-# headless only: unset, this script behaves exactly as it did before.
-#   WORK_MAX_USD          hard per-run spend ceiling, enforced by the harness
+# Unattended-run controls (#108). All three are opt-in: unset, this script
+# behaves exactly as it did before.
+#   WORK_MAX_USD          spend ceiling (pre-emptive for Claude, post-hoc for Antigravity)
 #   WORK_PERMISSION_MODE  passed to --permission-mode; without it an
 #                         unattended persona is denied Edit/git/gh
 #   WORK_COST_FILE        path the observed cost (line 1) and the model the run
 #                         actually billed to (line 2) are written to,
 #                         so a caller can meter without scanning transcripts
 #   WORK_MODEL            re-tier ONE dispatch without a compiler run
+# Re-entrancy control (#134).
+#   WORK_DISPATCHED_ISSUE colon-separated issue numbers the current session
+#                         was launched for (the dispatch chain); refuses
+#                         re-entrant dispatch of any issue in the chain.
 WORK_MAX_USD="${WORK_MAX_USD:-}"
+if [ -n "$WORK_MAX_USD" ]; then
+    if ! grep -qE '^[0-9]+(\.[0-9]+)?$' <<<"$WORK_MAX_USD"; then
+        echo "==> WORK_MAX_USD must be numeric, got '$WORK_MAX_USD'" >&2
+        exit 1
+    fi
+fi
 WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
 WORK_COST_FILE="${WORK_COST_FILE:-}"
 WORK_MODEL="${WORK_MODEL:-}"
+WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:-}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GITHUB_LIB="$REPO_ROOT/scripts/ops/lib/github.sh"
@@ -111,9 +122,9 @@ Modes are environment variables, never flags:
               WORK-RESULT line to an exit code. Antigravity personas
               are always headless; there is no interactive row.
 
-Unattended-run controls, claude-code headless only, all opt-in (#108):
-  WORK_MAX_USD=<amount>       hard per-run spend ceiling held by the
-                              harness, not merely declared in config.
+Unattended-run controls, all opt-in (#108):
+  WORK_MAX_USD=<amount>       spend ceiling (pre-emptive for Claude,
+                              post-hoc detection after run for Antigravity).
   WORK_PERMISSION_MODE=<mode> passed to --permission-mode. Without it
                               the default mode denies Edit, git and gh,
                               and the persona spends its preamble to
@@ -131,6 +142,11 @@ Unattended-run controls, claude-code headless only, all opt-in (#108):
                               model: line the compiler writes into the
                               persona's agent file, so a run set that way
                               bills to the compiled pin regardless.
+
+Re-entrancy control (#134):
+  WORK_DISPATCHED_ISSUE=<list> colon-separated issue numbers in the current
+                              session's dispatch chain; prevents recursive
+                              self-dispatch.
 USAGE
 }
 
@@ -249,7 +265,17 @@ if has_label "hold"; then
     refuse "$(label_side hold) carries hold"
 fi
 
-# (b) humans have taken over.
+# (b) self-dispatch re-entrancy (#134): a session must not dispatch any
+#     issue in its dispatch chain.
+if [ -n "$WORK_DISPATCHED_ISSUE" ]; then
+    case ":$WORK_DISPATCHED_ISSUE:" in
+        *":$ISSUE:"*)
+            refuse "session was launched for #$ISSUE; refusing re-entrant dispatch"
+            ;;
+    esac
+fi
+
+# (c) humans have taken over.
 if [ "$state" != "open" ]; then
     refuse "#$ISSUE is closed"
 fi
@@ -257,12 +283,12 @@ if has_label "status:review-stuck"; then
     refuse "$(label_side status:review-stuck) carries status:review-stuck"
 fi
 
-# (c) blocked is a report-and-stop, not a wait.
+# (d) blocked is a report-and-stop, not a wait.
 if has_label "blocked"; then
     refuse "$(label_side blocked) carries blocked"
 fi
 
-# (d) more than one status:* is a corrupted state machine. Report the
+# (e) more than one status:* is a corrupted state machine. Report the
 #     labels and stop: never guess which is true, and never apply `hold`
 #     either — the stage advancer is the single writer of the circuit
 #     breaker, and two writers is two circuit breakers (#4, D1).
@@ -283,12 +309,12 @@ elif grep -Fxq "intent:new" <<<"$issue_labels"; then
     # Filed but not yet on the ladder: the first rung is where work starts.
     stage="$(jq -r '.stages[0].stage' "$LIFECYCLE_JSON")"
 else
-    # Not on the ladder at all: a defect-repair issue (`bug`, no rung —
-    # its fix PR is the final stage, AGENTS.md) or a bare filing. Nothing
-    # is wrong with it; it is simply not a number this script works, so
-    # it is a refusal like the six above, not an error: unattended, the
-    # difference is a named green line versus a red check on every fix
-    # PR in the repository (#129).
+    # (f) not on the ladder at all (#129): a defect-repair issue (`bug`,
+    #     no rung — its fix PR is the final stage, AGENTS.md) or a bare
+    #     filing. Nothing is wrong with it; it is simply not a number
+    #     this script works, so it is a refusal like the five above, not
+    #     an error: unattended, the difference is a named green line
+    #     versus a red check on every fix PR in the repository (#129).
     refuse "cannot derive a stage for #$ISSUE: it carries no status:* label and no intent:new"
 fi
 
@@ -336,7 +362,7 @@ persona_for_login() { # <login> -> persona name, or empty
     return 0
 }
 
-# (e) in-progress held by somebody else. The holder is the AUTHOR of the
+# (g) in-progress held by somebody else. The holder is the AUTHOR of the
 #     last claim comment, mapped through the identity table in
 #     personas/*.yaml — never a name read out of the comment body. A body
 #     is an unauthenticated string, and reading an actor out of it lets
@@ -353,7 +379,7 @@ persona_for_login() { # <login> -> persona name, or empty
 #     work and proceeds; when `--as` names one owner the mutex binds
 #     against that actor alone, since atlas holding the claim is a
 #     different actor from argus even though both own review. `--as` is
-#     itself validated against the stage's owners by (f) below, which
+#     itself validated against the stage's owners by (h) below, which
 #     leaves D5's refusal ORDER as written.
 #     The label alone is enough to stop: `in-progress` whose thread
 #     carries no structured claim is a mutex that names nobody, and
@@ -392,7 +418,7 @@ if has_label "in-progress"; then
         || refuse "in-progress on $held_on is held by $claim_holder"
 fi
 
-# (f) --as must name an owner of the stage the labels say is current.
+# (h) --as must name an owner of the stage the labels say is current.
 if [ -n "$AS" ] && ! grep -Fxq "$AS" <<<"$owners"; then
     refuse "$AS does not own stage $stage (owners: $(tr '\n' ' ' <<<"$owners"))"
 fi
@@ -910,6 +936,7 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
         export "GIT_CONFIG_KEY_$((base + 3))=url.https://github.com/.insteadOf"
         export "GIT_CONFIG_VALUE_$((base + 3))=git@github.com:"
         export GIT_CONFIG_COUNT=$((base + 4))
+        export WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:+$WORK_DISPATCHED_ISSUE:}$ISSUE"
         exec "${LAUNCH[@]}"
     )
 }
@@ -980,7 +1007,7 @@ printf '%s\n' "$raw"
 # directory tree, so a dispatch inside a worktree writes its usage
 # somewhere a caller scanning the main tree will never look, and the
 # ceiling silently never trips.
-if [ -n "$WORK_COST_FILE" ]; then
+if [ -n "$WORK_COST_FILE" ] || { [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ]; }; then
     cost="$(printf '%s' "$raw" | jq -r '.total_cost_usd // empty' 2>/dev/null)" || cost=""
     case "$cost" in ''|*[!0-9.]*) cost="" ;; esac
     if [ -n "$cost" ]; then
@@ -993,7 +1020,6 @@ if [ -n "$WORK_COST_FILE" ]; then
         # first line.
         models="$(printf '%s' "$raw" \
             | jq -r '(.modelUsage // {}) | keys | join(",")' 2>/dev/null)" || models=""
-        printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
     elif [ "$launch_harness" = "antigravity" ]; then
         models="${launch_model:-$(model_of "$launch_persona" 2>/dev/null)}" || models=""
         models="${models:-$(printf '%s' "$raw" | jq -r '.model // empty' 2>/dev/null)}"
@@ -1038,18 +1064,32 @@ if [ -n "$WORK_COST_FILE" ]; then
               printf "%.6f\n", (inp*p[1] + cr*p[4] + out*p[5]) / 1e6
             }')" || cost=""
         fi
+    fi
+
+    if [ -n "$WORK_COST_FILE" ]; then
         if [ -n "$cost" ]; then
             printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
-        else
+        elif [ "$launch_harness" = "antigravity" ]; then
             : > "$WORK_COST_FILE"
             echo "==> no total_cost_usd or unpriced .usage in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
+        else
+            # Truncate rather than guess. A caller that reads an empty cost
+            # must refuse; one that reads a fabricated 0 would keep spending.
+            : > "$WORK_COST_FILE"
+            echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
         fi
-    else
-        # Truncate rather than guess. A caller that reads an empty cost
-        # must refuse; one that reads a fabricated 0 would keep spending.
-        : > "$WORK_COST_FILE"
-        echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
     fi
+
+    if [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ]; then
+        if [ -z "$cost" ]; then
+            echo "==> $launch_persona has WORK_MAX_USD set to \$${WORK_MAX_USD}, but the session envelope missing .usage data to measure cost against. Refusing to fail open." >&2
+            exit 1
+        elif awk -v c="$cost" -v m="$WORK_MAX_USD" 'BEGIN { if (c > m) exit 0; else exit 1 }'; then
+            echo "==> $launch_persona exceeded the \$${WORK_MAX_USD} spend ceiling: session cost \$${cost}. The Antigravity harness cannot enforce ceilings pre-emptively; overrun was detected post-hoc." >&2
+            exit 1
+        fi
+    fi
+
     denials="$(printf '%s' "$raw" | jq -r '(.permission_denials // []) | length' 2>/dev/null)" || denials=0
     [ "${denials:-0}" = "0" ] \
         || echo "==> $launch_persona hit $denials permission denial(s); set WORK_PERMISSION_MODE if it needs to act." >&2
