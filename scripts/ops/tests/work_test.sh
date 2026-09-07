@@ -32,6 +32,21 @@
 
 set -euo pipefail
 
+# Hermetic against the launcher this suite tests. `launch_child()`
+# exports GIT_CONFIG_COUNT and GIT_CONFIG_KEY/VALUE_0..3 into every
+# session it starts, so a persona running these tests from inside a
+# launched session hands the stub child an OFFSET install and the
+# fixed-name assertions miss — one spurious `FAIL: D13: the credential
+# helper was not installed in the child`, for a difference in the
+# caller's environment rather than in the tree (Argus #164 R2-1). That
+# is now the normal way this suite runs: the runner work reviewers do
+# starts by running the repository's own gates. The AT-7 scenario sets
+# these deliberately and is unaffected — it exports them itself, after
+# this scrub.
+unset GIT_CONFIG_COUNT
+for _i in 0 1 2 3 4 5 6 7; do unset "GIT_CONFIG_KEY_$_i" "GIT_CONFIG_VALUE_$_i"; done
+unset _i
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_SH="$REPO/scripts/ops/work.sh"
 WORK="$(mktemp -d)"
@@ -182,6 +197,10 @@ echo "agy-saw-WORK_DISPATCHED_ISSUE=${WORK_DISPATCHED_ISSUE:-none}" >> "$LAUNCHE
 # Every GIT_CONFIG_* the child actually inherited, so an offset install
 # (AT-7) can be asserted by index rather than by the fixed names above.
 env | grep '^GIT_CONFIG_' | sed 's/^/agy-saw-env-/' >> "$LAUNCHES" || true
+# NAMES only, never values: the point of the assertion is that no App
+# private key reached the child, and a stub that echoed one would put a
+# PEM in a test log to prove a PEM should not be in a session.
+env | sed -n 's/^\([A-Z_]*_APP_PRIVATE_KEY\)=.*/agy-saw-key-\1/p' >> "$LAUNCHES" || true
 if [ "${LAUNCH_OK:-0}" != "1" ]; then
   echo "agy $*" >> "$WRITES"
   echo "stub agy: a session was launched by a test that forbids it" >&2
@@ -975,8 +994,11 @@ has "daedalus reported: ok" "D14: the later verdict wins"
 banner "#150 Antigravity dispatch writes cost and model to WORK_COST_FILE"
 : > "$LAUNCHES"; : > "$MINTS"
 cost_file="$WORK/cost.txt"
-# 100,000 input, 10,000 output, 5,000 thinking, 20,000 cache read
-# on daedalus (pinned to antigravity, model: gemini-3.1-pro-high).
+# 100,000 input, 10,000 output, 5,000 thinking, 20,000 cache read on
+# daedalus (pinned to antigravity, at whatever Pro-tier id config names
+# — read from the sidecar below, same reason as D9). The cost figure
+# survives a re-pin within the tier: session_spend.sh's gemini table
+# matches on family and version, not on the effort suffix.
 # Pro rates: input: 1.25, cache_read: 0.3125, output: 5.00
 # cost = (100000 * 1.25 + 20000 * 0.3125 + (10000 + 5000) * 5.00) / 1000000
 # cost = (125000 + 6250 + 75000) / 1000000 = 206250 / 1000000 = 0.206250
@@ -989,7 +1011,10 @@ cost_line1="$(sed -n '1p' "$cost_file")"
 cost_line2="$(sed -n '2p' "$cost_file")"
 [ "$cost_line1" = "0.206250" ] || fail "#150: expected cost 0.206250, got '$cost_line1'"
 pass "#150: Antigravity dispatch calculates list-rate cost from .usage"
-[ "$cost_line2" = "gemini-3.1-pro-high" ] || fail "#150: expected model gemini-3.1-pro-high, got '$cost_line2'"
+pinned_model="$(sed -n 's/.*"model": "\([^"]*\)".*/\1/p' \
+                "$REPO/.agents/agents/daedalus/agent.json")"
+[ -n "$pinned_model" ] || fail "#150: no model in daedalus's compiled sidecar"
+[ "$cost_line2" = "$pinned_model" ] || fail "#150: expected model $pinned_model, got '$cost_line2'"
 pass "#150: Antigravity dispatch writes resolved model to line 2"
 
 # Missing usage truncates WORK_COST_FILE
@@ -1192,6 +1217,33 @@ pass "AT-7: the re-minting helper lands at the caller's offset and still wins"
   || fail "AT-7: GIT_CONFIG_COUNT leaked out of the scenario"
 pass "AT-7: nothing leaked back into the parent"
 
+banner "#164 R1-1 the App private key does not reach the launched session"
+# Argus found itself holding a live 1678-character RSA key in its own
+# environment on a runner, where the harness permission gate is bypassed
+# (#163) and an unrestricted shell can therefore read it. The mint has
+# already happened by launch time, so the key has no remaining use in
+# the child: it inherits the one-hour repository-scoped token instead of
+# an App whose rotation is a human clicking in the GitHub UI.
+: > "$LAUNCHES"; : > "$MINTS"
+# Exported rather than passed as a prefix to `run`: bash restores a
+# prefix assignment when the function returns, which would make the
+# "the parent still has its key" assertion below pass for the wrong
+# reason.
+export DAEDALUS_APP_PRIVATE_KEY="stub-pem-value-that-must-not-travel"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" \
+  run 0 "R1-1: a launch with the App key in the environment exits 0" -- 113
+grep -qF "agy-saw-GH_TOKEN=stub-token-for-daedalus" "$LAUNCHES" \
+  || { cat "$LAUNCHES" >&2; fail "R1-1: the child got no token, so nothing was proved"; }
+pass "R1-1: the child still receives the minted installation token"
+grep -q '^agy-saw-key-' "$LAUNCHES" \
+  && { grep '^agy-saw-key-' "$LAUNCHES" >&2
+       fail "R1-1: an App private key reached the launched session"; }
+pass "R1-1: no App private key reached the launched session"
+[ -n "${DAEDALUS_APP_PRIVATE_KEY:-}" ] \
+  || fail "R1-1: the unset escaped the child and cleared the parent's key"
+pass "R1-1: the parent's own environment is untouched"
+unset DAEDALUS_APP_PRIVATE_KEY
+
 banner "#43 D4 work.sh reads no log file and names no home directory"
 # The home-path fragments are ASSEMBLED from pieces, the same trick
 # scripts/ci/sanitize_check.sh uses on itself: the home-variable
@@ -1202,6 +1254,38 @@ if grep -nE "\.gemini|antigravity-cli|/(${_h}e|${_u})/|[\$]${_h^^}E|~/" "$WORK_S
   fail "D4: work.sh reaches for a machine-local path"
 fi
 pass "D4: work.sh opens no CLI log and names no home directory"
+
+banner "#172 agy post-hoc budget ceiling enforcement"
+printf '%s\n' '{"status":"SUCCESS","response":"WORK-RESULT: ok test","model":"gemini-1.5-pro-002","usage":{"input_tokens":1000000,"output_tokens":0,"cache_read_tokens":0}}' > "$WORK/agy_cost_1.25.json"
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost_1.25.json" WORK_MAX_USD="2.00" \
+  run 0 "#172: agy under-ceiling passes" -- 113
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost_1.25.json" WORK_MAX_USD="1.00" \
+  run 1 "#172: agy overrun exits non-zero" -- 113
+has "exceeded the \$1.00 spend ceiling" "#172: overrun message names the ceiling"
+has "session cost \$1.250000" "#172: overrun message names the actual cost"
+has "detected post-hoc" "#172: overrun message explains post-hoc detection"
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost_1.25.json" \
+  run 0 "#172: no WORK_MAX_USD keeps today's report-only behavior" -- 113
+has "ok" "#172: report-only behavior completes successfully"
+
+banner "#184 agy no-usage cost silent fail-open"
+printf '%s\n' '{"status":"SUCCESS","response":"WORK-RESULT: ok test","model":"gemini-1.5-pro-002"}' > "$WORK/agy_no_cost.json"
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_no_cost.json" WORK_MAX_USD="1.00" \
+  run 1 "#184: empty cost with ceiling fails" -- 113
+has "missing .usage" "#184: empty cost with ceiling fails loudly"
+
+banner "#184 WORK_MAX_USD string fallback"
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost_1.25.json" WORK_MAX_USD="abc" \
+  run 1 "#184: non-numeric WORK_MAX_USD fails" -- 113
+has "must be numeric" "#184: string fallback prevented"
 
 echo
 echo "work_test.sh: all scenarios passed"

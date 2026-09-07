@@ -147,7 +147,19 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.resolve.outputs.matrix) }}
     steps:
+      # A reviewer's unit of work is a RANGE — `base...head` — not a
+      # working tree, and checkout's default `fetch-depth: 1` gives it
+      # only the merge commit with no parents: neither the PR head nor
+      # the base is in the object store, and there is no diff to review
+      # at all (#162). The deepening fetch that would have rescued the
+      # run was refused by the harness's permission gate (#163), not by
+      # the network or the runner — the distinction matters to whoever
+      # reads this next and reasons about what else the runner blocks.
+      # The resolve job above reads files and keeps the shallow clone;
+      # this one hands a model the history its job presumes.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -296,12 +308,53 @@ jobs:
           KEY_VAR_NAME: ${{ matrix.upper }}_APP_PRIVATE_KEY
           NUMBER: ${{ github.event.pull_request.number || inputs.number }}
           GITHUB_REPO: ${{ github.repository }}
+          # The range, stated rather than inferred. This job checks out
+          # the PR's MERGE ref, so `git rev-parse HEAD` is an ephemeral
+          # commit that exists nowhere the ledger can point and changes
+          # whenever main moves — a reviewer that records it as
+          # `Reviewed-head:` records a value the head-pinned labels can
+          # never match (#164 R1-2). Empty on workflow_dispatch, where
+          # there is no pull request and no range to state.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           DRY_RUN: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '1' || '0' }}
           # Not a preference: a hosted runner has no terminal, so the
           # interactive row of work.sh's launch table can never be the
           # right one here and the launcher refuses outright without
           # this (#159). Antigravity is headless whatever this says.
           HEADLESS: '1'
+          # Same shape of defect as HEADLESS, one layer in: with no
+          # permission mode set, print mode denies every tool that would
+          # otherwise prompt, and on a runner there is nobody to prompt.
+          # The first live argus run spent $0.88 and 30 turns to discover
+          # that `gh api`, `gh auth status` and even `printenv` were all
+          # refused, and correctly reported `blocked` rather than review
+          # a PR it could not read (#163). It could not re-read the
+          # `hold` gate before writing either, which trusted-posting
+          # (D13) makes a hard bar on writing at all.
+          #
+          # The bypass is scoped by placement, not granted globally: this
+          # step only ever runs for `gh-actions` (the step above skips
+          # any other placement), where the runner is ephemeral, the
+          # workflow's own GITHUB_TOKEN cannot write, and the ONLY write
+          # credential is the persona App token that post.sh gates. A
+          # HEADLESS=1 session on the presenter's laptop is a different
+          # situation with a human at the keyboard and keeps prompting —
+          # which is why this is set here and not in work.sh.
+          #
+          # It is also not the last word. Argus reviewed this line and
+          # objected to the WIDTH of the grant, not to giving a reviewer
+          # tools: with an unrestricted shell the App's write verbs are
+          # reachable directly, around post.sh and around the `hold`
+          # re-read post.sh exists to guarantee (#164 R1-1). Two answers
+          # followed. work.sh now unsets the persona's App private key
+          # before the launch, so a session inherits a one-hour
+          # repository-scoped token and not the App itself — the half a
+          # launcher can take back on its own. Whether the posture here
+          # should be this bypass or an allowlist naming the verbs is a
+          # Decision the spec deliberately deferred, and it is back at
+          # the design gate as #168 rather than settled by this comment.
+          WORK_PERMISSION_MODE: bypassPermissions
         run: |
           set -euo pipefail
           # `export NAME=value` as a builtin, never `env NAME=value cmd`:

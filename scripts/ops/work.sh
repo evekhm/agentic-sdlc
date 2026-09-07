@@ -74,9 +74,9 @@ set -euo pipefail
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
 HEADLESS="${HEADLESS:-0}"
-# Unattended-run controls (#108). All three are opt-in and claude-code
-# headless only: unset, this script behaves exactly as it did before.
-#   WORK_MAX_USD          hard per-run spend ceiling, enforced by the harness
+# Unattended-run controls (#108). All three are opt-in: unset, this script
+# behaves exactly as it did before.
+#   WORK_MAX_USD          spend ceiling (pre-emptive for Claude, post-hoc for Antigravity)
 #   WORK_PERMISSION_MODE  passed to --permission-mode; without it an
 #                         unattended persona is denied Edit/git/gh
 #   WORK_COST_FILE        path the observed cost (line 1) and the model the run
@@ -88,6 +88,12 @@ HEADLESS="${HEADLESS:-0}"
 #                         was launched for (the dispatch chain); refuses
 #                         re-entrant dispatch of any issue in the chain.
 WORK_MAX_USD="${WORK_MAX_USD:-}"
+if [ -n "$WORK_MAX_USD" ]; then
+    if ! grep -qE '^[0-9]+(\.[0-9]+)?$' <<<"$WORK_MAX_USD"; then
+        echo "==> WORK_MAX_USD must be numeric, got '$WORK_MAX_USD'" >&2
+        exit 1
+    fi
+fi
 WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
 WORK_COST_FILE="${WORK_COST_FILE:-}"
 WORK_MODEL="${WORK_MODEL:-}"
@@ -116,9 +122,9 @@ Modes are environment variables, never flags:
               WORK-RESULT line to an exit code. Antigravity personas
               are always headless; there is no interactive row.
 
-Unattended-run controls, claude-code headless only, all opt-in (#108):
-  WORK_MAX_USD=<amount>       hard per-run spend ceiling held by the
-                              harness, not merely declared in config.
+Unattended-run controls, all opt-in (#108):
+  WORK_MAX_USD=<amount>       spend ceiling (pre-emptive for Claude,
+                              post-hoc detection after run for Antigravity).
   WORK_PERMISSION_MODE=<mode> passed to --permission-mode. Without it
                               the default mode denies Edit, git and gh,
                               and the persona spends its preamble to
@@ -777,6 +783,17 @@ identity_of() { # <persona> -> the App login it posts as, or empty
     [ -f "$file" ] || return 0
     sed -n 's/^[[:space:]]*identity:[[:space:]]*"\(.*\)".*/\1/p' "$file" | head -1
 }
+
+# The NAME of the variable holding the App's private key — never its
+# value, which this script reads only by handing the name to the minter.
+# Unquoted in the persona files (`token: ARGUS_APP_PRIVATE_KEY`), so the
+# pattern is deliberately not identity_of's.
+token_var_of() { # <persona> -> the env var name of its App private key, or empty
+    local file="$PERSONA_DIR/$1.yaml"
+    [ -f "$file" ] || return 0
+    sed -n 's/^[[:space:]]*token:[[:space:]]*"\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)"\{0,1\}[[:space:]]*$/\1/p' \
+        "$file" | head -1
+}
 echo "    identity: $(identity_of "$launch_persona") (token minted at launch; not printed)"
 
 if [ "$DRY_RUN" = "1" ]; then
@@ -905,6 +922,19 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
     local base="${GIT_CONFIG_COUNT:-0}"
     case "$base" in ''|*[!0-9]*) base=0 ;; esac
     (
+        # The child gets the one-hour installation token and NEVER the
+        # App's private key. By the time this runs the mint has already
+        # happened, so the PEM has no remaining use inside the session —
+        # while its blast radius is every installation of the App and
+        # its rotation is a human clicking in the GitHub UI, against the
+        # token's one hour and single repository. Argus found it holding
+        # the live key in its own environment on a runner (#164 R1-1),
+        # which is only reachable at all because the harness permission
+        # gate is bypassed there (#163); this is the half of that grant
+        # a launcher can take back unilaterally, and it costs nothing.
+        local key_var
+        key_var="$(token_var_of "$launch_persona")"
+        [ -z "$key_var" ] || unset "$key_var"
         export GH_TOKEN="$tok" GITHUB_TOKEN="$tok"
         export "GIT_CONFIG_KEY_$base=credential.helper"
         export "GIT_CONFIG_VALUE_$base="
@@ -986,7 +1016,7 @@ printf '%s\n' "$raw"
 # directory tree, so a dispatch inside a worktree writes its usage
 # somewhere a caller scanning the main tree will never look, and the
 # ceiling silently never trips.
-if [ -n "$WORK_COST_FILE" ]; then
+if [ -n "$WORK_COST_FILE" ] || { [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ]; }; then
     cost="$(printf '%s' "$raw" | jq -r '.total_cost_usd // empty' 2>/dev/null)" || cost=""
     case "$cost" in ''|*[!0-9.]*) cost="" ;; esac
     if [ -n "$cost" ]; then
@@ -999,7 +1029,6 @@ if [ -n "$WORK_COST_FILE" ]; then
         # first line.
         models="$(printf '%s' "$raw" \
             | jq -r '(.modelUsage // {}) | keys | join(",")' 2>/dev/null)" || models=""
-        printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
     elif [ "$launch_harness" = "antigravity" ]; then
         models="${launch_model:-$(model_of "$launch_persona" 2>/dev/null)}" || models=""
         models="${models:-$(printf '%s' "$raw" | jq -r '.model // empty' 2>/dev/null)}"
@@ -1044,18 +1073,32 @@ if [ -n "$WORK_COST_FILE" ]; then
               printf "%.6f\n", (inp*p[1] + cr*p[4] + out*p[5]) / 1e6
             }')" || cost=""
         fi
+    fi
+
+    if [ -n "$WORK_COST_FILE" ]; then
         if [ -n "$cost" ]; then
             printf '%s\n%s\n' "$cost" "$models" > "$WORK_COST_FILE"
-        else
+        elif [ "$launch_harness" = "antigravity" ]; then
             : > "$WORK_COST_FILE"
             echo "==> no total_cost_usd or unpriced .usage in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
+        else
+            # Truncate rather than guess. A caller that reads an empty cost
+            # must refuse; one that reads a fabricated 0 would keep spending.
+            : > "$WORK_COST_FILE"
+            echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
         fi
-    else
-        # Truncate rather than guess. A caller that reads an empty cost
-        # must refuse; one that reads a fabricated 0 would keep spending.
-        : > "$WORK_COST_FILE"
-        echo "==> no total_cost_usd in $launch_harness's envelope; wrote no cost to $WORK_COST_FILE" >&2
     fi
+
+    if [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ]; then
+        if [ -z "$cost" ]; then
+            echo "==> $launch_persona has WORK_MAX_USD set to \$${WORK_MAX_USD}, but the session envelope missing .usage data to measure cost against. Refusing to fail open." >&2
+            exit 1
+        elif awk -v c="$cost" -v m="$WORK_MAX_USD" 'BEGIN { if (c > m) exit 0; else exit 1 }'; then
+            echo "==> $launch_persona exceeded the \$${WORK_MAX_USD} spend ceiling: session cost \$${cost}. The Antigravity harness cannot enforce ceilings pre-emptively; overrun was detected post-hoc." >&2
+            exit 1
+        fi
+    fi
+
     denials="$(printf '%s' "$raw" | jq -r '(.permission_denials // []) | length' 2>/dev/null)" || denials=0
     [ "${denials:-0}" = "0" ] \
         || echo "==> $launch_persona hit $denials permission denial(s); set WORK_PERMISSION_MODE if it needs to act." >&2

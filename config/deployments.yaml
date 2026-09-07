@@ -20,7 +20,7 @@ personas:
 # persona's `escalation_tier` is not one:
 #
 #   argus  -> claude-code -> opus                -> Anthropic (Claude)
-#   atlas  -> antigravity -> gemini-3.1-pro-high -> Google (Gemini)
+#   atlas  -> antigravity -> gemini-3.1-pro-low-thinking -> Google (Gemini)
 #
 # Two families, pairwise distinct: the constraint holds.
 #
