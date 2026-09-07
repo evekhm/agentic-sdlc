@@ -83,7 +83,7 @@ Touch: `scripts/ci/intake_triage.sh`
    - For `bug`: check `What happened`, `What you expected`, `Severity`.
    - Formulate `Required sections:` string for any missing sections.
 4. Search prior art (D20): Derive query terms from title by lowercasing, replacing non-alphanumerics with space, dropping words under 4 characters and stopwords, deduplicating (keeping first occurrence), capping at 6 terms, and joining with ` OR `. Stopword list must live on one line in the script.
-   - If zero terms are yielded, no searches run, exit 0 and write exact "nothing matched" form (D17).
+   - If zero terms are yielded, no searches run, exit 0, and write D17's third form verbatim: `**Prior art:** not searched — the title yielded no term of 4 characters or more.`
    - Run `gh search issues` and `gh search prs` without `--state` flag, with `--limit 10`. Tag output matches `(open)` or `(closed)`.
    - Grep `intent/*/` where a directory matches if its slug shares at least one hyphen-separated component with a term. Exclude the triaged issue's own number.
    - Exit 1 with no write if any of the three sources fails (D13, D20).

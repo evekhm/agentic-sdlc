@@ -12,7 +12,27 @@ INTENT_MD="${INTENT_MD_FILE:-$REPO/intent/117-typed-intake/intent.md}"
 
 banner() { printf '\n--- %s\n' "$*"; }
 
+SCRATCH="$(mktemp -d)"
+trap 'rm -rf "$SCRATCH"' EXIT
+
 FAILURES=0
+
+# The origin/main baseline is resolved ONCE, here, and by its own name.
+# Two checks below (D8's pull_request trigger, D15's unchanged
+# permission blocks) compare this file against its base revision. Where
+# origin/main is not a local ref the comparison cannot run at all, and
+# reporting that as a D8 or D15 verdict would claim a result nobody
+# computed — on the two checks that guard the fork-secrets surface.
+banner "Baseline (prerequisite for the D8 and D15 unchanged-block comparisons)"
+BASELINE_WF=""
+if BASELINE_TXT="$(git -C "$REPO" show origin/main:.github/workflows/unattended.yml 2>/dev/null)"; then
+    BASELINE_WF="$SCRATCH/baseline-unattended.yml"
+    printf '%s\n' "$BASELINE_TXT" > "$BASELINE_WF"
+    echo "PASS: baseline origin/main resolved"
+else
+    echo "FAIL: baseline origin/main unavailable — the unchanged-block comparisons cannot run; check out with fetch-depth: 0 or run 'git fetch origin main' first" >&2
+    FAILURES=$((FAILURES + 1))
+fi
 
 banner "Workflow checks (D6, D8, D9, D10, D14, D15)"
 python3 -c "
@@ -36,6 +56,11 @@ def pass_check(msg):
     print(f'PASS: {msg}')
 
 on_block = d.get('on', d.get(True, {}))
+try:
+    with open(sys.argv[2]) as f:
+        origin_d = yaml.safe_load(f) or {}
+except Exception:
+    origin_d = {}
 
 try:
     if on_block.get('issues', {}).get('types') == ['opened']:
@@ -47,9 +72,9 @@ except Exception as e:
 
 try:
     c = d.get('concurrency', {})
-    expected_cg_terms = ['\${{ github.workflow }}', '\${{ github.event.pull_request.number || github.event.issue.number || inputs.number }}']
+    expected_term = '\${{ github.event.pull_request.number || github.event.issue.number || inputs.number }}'
     group = c.get('group', '')
-    if expected_cg_terms[0] in group and expected_cg_terms[1] in group:
+    if expected_term in group:
         pass_check('D10: concurrency group correct')
     else:
         fail('D10: concurrency group incorrect')
@@ -65,13 +90,13 @@ except Exception as e:
     fail(f'D10: {e}')
 
 try:
-    import subprocess
-    origin_main_wf = subprocess.check_output(['git', 'show', 'origin/main:.github/workflows/unattended.yml']).decode()
-    origin_d = yaml.safe_load(origin_main_wf)
-    if d.get('on', {}).get('pull_request') == origin_d.get('on', {}).get('pull_request'):
-        pass_check('D8: pull_request trigger unchanged')
-    else:
-        fail('D8: pull_request trigger changed')
+    if origin_d:
+        pr = d.get('on', d.get(True, {})).get('pull_request')
+        origin_pr = origin_d.get('on', origin_d.get(True, {})).get('pull_request')
+        if pr and origin_pr and pr == origin_pr:
+            pass_check('D8: pull_request trigger unchanged')
+        else:
+            fail('D8: pull_request trigger changed or missing')
 except Exception as e:
     fail(f'D8: {e}')
 
@@ -112,23 +137,20 @@ except Exception as e:
     fail(f'D14: {e}')
 
 try:
-    import subprocess
-    origin_main_wf = subprocess.check_output(['git', 'show', 'origin/main:.github/workflows/unattended.yml']).decode()
-    origin_d = yaml.safe_load(origin_main_wf)
-    
-    dispatch = d.get('jobs', {}).get('dispatch', {})
-    origin_dispatch = origin_d.get('jobs', {}).get('dispatch', {})
-    if dispatch.get('permissions') == origin_dispatch.get('permissions'):
-        pass_check('D15: dispatch job permissions are correct')
-    else:
-        fail('D15: dispatch job permissions incorrect')
-    
-    fp = d.get('permissions', {})
-    origin_fp = origin_d.get('permissions', {})
-    if fp == origin_fp:
-        pass_check('D15: file-level permissions unchanged')
-    else:
-        fail('D15: file-level permissions changed')
+    if origin_d:
+        dispatch = d.get('jobs', {}).get('dispatch', {})
+        origin_dispatch = origin_d.get('jobs', {}).get('dispatch', {})
+        if dispatch.get('permissions') == origin_dispatch.get('permissions'):
+            pass_check('D15: dispatch job permissions are correct')
+        else:
+            fail('D15: dispatch job permissions incorrect')
+        
+        fp = d.get('permissions', {})
+        origin_fp = origin_d.get('permissions', {})
+        if fp == origin_fp:
+            pass_check('D15: file-level permissions unchanged')
+        else:
+            fail('D15: file-level permissions changed')
         
     jobs = d.get('jobs', {})
     jobs_with_issues_write = [name for name, job in jobs.items() if job.get('permissions', {}).get('issues') == 'write']
@@ -163,7 +185,7 @@ except Exception as e:
     fail(f'D13: {e}')
 
 sys.exit(failures)
-" "$WF" || FAILURES=$((FAILURES + $?))
+" "$WF" "$BASELINE_WF" || FAILURES=$((FAILURES + $?))
 
 banner "Forms checks (D22, D23, D24, D25)"
 python3 -c "

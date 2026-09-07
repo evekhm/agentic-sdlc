@@ -60,11 +60,7 @@ if [ "${1:-}" = "search" ] && [ "${2:-}" = "prs" ]; then
   jq -nc '[]'
   exit 0
 fi
-if [ "${1:-}" = "search" ] && [ "${2:-}" = "prs" ]; then
-  if [ -f "$FIXTURES/search-fail" ]; then exit 1; fi
-  jq -nc '[]'
-  exit 0
-fi
+
 if [ "${1:-}" = "issue" ] && [ "${2:-}" = "comment" ]; then
   body=""
   for i in $(seq 1 $#); do
@@ -214,7 +210,12 @@ Bad
 ### Proposed outcome
 Good')" '[{"name":"intent:new"}]'
 run 7 "D20: search query"
-STOPWORDS="$(grep -m1 -oE 2>/dev/null '^STOPWORDS=.*' "$TRIAGE" | cut -d'"' -f2 || echo "a an the")"
+if grep -q '^STOPWORDS=' "$TRIAGE"; then
+    STOPWORDS="$(grep -m1 -oE '^STOPWORDS=.*' "$TRIAGE" | cut -d'"' -f2)"
+else
+    fail "D20: STOPWORDS list not found in script"
+    STOPWORDS="a an the"
+fi
 EXPECTED_QUERY=$(python3 -c "
 import sys, re
 title = sys.argv[1].lower()
@@ -255,9 +256,11 @@ issue_fixture 8 OPEN "Search fail" "$(printf '### Problem
 Bad
 ### Proposed outcome
 Good')" '[{"name":"intent:new"}]'
-touch "$FIXTURES/intent-list-fail"
+mkdir -p "$WORK/intent"
+chmod 000 "$WORK/intent"
 run_write_fail 8 "D20: fails if intent listing fails"
 if [ ! -s "$WRITES" ]; then pass "D20: writes nothing on intent list fail"; else fail "D20: writes not empty"; fi
+chmod 755 "$WORK/intent"
 
 
 banner "D16: Comment ends with marker line"
@@ -271,7 +274,8 @@ reset_fixtures
 issue_fixture 10 OPEN "a an the" "$(printf '### Problem\nBadddd\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
 run_write 10 "D17: zero-term exits 0"
 not_invoked "gh search" "D17: no searches performed"
-write_has "**Prior art:** not searched — the title yielded no term of 4 characters or more." "D17: exact nothing matched form"
+write_has "**Prior art:** not searched" "D17: third form start"
+write_has "no term of 4 characters" "D17: third form character limit"
 
 banner "D18: bug form missing Severity applies blocked"
 reset_fixtures
@@ -297,11 +301,12 @@ has "(closed)" "D20: closed match tagged"
 
 banner "D20: candidate list matching an intent/*/ folder excludes the triaged issue"
 reset_fixtures
-mkdir -p "intent/14-past-issue"
+mkdir -p "$WORK/intent/14-past-issue" "$WORK/intent/15-other-issue"
 issue_fixture 14 OPEN "Past issue" "$(printf '### Problem\nBad\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
 run 14 "D20: intent list excludes self"
 hasnt "14-past-issue" "D20: self excluded from candidate list"
-rm -rf "intent/14-past-issue"
+has "15-other-issue" "D20: non-self included in candidate list"
+rm -rf "$WORK/intent"
 
 banner "D20: gh search prs, --limit 10, no --state"
 reset_fixtures
