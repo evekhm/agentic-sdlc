@@ -77,7 +77,7 @@ run() {
     rc=$?
   fi
   set -e
-  [ "$rc" -eq 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (exit $rc)"; return 1; }
+  [ "$rc" -eq 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (exit $rc)"; return 0; }
   pass "$2"
 }
 run_fail() {
@@ -91,7 +91,7 @@ run_fail() {
     rc=$?
   fi
   set -e
-  [ "$rc" -ne 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (expected non-zero exit)"; return 1; }
+  [ "$rc" -ne 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (expected non-zero exit)"; return 0; }
   pass "$2"
 }
 run_write() {
@@ -105,7 +105,7 @@ run_write() {
     rc=$?
   fi
   set -e
-  [ "$rc" -eq 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (exit $rc)"; return 1; }
+  [ "$rc" -eq 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (exit $rc)"; return 0; }
   pass "$2"
 }
 run_write_fail() {
@@ -119,13 +119,13 @@ run_write_fail() {
     rc=$?
   fi
   set -e
-  [ "$rc" -ne 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (expected non-zero exit)"; return 1; }
+  [ "$rc" -ne 0 ] || { printf '%s\n' "$OUT" >&2; fail "$2 (expected non-zero exit)"; return 0; }
   pass "$2"
 }
 
 has() {
   if printf '%s\n' "$OUT" | grep -qF -- "$1"; then pass "$2";
-  else printf '%s\n' "$OUT" >&2; fail "$2 (expected: $1)"; return 1; fi
+  else printf '%s\n' "$OUT" >&2; fail "$2 (expected: $1)"; return 0; fi
 }
 hasnt() {
   if printf '%s\n' "$OUT" | grep -qF -- "$1"; then fail "$2 (did not expect: $1)"; return 1; else pass "$2"; fi
@@ -134,7 +134,7 @@ not_invoked() {
   if grep -Eq -- "$1" "$INVOKES"; then fail "$2 (unexpected gh matching: $1)"; return 1; else pass "$2"; fi
 }
 invoked() {
-  if grep -Eq -- "$1" "$INVOKES"; then pass "$2"; else fail "$2 (expected gh matching: $1)"; return 1; fi
+  if grep -Eq -- "$1" "$INVOKES"; then pass "$2"; else fail "$2 (expected gh matching: $1)"; return 0; fi
 }
 
 reset_fixtures() { rm -f "$FIXTURES"/*; : > "$INVOKES"; : > "$WRITES"; }
@@ -251,7 +251,7 @@ banner "D13, D15: invocation log holds exactly two labels-and-state reads surrou
 reset_fixtures
 issue_fixture 16 OPEN "Valid issue" "$(printf '### Problem\nBad\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
 run 16 "D13: invocation order exits 0"
-if [ "$(grep -c "issue view" "$INVOKES")" -ge 2 ]; then
+if [ "$(grep -c "issue view" "$INVOKES" || true)" -ge 2 ]; then
     pass "D13: at least two issue views"
 else
     fail "D13: expected at least two issue views"
