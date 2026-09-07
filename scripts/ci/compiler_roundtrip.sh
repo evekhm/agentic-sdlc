@@ -242,138 +242,50 @@ assert_lifecycle_refused() {
 }
 
 # 1. invalid stage name not in schema.json's stage enum
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["stage"] = "bogus_stage"
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "invalid_stage"
 assert_lifecycle_refused "invalid stage name" "stage 'bogus_stage' is not one of"
 
 # 2. duplicate stage label
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["stage"] = "plan"
-d["stages"][1]["label"] = d["stages"][0]["label"]
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "duplicate_label"
 assert_lifecycle_refused "duplicate stage label" "duplicate label rows"
 
 # 3. missing advances_on
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][1]["label"] = "status:spec"
-del d["stages"][0]["advances_on"]
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "missing_advances_on"
 assert_lifecycle_refused "missing advances_on" "missing advances_on"
 
 # 4. invalid advances_on value
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["advances_on"] = "invalid_trigger"
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "invalid_advances_on"
 assert_lifecycle_refused "invalid advances_on" 'invalid advances_on "invalid_trigger"'
 
 # 5. artifact mismatch (advances_on=artifact but artifact=null)
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["advances_on"] = "artifact"
-d["stages"][0]["artifact"] = None
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "artifact_mismatch_null"
 assert_lifecycle_refused "artifact null when advances_on is artifact" "advances_on is 'artifact' but artifact is null"
 
 # 6. artifact mismatch (advances_on!=artifact but artifact non-null)
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["artifact"] = "intent.md"
-d["stages"][3]["artifact"] = "unexpected.md"
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "artifact_mismatch_non_null"
 assert_lifecycle_refused "artifact non-null when advances_on is merge" 'advances_on is "merge" but artifact is non-null'
 
 # 7. non-terminal null advances_on
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][3]["artifact"] = None
-d["stages"][0]["advances_on"] = None
-d["stages"][0]["artifact"] = None
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "advances_on_non_terminal_null"
 assert_lifecycle_refused "non-terminal null advances_on" "non-terminal rung cannot have advances_on null"
 
 # 8. terminal non-null advances_on
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["advances_on"] = "artifact"
-d["stages"][0]["artifact"] = "intent.md"
-d["stages"][4]["advances_on"] = "merge"
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "advances_on_terminal_not_null"
 assert_lifecycle_refused "terminal non-null advances_on" "last rung must have advances_on null"
 
 # 9. non-terminal null advances_to
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][4]["advances_on"] = None
-d["stages"][0]["advances_to"] = None
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "advances_to_non_terminal_null"
 assert_lifecycle_refused "non-terminal null advances_to" "non-terminal rung cannot have advances_to null"
 
 # 10. terminal non-null advances_to
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["advances_to"] = "status:spec"
-d["stages"][4]["advances_to"] = "status:done"
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "advances_to_terminal_not_null"
 assert_lifecycle_refused "terminal non-null advances_to" "last rung must have advances_to null"
 
 # 11. multiple merges
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][4]["advances_to"] = None
-d["stages"][0]["advances_on"] = "merge"
-d["stages"][0]["artifact"] = None
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "multiple_merges"
 assert_lifecycle_refused "multiple merges" "expected exactly one rung with advances_on 'merge', found 2"
 
 # 12. zero merges
-python3 -c '
-import json
-p = "'"$LF_JSON"'"
-d = json.loads(open(p).read())
-d["stages"][0]["advances_on"] = "artifact"
-d["stages"][0]["artifact"] = "intent.md"
-d["stages"][3]["advances_on"] = "artifact"
-d["stages"][3]["artifact"] = "code.patch"
-open(p, "w").write(json.dumps(d))
-'
+python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "zero_merges"
 assert_lifecycle_refused "zero merges" "expected exactly one rung with advances_on 'merge', found 0"
-
 printf '\nPASS: compiler roundtrip green (%s target files, 7 checks).\n' "$count"
