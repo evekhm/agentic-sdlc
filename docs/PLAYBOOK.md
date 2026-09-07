@@ -245,6 +245,29 @@ only distrusts the model ships the other two layers' lies.**
   line in a handoff or observations file carries a re-checkable pointer
   (SHA + comment id), and the reader re-checks it against GitHub before
   acting on it.
+- **A guard installed is not a guard running** (#224, found
+  2026-09-07): the sibling of the entry above, one layer down. #142
+  shipped a `pre-commit` hook refusing commits in the primary
+  checkout, and `install.sh` copied it to
+  `$(git rev-parse --git-common-dir)/hooks`. Correct reasoning about
+  worktrees, wrong about the machine: git consults `core.hooksPath`
+  *exclusively* when it is set, and it is set globally here, so
+  `.git/hooks` is never read and that guard has never executed. The
+  install exits 0, the file is on disk at the path it names, and the
+  countermeasure does not exist — fake-green in the tooling layer,
+  with every "the hook will catch it" claim downstream of #142 false
+  since the day it merged. Two rules, both instances of the same
+  discipline the gates already follow: install to the path git will
+  actually use (`git rev-parse --git-path hooks`, which resolves
+  `core.hooksPath`), and **verify a guard by making it fire**, in a
+  throwaway repo, rather than by checking that a file exists. Corollary
+  for parallel sessions: a global `core.hooksPath` is *shared mutable
+  state*. This session wrote a one-minute test hook to the directory
+  `git rev-parse --git-path hooks` reported, not noticing it resolved
+  outside the repo, and every ref update on the machine failed for
+  every session until a peer noticed and reported it. Test hooks go in
+  a temp dir via `git -c core.hooksPath=<tmp>`, never at the resolved
+  path.
 - **The repair ledger fabricates too** (PR #202, rounds 2 and 3): the
   round-2 ledger listed AT-1/R1-1 as fixed while the suite still
   aborted on the first failure — the author retracted it itself in a
