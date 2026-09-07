@@ -12,26 +12,38 @@ file is the live ordering under it. The advisor seat owns both; update
 this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line.
 
-Status line: 2026-09-07, ~07:45 UTC. Live `gh issue list` state always
+Status line: 2026-09-07, ~08:30 UTC. Live `gh issue list` state always
 beats this file.
 
-## Gate 1: one real unattended review exists
+## Gate 1: unattended review runs on every rung
 
-Exit criterion: one pull request whose reviewer job log shows a model
-call succeeding and a review posted by the runner itself. Nothing
-downstream can be trusted until this exists. Order matters.
+Two exit criteria, in order.
+
+**1a, met:** one pull request whose reviewer job log shows a model call
+succeeding and a review posted by the runner itself. Evidence: run
+34093599471 on PR #188, job "argus via gh-actions", success,
+07:03:34 to 07:12:04 UTC on 2026-09-07; the log ends in a real
+`end_turn` result and the round-1 review comment is by
+`evekhm-argus-app[bot]` at 07:11:23. Atlas failed in the same run on the
+old model pin and has since posted a real BLOCK on PR #211 after the
+re-pin, so both reviewers have now reviewed unattended at least once.
+
+**1b, not met:** the runner reviews every rung's pull request, not only
+a bug-fix branch outside the ladder. Every ladder PR is refused at the
+claim mutex for its whole open window (#207). Until #207 lands, 1a is a
+proof of mechanism, not of coverage. Order matters.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
-| 1 | #207 | The claim mutex refuses every ladder PR's review for its whole open window, and the derived stage is never `review`. Two walls; everything below is measurable only after this lands. | spec PR #212 open; plan and implement rungs follow |
+| 1 | #207 | The claim mutex refuses every ladder PR's review for its whole open window, and the derived stage is never `review`. Two walls; 1b is measurable only after this lands. | spec merged (PR #212); plan PR #218 open; implement rung follows |
 | 2 | #167 | atlas cannot see its model on the runner. The re-pin landed; sufficiency is measured by the next status-labelled PR's atlas log, which #207 unblocks. | open, in-progress |
-| 3 | #169 | jsonschema is missing on the runner, so a persona cannot run the compiler gate. Independent of #207; prompt is written. | open |
+| 3 | #169 | jsonschema is missing on the runner, so a persona cannot run the compiler gate. | done: PR #214 merged 07:50, issue closed |
 | 4 | #168 | Permission posture for a persona on a CI runner: bypass or allowlist. An operator decision, not a build. | open, intent:new |
 | 5 | #191 | Claims land under the bare human login. Identity as a hard claim-time parameter; needed before any board reading is trustworthy. | open |
 
 ## Gate 2: the trigger becomes a label and merge becomes a decision
 
-Start once gate 1's exit criterion is met.
+Start once gate 1's criterion 1b is met.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
@@ -47,7 +59,7 @@ Needed for the demo story, not for the mechanism.
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | 10 | #117 | Typed intake: issue forms and deterministic triage on open. | plan PR #202 open |
-| 11 | #82 | Repair path through the one command. Today every bug fix gets zero unattended review by construction. Moved here from gate 1: it does not block the exit criterion. | open, intent:new |
+| 11 | #82 | Repair path through the one command. Today every bug fix gets zero unattended review by construction: both reviewers refused PR #214 with "cannot derive a stage for #169", and it merged knowingly unreviewed. Moved here from gate 1: it does not block 1a or 1b, but it is the coverage hole after them. | open, intent:new |
 | 12 | #89 | `/work <n>` drives the whole ladder from one session. | open, intent:new |
 
 ## Parallel track, any time
@@ -58,11 +70,17 @@ Needed for the demo story, not for the mechanism.
   session is free.
 - **#198** — CI gate for `distinct_model_families`. A guard against
   regression, not a blocker; slides to whenever config is next touched.
+- **#216** — a pull request with no resolvable issue dies with exit 1 in
+  the resolver, so the runner check goes red instead of the exit-2
+  refusal the workflow expects. A bug, kept separate from #82; fix
+  whenever a session is free.
 
 ## Standing seats
 
-- **#199** (advisor persona `nestor`): plan PR #208 open. Its
-  implementation dispatch waits behind #207 per the operator's direction.
+- **#199** (advisor persona `nestor`): plan merged (PR #208), issue at
+  `status:implementing`, claim released. Its implementation dispatch
+  waits behind #207 per the operator's direction and needs nestor's
+  harness pin posted on the issue first (plan T3).
 - **#204** (verifier as the review stage of `argus`): spec PR #211 open.
   Blocks nothing above.
 
