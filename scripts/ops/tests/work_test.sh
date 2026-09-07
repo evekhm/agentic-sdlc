@@ -724,21 +724,24 @@ has "unknown flag" "D7: a flag naming a stage is refused outright"
 run 1 "D7: a non-numeric argument exits 1" -- not-a-number
 has "is not an issue or pull-request number" "D7: it says why"
 
-banner "#165 Preflight tests"
-: > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
-rm -f "$FIXTURES/repos_test_repo.json"
-run 1 "#165: missing GitHub read path exits 1" -- 108
-has "environment cannot run: cannot read test/repo from GitHub" "#165: the missing read is named"
-
-echo "{}" > "$FIXTURES/repos_test_repo.json"
-GITHUB_BASE_REF="does-not-exist" run 0 "#165: missing base object prints notice but exits 0" -- 108
-has "work.sh: notice: no base object origin/does-not-exist" "#165: the missing base object is named in a notice"
-
 banner "nothing above this line launched or wrote"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "a write or launch was attempted"; }
 [ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "a session was launched"; }
 [ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "a token was minted"; }
 pass "no GitHub write, no launch and no token exchange in any resolve-only scenario"
+
+banner "#165 preflight checks — missing GitHub read or missing base object exits 1"
+rm -f "$FIXTURES/repos_test_repo.json"
+run 1 "#165: missing GitHub read path exits 1" -- 108
+has "environment cannot run: cannot read test/repo from GitHub" "#165: the missing read is named"
+
+echo "{}" > "$FIXTURES/repos_test_repo.json"
+GITHUB_BASE_REF="does-not-exist" run 1 "#165: missing base object exits 1" -- 108
+has "environment cannot run: no base object origin/does-not-exist" "#165: the missing base object is named"
+[ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "#165: a write was attempted on preflight failure"; }
+[ ! -s "$LAUNCHES" ] || { cat "$LAUNCHES" >&2; fail "#165: a session was launched on preflight failure"; }
+[ ! -s "$MINTS" ] || { cat "$MINTS" >&2; fail "#165: a token was minted on preflight failure"; }
+pass "#165: preflight failures exit 1 and attempt zero writes, launches, or mints"
 
 # =============================================================================
 # #43 — the launching half. Everything below runs against a fixture_tree:

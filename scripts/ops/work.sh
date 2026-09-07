@@ -182,9 +182,9 @@ gh api "repos/$GITHUB_REPO" >/dev/null 2>&1 \
     || die "environment cannot run: cannot read $GITHUB_REPO from GitHub"
 
 base="${GITHUB_BASE_REF:-main}"
-if ! git -C "$REPO_ROOT" cat-file -e "origin/$base^{commit}" >/dev/null 2>&1; then
-        echo "work.sh: notice: no base object origin/$base (reviewer cannot compute a diff)" >&2
-fi
+git -C "$REPO_ROOT" cat-file -e "origin/$base^{commit}" >/dev/null 2>&1 \
+    || die "environment cannot run: no base object origin/$base (reviewer cannot compute a diff)"
+
 
 # The pull-request resolver and has_label live here rather than in this
 # file so that D14's "the same way work.sh resolves it" is ONE
