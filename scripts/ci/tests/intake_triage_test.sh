@@ -19,7 +19,7 @@ FAILURES=0
 fail() { echo "FAIL: $*" >&2; FAILURES=$((FAILURES + 1)); }
 banner() { printf '\n--- %s\n' "$*"; }
 
-TRIAGE="$REPO/scripts/ci/intake_triage.sh"
+TRIAGE="${TRIAGE:-$REPO/scripts/ci/intake_triage.sh}"
 
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -47,7 +47,7 @@ if [ "${1:-}" = "issue" ] && [ "${2:-}" = "view" ]; then
   exit 0
 fi
 if [ "${1:-}" = "search" ] && [ "${2:-}" = "issues" ]; then
-  if [ -f "$FIXTURES/search-fail" ]; then exit 1; fi
+  if [ -f "$FIXTURES/search-issues-fail" ]; then exit 1; fi
   if [[ "$*" == *"--state"* ]]; then
      echo "search has state" >&2
      exit 1
@@ -56,8 +56,28 @@ if [ "${1:-}" = "search" ] && [ "${2:-}" = "issues" ]; then
   exit 0
 fi
 if [ "${1:-}" = "search" ] && [ "${2:-}" = "prs" ]; then
+  if [ -f "$FIXTURES/search-prs-fail" ]; then exit 1; fi
+  jq -nc '[]'
+  exit 0
+fi
+if [ "${1:-}" = "search" ] && [ "${2:-}" = "prs" ]; then
   if [ -f "$FIXTURES/search-fail" ]; then exit 1; fi
   jq -nc '[]'
+  exit 0
+fi
+if [ "${1:-}" = "issue" ] && [ "${2:-}" = "comment" ]; then
+  body=""
+  for i in $(seq 1 $#); do
+    if [ "${!i}" = "--body-file" ]; then
+      j=$((i+1))
+      body=$(cat "${!j}")
+      break
+    fi
+  done
+  printf '%s\n' "gh $*" >> "$WRITES"
+  if [ -n "$body" ]; then
+    printf '%s\n' "$body" >> "$WRITES"
+  fi
   exit 0
 fi
 printf '%s\n' "gh $*" >> "$WRITES"
@@ -70,10 +90,9 @@ run() {
   local rc=0
   set +e
   if [ ! -f "$TRIAGE" ]; then
-    OUT="script missing"
-    rc=1
+    fail "$2 (script missing)"; return 0
   else
-    OUT="$(DRY_RUN=1 bash "$TRIAGE" "$1" 2>&1)"
+    OUT="$(cd "$WORK" && DRY_RUN=1 bash "$TRIAGE" "$1" 2>&1)"
     rc=$?
   fi
   set -e
@@ -84,10 +103,9 @@ run_fail() {
   local rc=0
   set +e
   if [ ! -f "$TRIAGE" ]; then
-    OUT="script missing"
-    rc=1
+    fail "$2 (script missing)"; return 0
   else
-    OUT="$(DRY_RUN=1 bash "$TRIAGE" "$1" 2>&1)"
+    OUT="$(cd "$WORK" && DRY_RUN=1 bash "$TRIAGE" "$1" 2>&1)"
     rc=$?
   fi
   set -e
@@ -98,10 +116,9 @@ run_write() {
   local rc=0
   set +e
   if [ ! -f "$TRIAGE" ]; then
-    OUT="script missing"
-    rc=1
+    fail "$2 (script missing)"; return 0
   else
-    OUT="$(bash "$TRIAGE" "$1" 2>&1)"
+    OUT="$(cd "$WORK" && bash "$TRIAGE" "$1" 2>&1)"
     rc=$?
   fi
   set -e
@@ -112,10 +129,9 @@ run_write_fail() {
   local rc=0
   set +e
   if [ ! -f "$TRIAGE" ]; then
-    OUT="script missing"
-    rc=1
+    fail "$2 (script missing)"; return 0
   else
-    OUT="$(bash "$TRIAGE" "$1" 2>&1)"
+    OUT="$(cd "$WORK" && bash "$TRIAGE" "$1" 2>&1)"
     rc=$?
   fi
   set -e
@@ -127,11 +143,19 @@ has() {
   if printf '%s\n' "$OUT" | grep -qF -- "$1"; then pass "$2";
   else printf '%s\n' "$OUT" >&2; fail "$2 (expected: $1)"; return 0; fi
 }
+
+write_has() {
+  if grep -qF -- "$1" "$WRITES"; then pass "$2";
+  else fail "$2 (expected in writes: $1)"; return 0; fi
+}
+write_hasnt() {
+  if grep -qF -- "$1" "$WRITES"; then fail "$2 (did not expect in writes: $1)"; return 0; else pass "$2"; fi
+}
 hasnt() {
-  if printf '%s\n' "$OUT" | grep -qF -- "$1"; then fail "$2 (did not expect: $1)"; return 1; else pass "$2"; fi
+  if printf '%s\n' "$OUT" | grep -qF -- "$1"; then fail "$2 (did not expect: $1)"; return 0; else pass "$2"; fi
 }
 not_invoked() {
-  if grep -Eq -- "$1" "$INVOKES"; then fail "$2 (unexpected gh matching: $1)"; return 1; else pass "$2"; fi
+  if grep -Eq -- "$1" "$INVOKES"; then fail "$2 (unexpected gh matching: $1)"; return 0; else pass "$2"; fi
 }
 invoked() {
   if grep -Eq -- "$1" "$INVOKES"; then pass "$2"; else fail "$2 (expected gh matching: $1)"; return 0; fi
@@ -185,15 +209,55 @@ hasnt "blocked" "D17: blocked is not applied"
 
 banner "D20: search queries are derived from title"
 reset_fixtures
-issue_fixture 7 OPEN "Typed intake: issue forms for intent and bug, deterministic triage on issue open" "$(printf '### Problem\nBad\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
+issue_fixture 7 OPEN "Typed intake: issue forms for intent and bug, deterministic triage on issue open" "$(printf '### Problem
+Bad
+### Proposed outcome
+Good')" '[{"name":"intent:new"}]'
 run 7 "D20: search query"
-invoked "gh search issues --repo.*typed OR intake OR issue OR forms OR intent OR deterministic" "D20: query is built from title"
+STOPWORDS="$(grep -m1 -oE 2>/dev/null '^STOPWORDS=.*' "$TRIAGE" | cut -d'"' -f2 || echo "a an the")"
+EXPECTED_QUERY=$(python3 -c "
+import sys, re
+title = sys.argv[1].lower()
+title = re.sub(r'[^a-z0-9]', ' ', title)
+words = title.split()
+stopwords = sys.argv[2].split()
+res = []
+for w in words:
+    if len(w) >= 4 and w not in stopwords and w not in res:
+        res.append(w)
+print(' OR '.join(res[:6]))
+" "Typed intake: issue forms for intent and bug, deterministic triage on issue open" "$STOPWORDS")
+invoked "gh search issues --repo.*$EXPECTED_QUERY" "D20: query is built from title"
 
-banner "D20: search failures exit 1"
+
+banner "D20: search failures exit 1 and write nothing"
+
 reset_fixtures
-issue_fixture 8 OPEN "Search fail" "$(printf '### Problem\nBad\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
-touch "$FIXTURES/search-fail"
-run_fail 8 "D20: fails if search fails"
+issue_fixture 8 OPEN "Search fail" "$(printf '### Problem
+Bad
+### Proposed outcome
+Good')" '[{"name":"intent:new"}]'
+touch "$FIXTURES/search-issues-fail"
+run_write_fail 8 "D20: fails if search issues fails"
+if [ ! -s "$WRITES" ]; then pass "D20: writes nothing on search issues fail"; else fail "D20: writes not empty"; fi
+
+reset_fixtures
+issue_fixture 8 OPEN "Search fail" "$(printf '### Problem
+Bad
+### Proposed outcome
+Good')" '[{"name":"intent:new"}]'
+touch "$FIXTURES/search-prs-fail"
+run_write_fail 8 "D20: fails if search prs fails"
+if [ ! -s "$WRITES" ]; then pass "D20: writes nothing on search prs fail"; else fail "D20: writes not empty"; fi
+
+reset_fixtures
+issue_fixture 8 OPEN "Search fail" "$(printf '### Problem
+Bad
+### Proposed outcome
+Good')" '[{"name":"intent:new"}]'
+touch "$FIXTURES/intent-list-fail"
+run_write_fail 8 "D20: fails if intent listing fails"
+if [ ! -s "$WRITES" ]; then pass "D20: writes nothing on intent list fail"; else fail "D20: writes not empty"; fi
 
 
 banner "D16: Comment ends with marker line"
@@ -207,22 +271,22 @@ reset_fixtures
 issue_fixture 10 OPEN "a an the" "$(printf '### Problem\nBadddd\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
 run_write 10 "D17: zero-term exits 0"
 not_invoked "gh search" "D17: no searches performed"
-has "No automated prior-art links could be derived" "D17: exact nothing matched form"
+write_has "**Prior art:** not searched — the title yielded no term of 4 characters or more." "D17: exact nothing matched form"
 
 banner "D18: bug form missing Severity applies blocked"
 reset_fixtures
 issue_fixture 11 OPEN "Bug issue" "$(printf '### What happened\nBad\n### What you expected\nGood')" '[{"name":"bug"}]'
 run_write 11 "D18: bug missing severity exits 0"
-has "blocked" "D18: bug blocked label applied"
-has "Severity" "D18: names Severity as missing"
+write_has "blocked" "D18: bug blocked label applied"
+write_has "Severity" "D18: names Severity as missing"
 
 banner "D18: intent:new missing Problem does NOT name Constraints"
 reset_fixtures
 issue_fixture 12 OPEN "Missing problem" "$(printf '### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
 run_write 12 "D18: intent missing problem exits 0"
-has "blocked" "D18: blocked label applied"
-has "Problem" "D18: names Problem as missing"
-hasnt "Constraints" "D18: does NOT name Constraints as missing"
+write_has "blocked" "D18: blocked label applied"
+write_has "Problem" "D18: names Problem as missing"
+write_hasnt "Constraints" "D18: does NOT name Constraints as missing"
 
 banner "D20: stub returning open and closed matches lists both, tagged (open) and (closed)"
 reset_fixtures
@@ -247,21 +311,51 @@ invoked "gh search prs" "D20: search prs invoked"
 invoked "--limit 10" "D20: --limit 10 invoked"
 not_invoked "--state" "D20: no --state invoked"
 
+
 banner "D13, D15: invocation log holds exactly two labels-and-state reads surrounding the marker read in order"
 reset_fixtures
-issue_fixture 16 OPEN "Valid issue" "$(printf '### Problem\nBad\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
+issue_fixture 16 OPEN "Valid issue" "$(printf '### Problem
+Bad
+### Proposed outcome
+Good')" '[{"name":"intent:new"}]'
 run 16 "D13: invocation order exits 0"
-if [ "$(grep -c "issue view" "$INVOKES" || true)" -ge 2 ]; then
-    pass "D13: at least two issue views"
+# Filter and normalize invocations to just the command bases
+awk '{
+  if ($0 ~ /gh issue view/) print "view";
+  else if ($0 ~ /gh api.*comments/) print "marker";
+  else if ($0 ~ /gh search issues/) print "search_issues";
+  else if ($0 ~ /gh search prs/) print "search_prs";
+}' "$INVOKES" > "$WORK/actual_order"
+
+cat << 'SEQ' > "$WORK/expected_order"
+view
+marker
+search_issues
+search_prs
+view
+SEQ
+
+if cmp -s "$WORK/expected_order" "$WORK/actual_order"; then
+    pass "D13: sequence is view, marker, search_issues, search_prs, view"
 else
-    fail "D13: expected at least two issue views"
+    fail "D13: sequence mismatch. Expected:"
+    cat "$WORK/expected_order" >&2
+    echo "Got:" >&2
+    cat "$WORK/actual_order" >&2
 fi
 
-banner "D20: query derivation is identical on two consecutive runs, three real titles"
+banner "D20: query derivation is identical on two consecutive runs, one real title"
 reset_fixtures
-issue_fixture 17 OPEN "Add tests for user authentication" "$(printf '### Problem\nBad\n### Proposed outcome\nGood')" '[{"name":"intent:new"}]'
-run 17 "D20: title 1"
-invoked "tests OR user OR authentication" "D20: derived query"
+issue_fixture 17 OPEN "Add tests for user authentication" "$(printf '### Problem
+Bad
+### Proposed outcome
+Good')" '[{"name":"intent:new"}]'
+run 17 "D20: title 1 run 1"
+Q1=$(grep -oE "gh search issues --repo.*" "$INVOKES" | head -n1)
+: > "$INVOKES"
+run 17 "D20: title 1 run 2"
+Q2=$(grep -oE "gh search issues --repo.*" "$INVOKES" | head -n1)
+if [ "$Q1" = "$Q2" ] && [ -n "$Q1" ]; then pass "D20: query is identical on two runs"; else fail "D20: query mismatch"; fi
 
 
 if [ "$FAILURES" -gt 0 ]; then

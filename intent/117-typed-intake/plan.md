@@ -139,7 +139,7 @@ Touch: `scripts/ci/tests/lifecycle_advance_test.sh`, `scripts/ops/tests/executio
 2. `execution_test.sh`: Update lines ~69, ~76, ~91-93, ~98-99 to expect 6 bindings, list `cassandra` and `athena` in issues output, and expect exit 0 / printed binding instead of exit 1 for cassandra.
 3. `work_test.sh`: Update the #129 block (:599-611) strings. Replace "refused: cannot derive a stage for #140" with D5(f) refusal strings for argus/atlas, replace "no status:* label and no intent:new" with owner clause "owners: cassandra". Add D4 scenarios (bug derives maintain, bug+spec derives design, two off-ladder refuse, no label refuse). Add D1 scenario: DRY_RUN=1 scripts/ops/work.sh <pr> --as argus on a bug issue exits 2 green naming cassandra as owner (D1).
 4. `docs/SPEC.md`: Upsert `intake.triage` per spec. Amend `lifecycle.labels` (15 labels), `tracker.provisioning` (count), `ops.dispatch` (nine refusals) at `docs/SPEC.md:451`, `personas.resume` (five rungs) at `docs/SPEC.md:194`, and `execution.placement` (cassandra cadence) at `docs/SPEC.md:736` and `:757-759`.
-5. Include `Spec-impact: none — contract tests only; SPEC.md entries land with the implementation per D27` in the implementing PR.
+5. Include `Spec-impact: docs/SPEC.md: added intake.triage, amended intent, intent.new, issue.state, deterministic (D27)` in the implementing PR.
 
 ### Verification
 `bash scripts/ci/tests/lifecycle_advance_test.sh` passes.

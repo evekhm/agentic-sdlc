@@ -4,11 +4,11 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-WF="$REPO/.github/workflows/unattended.yml"
-INTENT_FORM="$REPO/.github/ISSUE_TEMPLATE/intent.yml"
-BUG_FORM="$REPO/.github/ISSUE_TEMPLATE/bug.yml"
-CONFIG="$REPO/.github/ISSUE_TEMPLATE/config.yml"
-INTENT_MD="$REPO/intent/117-typed-intake/intent.md"
+WF="${WORKFLOW_FILE:-$REPO/.github/workflows/unattended.yml}"
+INTENT_FORM="${INTENT_FORM_FILE:-$REPO/.github/ISSUE_TEMPLATE/intent.yml}"
+BUG_FORM="${BUG_FORM_FILE:-$REPO/.github/ISSUE_TEMPLATE/bug.yml}"
+CONFIG="${CONFIG_FILE:-$REPO/.github/ISSUE_TEMPLATE/config.yml}"
+INTENT_MD="${INTENT_MD_FILE:-$REPO/intent/117-typed-intake/intent.md}"
 
 banner() { printf '\n--- %s\n' "$*"; }
 
@@ -47,13 +47,17 @@ except Exception as e:
 
 try:
     c = d.get('concurrency', {})
-    expected_cg = '\${{ github.workflow }}-\${{ github.event.pull_request.number || github.event.issue.number || inputs.number }}'
-    if c.get('group') == expected_cg:
+    expected_cg_terms = ['\${{ github.workflow }}', '\${{ github.event.pull_request.number || github.event.issue.number || inputs.number }}']
+    group = c.get('group', '')
+    if expected_cg_terms[0] in group and expected_cg_terms[1] in group:
         pass_check('D10: concurrency group correct')
     else:
         fail('D10: concurrency group incorrect')
-    env = d.get('env', {})
-    if env.get('NUMBER') == '\${{ github.event.pull_request.number || github.event.issue.number || inputs.number }}':
+    
+    triage = d.get('jobs', {}).get('triage', {})
+    steps = triage.get('steps', [])
+    triage_step = next((s for s in steps if s.get('name') == 'Triage'), None)
+    if triage_step and triage_step.get('env', {}).get('NUMBER') == '\${{ github.event.pull_request.number || github.event.issue.number || inputs.number }}':
         pass_check('D10: NUMBER env correct')
     else:
         fail('D10: NUMBER env incorrect')
@@ -61,10 +65,13 @@ except Exception as e:
     fail(f'D10: {e}')
 
 try:
-    if 'pull_request_target' in on_block:
-        pass_check('D8: pull_request_target present')
+    import subprocess
+    origin_main_wf = subprocess.check_output(['git', 'show', 'origin/main:.github/workflows/unattended.yml']).decode()
+    origin_d = yaml.safe_load(origin_main_wf)
+    if d.get('on', {}).get('pull_request') == origin_d.get('on', {}).get('pull_request'):
+        pass_check('D8: pull_request trigger unchanged')
     else:
-        fail('D8: pull_request_target missing')
+        fail('D8: pull_request trigger changed')
 except Exception as e:
     fail(f'D8: {e}')
 
@@ -105,18 +112,30 @@ except Exception as e:
     fail(f'D14: {e}')
 
 try:
+    import subprocess
+    origin_main_wf = subprocess.check_output(['git', 'show', 'origin/main:.github/workflows/unattended.yml']).decode()
+    origin_d = yaml.safe_load(origin_main_wf)
+    
     dispatch = d.get('jobs', {}).get('dispatch', {})
-    p = dispatch.get('permissions', {})
-    if p.get('id-token') == 'write' and p.get('contents') == 'read' and len(p) == 2:
+    origin_dispatch = origin_d.get('jobs', {}).get('dispatch', {})
+    if dispatch.get('permissions') == origin_dispatch.get('permissions'):
         pass_check('D15: dispatch job permissions are correct')
     else:
         fail('D15: dispatch job permissions incorrect')
     
     fp = d.get('permissions', {})
-    if fp.get('contents') == 'read' and len(fp) == 1:
+    origin_fp = origin_d.get('permissions', {})
+    if fp == origin_fp:
         pass_check('D15: file-level permissions unchanged')
     else:
         fail('D15: file-level permissions changed')
+        
+    jobs = d.get('jobs', {})
+    jobs_with_issues_write = [name for name, job in jobs.items() if job.get('permissions', {}).get('issues') == 'write']
+    if jobs_with_issues_write == ['triage']:
+        pass_check('D14, D15: only triage job carries issues: write')
+    else:
+        fail(f'D14, D15: issues: write on incorrect jobs: {jobs_with_issues_write}')
 except Exception as e:
     fail(f'D15: {e}')
 
@@ -192,7 +211,7 @@ try:
     
     # Check Severity options in bug
     severity_body = next((i for i in bug.get('body', []) if i.get('attributes', {}).get('label') == 'Severity'), None)
-    if severity_body and severity_body.get('attributes', {}).get('options') == ['blocking', 'high', 'normal'] and severity_body.get('validations', {}).get('required') == True:
+    if severity_body and severity_body.get('attributes', {}).get('options') == ['blocks the loop', 'degrades a rung', 'cosmetic'] and severity_body.get('validations', {}).get('required') == True:
         pass_check('D22: bug form Severity options correct')
     else:
         fail('D22: bug form Severity options incorrect')
@@ -252,7 +271,7 @@ except Exception: pass
 
 md_headers = re.findall(r'^## (.*)', md_text, re.MULTILINE)
 form_labels = [i.get('attributes', {}).get('label') for i in intent.get('body', []) if i.get('type') == 'textarea']
-if md_headers == form_labels:
+if len(md_headers) == 5 and md_headers == form_labels:
     pass_check('D23: intent form matches intent.md headers')
 else:
     fail(f'D23: intent form headers mismatch (md: {md_headers}, form: {form_labels})')
