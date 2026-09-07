@@ -91,7 +91,7 @@ not a new actor. Four parts.
    exercise. The alternative — writing an admittedly interim power
    into the durable policy doc — makes #64 responsible for unwriting
    it.
-4. **No cast change.** `personas/lifecycle.json` derives a stage's
+4. **No cast change for this seat.** `personas/lifecycle.json` derives a stage's
    owner as every `personas/*.yaml` whose `stage` list contains it,
    and `personas/schema.json` carries a closed stage enum. A `verify`
    rung would touch the enum, the compiler, the label taxonomy,
@@ -141,8 +141,13 @@ carries the upsert.
   `approve`, `merge`, `close`, or `edit`. The verifier's merge is a
   human's merge, exercised through an operator-driven session; that
   distinction is the reason this is a stage and not a persona.
-- **No new persona, no stage-enum change, no new document.** The
-  deliverable is depth in existing files.
+- **No new persona for this seat, no stage-enum change, no new
+  document.** The deliverable is depth in existing files. Scoped to
+  seat 2 deliberately: #199 does add `personas/nestor.yaml` for seat 1
+  (its D1), and that is not in tension with this — the advisor seat
+  needs an actor, the verifier seat needs a protocol. Neither issue's
+  artifacts restate a persona count, which #199's implementation
+  changes.
 - **Not blocked on #181.** A persona's compiled brief *is* the tracked
   launch template this repo already has; #181 generalizes the agy
   implementer dispatch preamble, a different artifact. Recorded here
