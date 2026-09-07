@@ -281,6 +281,38 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           bash scripts/ci/install_harness.sh check
 
+      # agy's second credential reaches the launcher as a FILE, and this
+      # step exists so that the value is in the environment of a step
+      # that does nothing else and then exits. Putting it in Dispatch's
+      # environment instead would leave it readable for the whole run:
+      # the kernel keeps every process's initial environment in
+      # /proc/<pid>/environ, so `unset` inside work.sh cannot take it
+      # back from the step process that hosts the harness, and a session
+      # running as the same runner user reads it with `cat` (atlas A1-1
+      # on PR #221). A path is not a secret and can be taken back — by
+      # deleting the file, which work.sh does before the launch whenever
+      # the persona it resolved is not on antigravity. So this file
+      # stays harness-blind (D18) and still hands nothing to the
+      # harnesses that must not have it.
+      - name: Stage agy's model credential
+        if: steps.gate.outputs.ready == 'true'
+        env:
+          ANTIGRAVITY_ADC_JSON: ${{ secrets.ANTIGRAVITY_ADC_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANTIGRAVITY_ADC_JSON:-}" ]; then
+            echo "ANTIGRAVITY_ADC_JSON is not set; antigravity personas will" >&2
+            echo "resolve no model. See scripts/setup/wif_setup.sh --check (#167)." >&2
+            exit 0
+          fi
+          DEST="$RUNNER_TEMP/agy-adc.json"
+          # Create empty at 0600 first, then write: the value never
+          # appears in an argv, and never exists at a world-readable
+          # path for even an instant.
+          install -m 600 /dev/null "$DEST"
+          printf '%s' "$ANTIGRAVITY_ADC_JSON" > "$DEST"
+          echo "ANTIGRAVITY_ADC_FILE=$DEST" >> "$GITHUB_ENV"
+
       - name: Dispatch
         if: steps.gate.outputs.ready == 'true'
         env:
@@ -293,24 +325,20 @@ jobs:
           CLOUD_ML_REGION: global
           AGY_ADC_AUTH: 'true'
           ANTIGRAVITY_PROJECT_ID: ${{ vars.ANTIGRAVITY_PROJECT_ID }}
-          # agy's SECOND credential, and the only one WIF cannot supply
-          # (#167). agy ships no built-in model list; it fetches its
-          # catalog from cloudcode-pa.googleapis.com, which serves per
-          # IDENTITY ENTITLEMENT rather than per project, and a federated
-          # service account holds none — measured on this runner, WIF
-          # gets 0 models and every --model value is then "not
-          # recognized", while an authorized_user ADC credential gets 15
-          # and the call succeeds. roles/serviceusage.serviceUsageConsumer
-          # was granted and re-measured at 0, so no IAM change reaches it.
-          #
-          # Passed as a VALUE, and this file does not decide who gets it:
-          # work.sh writes it to a 0600 temp file outside the checkout
-          # only when the persona it resolved is pinned to antigravity,
-          # unsets it for every harness before the launch, and deletes
-          # the file on exit. A step here would have to write it on every
-          # runner — including the claude-code dispatches that run with
-          # the permission gate bypassed and have no use for it.
-          ANTIGRAVITY_ADC_JSON: ${{ secrets.ANTIGRAVITY_ADC_JSON }}
+          # agy's SECOND credential is deliberately ABSENT from this
+          # environment (#167, atlas A1-1). It is the only credential
+          # WIF cannot supply: agy ships no built-in model list, fetches
+          # its catalog from cloudcode-pa.googleapis.com, which serves
+          # per IDENTITY ENTITLEMENT rather than per project, and a
+          # federated service account holds none — measured on this
+          # runner, WIF gets 0 models and every --model value is then
+          # "not recognized", while an authorized_user ADC credential
+          # gets 15 and the call succeeds.
+          # roles/serviceusage.serviceUsageConsumer was granted and
+          # re-measured at 0, so no IAM change reaches it. The staging
+          # step above puts it in a file and exports only
+          # $ANTIGRAVITY_ADC_FILE, which work.sh keeps for antigravity
+          # and deletes for everyone else.
           # BY NAME (D3). The value is an Actions secret whose name is
           # the persona's authority.token; it reaches the adapter as the
           # variable of that name, set in the shell below, and is never
@@ -402,4 +430,13 @@ jobs:
             exit 0
           fi
           exit "$rc"
+
+      # work.sh deletes this itself — before the launch when the harness
+      # is not antigravity, and on EXIT/INT/TERM when it is. This is the
+      # case its traps cannot reach: a job cancelled or killed hard
+      # enough that the launcher never runs its handler. Last step, and
+      # `always()`, so it also runs after a failed dispatch.
+      - name: Remove agy's model credential
+        if: always()
+        run: rm -f "$RUNNER_TEMP/agy-adc.json"
 

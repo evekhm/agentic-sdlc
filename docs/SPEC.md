@@ -139,15 +139,19 @@ given, which no re-pin and no role grant can repair. An antigravity
 persona therefore requires a user-entitled credential, provisioned as
 a repository secret. The launcher is the only component that resolves
 this, because it is the only component that knows which harness is
-about to run: it materialises that credential and substitutes it for
-the federated one on the antigravity branch and nowhere else, and an
-absent credential degrades that persona alone rather than failing the
-dispatch. Because the credential is user-entitled and long-lived it is
-withheld from every dispatch that does not need it — a claude-code
-session never sees the value or a file holding it — it belongs to a
-dedicated account rather than an operator's own, it is never written
-inside the checkout, and it is deleted when the launcher exits
-whatever the outcome.
+about to run: it substitutes that credential for the federated one on
+the antigravity branch and nowhere else, and an absent credential
+degrades that persona alone rather than failing the dispatch. Because
+the credential is user-entitled and long-lived, no dispatch that does
+not need it may retain it, and withholding must be by DESTRUCTION
+rather than by concealment — a value placed in the environment of the
+process that hosts a session cannot be withdrawn from it, so the
+credential is carried to the launcher as a path to a file readable
+only by its owner and never written inside the checkout, and the
+launcher deletes that file before any session exists whenever the
+harness it resolved is not the one entitled to it, and on its own exit
+whatever the outcome when it is. It belongs to a dedicated account
+rather than an operator's own.
 
 ### config.bindings
 `config/` is the only layer where vendor, model, and tool names
