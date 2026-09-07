@@ -97,6 +97,12 @@ try:
             pass_check('D8: pull_request trigger unchanged')
         else:
             fail('D8: pull_request trigger changed or missing')
+    else:
+        # An unrunnable comparison reports UNRUNNABLE, never a verdict — but
+        # it still reports. A bare 'if origin_d' with no else deletes the
+        # assertion site, so a run without a baseline exercises fewer sites
+        # than one with it and the difference is invisible in the output.
+        fail('D8: pull_request trigger comparison NOT RUN — no origin/main baseline')
 except Exception as e:
     fail(f'D8: {e}')
 
@@ -151,7 +157,13 @@ try:
             pass_check('D15: file-level permissions unchanged')
         else:
             fail('D15: file-level permissions changed')
-        
+    else:
+        # Same rule as D8 above: report both comparisons as unrunnable by
+        # name, so the assertion-site count is identical with and without a
+        # baseline and nothing passes on a check nobody computed.
+        fail('D15: dispatch job permission comparison NOT RUN — no origin/main baseline')
+        fail('D15: file-level permission comparison NOT RUN — no origin/main baseline')
+
     jobs = d.get('jobs', {})
     jobs_with_issues_write = [name for name, job in jobs.items() if job.get('permissions', {}).get('issues') == 'write']
     if jobs_with_issues_write == ['triage']:
@@ -173,8 +185,13 @@ except Exception as e:
     fail(f'D9: {e}')
 
 try:
+    # No bare 'if exists' without an else: a missing ci-gates.yml used to
+    # make this whole check VANISH, so a run under WORKFLOW_FILE= silently
+    # exercised one site fewer than the real path and nobody could tell.
     ci_gates_path = os.path.join(os.path.dirname(wf_path), 'ci-gates.yml')
-    if os.path.exists(ci_gates_path):
+    if not os.path.exists(ci_gates_path):
+        fail(f'D13: no ci-gates.yml beside the workflow at {ci_gates_path}')
+    else:
         with open(ci_gates_path) as f2:
             ci_gates = f2.read()
         if 'scripts/ci/tests/intake_triage_test.sh' in ci_gates and 'scripts/ci/tests/unattended_issues_test.sh' in ci_gates:
