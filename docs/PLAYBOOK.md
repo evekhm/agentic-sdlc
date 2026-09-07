@@ -268,6 +268,11 @@ Final scoring lands in the wave observations file when batch 2 merges.
 
 ## Roadmap: from YOLO off to YOLO on
 
+The four items below are the shape and the reasons. The live ordering
+under them — which issue lands next, what each one waits on, and the
+decisions still open — is [CRITICAL_PATH.md](CRITICAL_PATH.md); keep
+the two in step.
+
 1. **Rules into the repo** — #181 (preamble → GEMINI.md numbered
    rules + tracked launch template, incl. the prompt-author rule).
    Then the prompt-minimalism A/B: dispatch a well-specified issue
