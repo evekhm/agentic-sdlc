@@ -74,9 +74,9 @@ set -euo pipefail
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
 HEADLESS="${HEADLESS:-0}"
-# Unattended-run controls (#108). All three are opt-in and claude-code
-# headless only: unset, this script behaves exactly as it did before.
-#   WORK_MAX_USD          hard per-run spend ceiling, enforced by the harness
+# Unattended-run controls (#108). All three are opt-in: unset, this script
+# behaves exactly as it did before.
+#   WORK_MAX_USD          spend ceiling (pre-emptive for Claude, post-hoc for Antigravity)
 #   WORK_PERMISSION_MODE  passed to --permission-mode; without it an
 #                         unattended persona is denied Edit/git/gh
 #   WORK_COST_FILE        path the observed cost (line 1) and the model the run
@@ -88,6 +88,12 @@ HEADLESS="${HEADLESS:-0}"
 #                         was launched for (the dispatch chain); refuses
 #                         re-entrant dispatch of any issue in the chain.
 WORK_MAX_USD="${WORK_MAX_USD:-}"
+if [ -n "$WORK_MAX_USD" ]; then
+    if ! grep -qE '^[0-9]+(\.[0-9]+)?$' <<<"$WORK_MAX_USD"; then
+        echo "==> WORK_MAX_USD must be numeric, got '$WORK_MAX_USD'" >&2
+        exit 1
+    fi
+fi
 WORK_PERMISSION_MODE="${WORK_PERMISSION_MODE:-}"
 WORK_COST_FILE="${WORK_COST_FILE:-}"
 WORK_MODEL="${WORK_MODEL:-}"
@@ -116,9 +122,9 @@ Modes are environment variables, never flags:
               WORK-RESULT line to an exit code. Antigravity personas
               are always headless; there is no interactive row.
 
-Unattended-run controls, claude-code headless only, all opt-in (#108):
-  WORK_MAX_USD=<amount>       hard per-run spend ceiling held by the
-                              harness, not merely declared in config.
+Unattended-run controls, all opt-in (#108):
+  WORK_MAX_USD=<amount>       spend ceiling (pre-emptive for Claude,
+                              post-hoc detection after run for Antigravity).
   WORK_PERMISSION_MODE=<mode> passed to --permission-mode. Without it
                               the default mode denies Edit, git and gh,
                               and the persona spends its preamble to
@@ -1050,8 +1056,11 @@ if [ -n "$WORK_COST_FILE" ] || { [ "$launch_harness" = "antigravity" ] && [ -n "
         fi
     fi
 
-    if [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ] && [ -n "$cost" ]; then
-        if awk -v c="$cost" -v m="$WORK_MAX_USD" 'BEGIN { if (c > m) exit 0; else exit 1 }'; then
+    if [ "$launch_harness" = "antigravity" ] && [ -n "$WORK_MAX_USD" ]; then
+        if [ -z "$cost" ]; then
+            echo "==> $launch_persona has WORK_MAX_USD set to \$${WORK_MAX_USD}, but the session envelope missing .usage data to measure cost against. Refusing to fail open." >&2
+            exit 1
+        elif awk -v c="$cost" -v m="$WORK_MAX_USD" 'BEGIN { if (c > m) exit 0; else exit 1 }'; then
             echo "==> $launch_persona exceeded the \$${WORK_MAX_USD} spend ceiling: session cost \$${cost}. The Antigravity harness cannot enforce ceilings pre-emptively; overrun was detected post-hoc." >&2
             exit 1
         fi

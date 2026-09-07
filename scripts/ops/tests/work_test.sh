@@ -1193,5 +1193,18 @@ TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost_1.25.json" \
   run 0 "#172: no WORK_MAX_USD keeps today's report-only behavior" -- 113
 has "ok" "#172: report-only behavior completes successfully"
 
+banner "#184 agy no-usage cost silent fail-open"
+printf '%s\n' '{"status":"SUCCESS","response":"WORK-RESULT: ok test","model":"gemini-1.5-pro-002"}' > "$WORK/agy_no_cost.json"
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_no_cost.json" WORK_MAX_USD="1.00" \
+  run 1 "#184: empty cost with ceiling fails" -- 113
+has "missing .usage" "#184: empty cost with ceiling fails loudly"
+
+banner "#184 WORK_MAX_USD string fallback"
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost_1.25.json" WORK_MAX_USD="abc" \
+  run 1 "#184: non-numeric WORK_MAX_USD fails" -- 113
+has "must be numeric" "#184: string fallback prevented"
+
 echo
 echo "work_test.sh: all scenarios passed"
