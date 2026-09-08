@@ -12,10 +12,13 @@ file is the live ordering under it. The advisor seat owns both; update
 this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line.
 
-Status line: 2026-09-08, revision five (~19:30 UTC): step 3's PR #257 is
-not merged (two open `security` rows, four open `high`; smoke-merge
-withdrawn for this PR); fix round agy-64ii in flight. Live `gh issue
-list` state always beats this file.
+Status line: 2026-09-08, revision six (~20:15 UTC): step 3's PR #257 hit
+Argus's round-3 cap at head `b5d978ca` with a `security` row still open
+(R1-1) and one partly-fixed with an open residual (R1-2), plus four
+open `high` rows (two new this round). Per REVIEW.md's funnel an open
+`security` row at round 3 escalates to a human; Argus writes no more
+labels and no merge from here. Atlas has not re-reviewed past round 1's
+`900b4408` head. Live `gh issue list` state always beats this file.
 
 ## Fast path to the demo (operator directive, 2026-09-08 06:40 UTC)
 
@@ -43,18 +46,34 @@ order:
    because the launch preceded the prompt amendment. **Not merged on
    smoke after all**: PR #257 (head 900b4408, two rounds) shipped a
    "Completed" table contradicted by the diff (#258), two open `security`
-   rows (an unauthenticated merge-eligibility grep; the merge actor's key
-   handed to code the PR under review authored) and four open `high` rows
-   (dead ladder dispatch; the D13/D14 ledger and ratchet unimplemented;
-   `hold`/`blocked` failing open). Argus, Atlas and the verifier
-   independently converged and refused across two rounds; smoke-merge was
-   withdrawn for this PR specifically by the verifier 15:00 UTC and the
-   advisor agreed. agy-64i went idle ~12h with no further push and is
-   treated as dead. Fix round 2026-09-08 ~19:15 UTC: agy-64ii, prompt
-   `ops/waves/w4-64ii-odyssey.txt`, launch line `ops/waves/launch.sh 64ii`,
-   resets onto and pushes back to the same branch so PR #257 stays the one
-   PR. This round is a real review, not smoke — the two `security` rows
-   need Atlas's explicit double AGREE.
+   rows from Argus (an unauthenticated merge-eligibility grep; the merge
+   actor's key handed to code the PR under review authored) plus four
+   open `high` from Argus and open `AT-*` rows from Atlas (dead ladder
+   dispatch; the D13/D14 ledger and ratchet unimplemented; `hold`/
+   `blocked` failing open; deterministic conjuncts skipped;
+   `merge_gate_test.sh` exiting 0 regardless; comment pagination
+   missing; no author identity check on state comments). Argus, Atlas
+   and the verifier independently converged and refused across two
+   rounds; smoke-merge was withdrawn for this PR specifically by the
+   verifier 15:00 UTC and the advisor agreed. agy-64i went idle ~12h
+   with no further push and is treated as dead. Fix round 2026-09-08
+   ~19:15 UTC: agy-64ii, prompt `ops/waves/w4-64ii-odyssey.txt`, launch
+   line `ops/waves/launch.sh 64ii`, resets onto and pushes back to the
+   same branch so PR #257 stays the one PR; merges `origin/main` mid-round
+   to absorb a README.md conflict from PR #260. **Round 3 (Argus,
+   19:59 UTC, head `b5d978ca`): escalated to a human.** R1-1 (security,
+   the unauthenticated merge-eligibility grep) is still open; R1-2
+   (security, the merge actor's key) is partly fixed with an open
+   residual (the trusted-ref checkout does not protect the workflow
+   *file* itself, and `github.base_ref` is attacker-controlled); two new
+   `high` rows landed this round (R3-1, a YAML indentation bug in
+   `lifecycle.yml` that breaks the ladder repo-wide if merged; R3-2, an
+   `issue_comment` handler that evaluates the wrong pull request). Per
+   REVIEW.md's funnel, an open `security` row at the round-3 cap
+   escalates to a human — Argus writes no more labels and no merge from
+   here; Atlas has not re-reviewed past round 1's `900b4408` head.
+   Cheapest fixes named by Argus: R3-1 (one line of indentation) and
+   R3-2 (one `if` guard).
 4. #251 + #252, the end-to-end chain after #64. Retired: the #147
    label-trigger slice — the merged #64 spec D16 reads "No second
    workflow, no `issues: labeled` trigger, no new event" and flips
@@ -200,7 +219,7 @@ whichever merges second rebases.
 |---|-------|----------------|-------|
 | 6 | #147 | `mode:autonomous` and per-issue override labels honored by work.sh, unattended.yml and the driver. The switch itself. | open, intent:new |
 | 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | PR #232 open (evekhm-odyssey-bot, odyssey/108-ci-spend-ceiling), head 77501a8 after three follow-ups (ceiling header, the docs/SPEC.md twin, the measured-run count). Verifier escalated 06:18 (comment 5580232140); advisor ruling: merges after the B1 clause fix, a rebase and real reviews, and the 8.00 ceiling is the operator's number (not objected to). Three overrun data live on it: 2.75 (argus on PR #233, run 34186361378), 2.28 (argus on PR #221) and 2.33 (argus on PR #235, run 34194196957) against the declared 2.0; across six measured argus runs the ceiling has never bound. Argus refused the PR at 06:26 because #108 is intent:new with no review stage to derive (the #82 class), so under the #221 precedent the verifier's own review under the argus seat (#204 D15) is the review of record |
-| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at status:build with the agy-64 daedalus claim; plan PR #235 open (keystone paragraph above). #151 closed; PR #228 merged 05:45 UTC 2026-09-08 |
+| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at `status:implementing`; plan PR #235 merged. Implementation PR #257 open, escalated to a human at round 3 (keystone paragraph above). #151 closed; PR #228 merged 05:45 UTC 2026-09-08 |
 | 9 | #148 | A deterministic closer after review. Removes the last by-hand step. Today's by-hand closes (#207 at status:in-review with its PR merged) are exactly what it removes. | open, intent:new |
 
 ## Gate 3: issues dispatch-ready by construction

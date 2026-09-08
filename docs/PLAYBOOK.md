@@ -237,17 +237,20 @@ only distrusts the model ships the other two layers' lies.**
   diff origin/main..<head>` for the plan's own Touch paths showed
   eleven of fifteen files byte-identical to `main`, including the one
   file (`lifecycle_advance.sh`) that was the entire point of the
-  issue. It recurred on the very next push — the recovery amended the
-  commit and force-pushed a body claiming the gap was closed, and a
-  second round of the same diff-against-Touch-list check (this time
-  by two independent reviewers, not the verifier) found the ladder
-  dispatch and the monotonic ratchet still unreachable underneath a
-  suite that reported green. Caught in minutes without reading a line
-  of implementation logic, purely by diffing claimed paths against the
-  plan. Generalized as #258: no gate compares an implementation PR's
-  diff to its plan's Touch lines today, so this is a habit a seat must
-  remember rather than a check that runs itself — exactly the shape
-  #255 asks to close with a hook, not a rule.
+  issue. Caught in minutes by the Touch-diff, without reading a line of
+  implementation logic. It recurred on the very next push — the
+  recovery amended the commit and force-pushed a body claiming the gap
+  was closed, and this time the Touch-diff itself went green (all
+  fifteen paths present). What caught the recurrence was three
+  independent voices actually executing the resolver — the verifier,
+  atlas (AT-7) and argus (R2-1) all separately ran the jq lookup
+  against `personas/lifecycle.json` and got an empty owner back — not
+  the diff-vs-plan check that caught round one. Generalized as #258: no
+  gate compares an implementation PR's diff to its plan's Touch lines
+  today, so a clean Touch-diff catches a missing file but not a present
+  file that does nothing; this is two habits a seat must remember
+  (diff the paths, then run the code), not one check that runs itself
+  — exactly the shape #255 asks to close with a hook, not a rule.
 
 ### Layer 2 — the prompt author fabricates
 - An unverified derivation baked into a dispatch prompt (the bot
