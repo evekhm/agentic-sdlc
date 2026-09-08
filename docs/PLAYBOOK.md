@@ -258,6 +258,133 @@ only distrusts the model ships the other two layers' lies.**
   line in a handoff or observations file carries a re-checkable pointer
   (SHA + comment id), and the reader re-checks it against GitHub before
   acting on it.
+- **A guard installed is not a guard running** (#224, found
+  2026-09-07): the sibling of the entry above, one layer down. #142
+  shipped a `pre-commit` hook refusing commits in the primary
+  checkout, and `install.sh` copied it to
+  `$(git rev-parse --git-common-dir)/hooks`. Correct reasoning about
+  worktrees, wrong about the machine: git consults `core.hooksPath`
+  *exclusively* when it is set, and it is set globally here, so
+  `.git/hooks` is never read and that guard has never executed. The
+  install exits 0, the file is on disk at the path it names, and the
+  countermeasure does not exist — fake-green in the tooling layer,
+  with every "the hook will catch it" claim downstream of #142 false
+  since the day it merged. Two rules, both instances of the same
+  discipline the gates already follow: install to the path git will
+  actually use (`git rev-parse --git-path hooks`, which resolves
+  `core.hooksPath`), and **verify a guard by making it fire**, in a
+  throwaway repo, rather than by checking that a file exists. Corollary
+  for parallel sessions: a global `core.hooksPath` is *shared mutable
+  state*. This session wrote a one-minute test hook to the directory
+  `git rev-parse --git-path hooks` reported, not noticing it resolved
+  outside the repo, and every ref update on the machine failed for
+  every session until a peer noticed and reported it. Test hooks go in
+  a temp dir via `git -c core.hooksPath=<tmp>`, never at the resolved
+  path.
+- **The repair ledger fabricates too** (PR #202, rounds 2 and 3): the
+  round-2 ledger listed AT-1/R1-1 as fixed while the suite still
+  aborted on the first failure — the author retracted it itself in a
+  round-2b correction, after a reviewer had started. The round-3 ledger
+  claimed `plan.md:31` and `:86` changed; the only hunk in that delta
+  is `:142`, and `:86` was still wrong. Both times a reviewer burned a
+  round discovering that a claim did not match the tree. Same class as
+  fabricated reproductions, relocated into the repair ledger, and the
+  countermeasure is mechanical: parse the ledger's claimed `file:line`
+  cells, diff against `git diff --unified=0 <prev>..<head>`, refuse the
+  round by name before any model call (filed on #8).
+- **The unsatisfiable test** (PR #202, R3-1): vacuous tests are the
+  entry above — assertions that cannot fail. Their strictly worse
+  sibling is an assertion that cannot *pass* for any spec-compliant
+  implementation. Here a scenario demanded a non-zero exit from a
+  fixture nothing connected to the script under test; making it green
+  needed a test-fixture lookup inside the deterministic triage path.
+  **Mutation testing does not find this** — mutation starts from a
+  green suite, and a pre-implementation contract suite is red by
+  design. Only running a reference implementation finds it. The
+  round-4 repair swapped the mechanism for `chmod 000` on the fixture
+  directory and reproduced the defect exactly: a glob over an
+  unreadable directory yields zero matches, and the spec defines zero
+  matches as an empty list, not a failure. Two authors, same trap,
+  three rounds apart.
+
+### Layer 3, continued — the environment fabricates *red* as well as green
+- **Fake-red verdicts** (PR #202, R3-2): two checks shelled out to
+  `git show origin/main:…` inside `except Exception`. The `execution`
+  job checks out with no `fetch-depth`, so the ref does not resolve,
+  exit 128 is caught, and the two checks guarding the fork-secrets
+  surface report "D8 failed" and "D15 failed" — verdicts nobody
+  computed. This is the fake-green board (#191) with the sign flipped,
+  and it is worse: a fake red is indistinguishable from a real finding
+  and costs a repair round to disprove. Rules: no broad `except`
+  around a contract assertion, and any suite reading git history or
+  the filesystem declares its environment prerequisites, verified by
+  one run in a `--depth 1` clone. Watch for the same shape one level
+  down — a bare `if resolved:` with no `else` makes the assertion
+  sites *vanish* instead of reporting, so the site count must be equal
+  across environments.
+
+### Layer 4 — the loop fabricates convergence (PR #202, #117 build rung)
+Three rounds, CI green throughout, escalation to `status:review-stuck`
+with four blocking rows still open — all four independently confirmed
+real. What the loop got right is worth saying first: it caught four
+defects at the plan/contract rung before a line of production code
+existed, and two of them were unsatisfiable-by-construction gates that
+would have forced the implementer to edit the contract or smuggle a
+fixture lookup into shipped code. The escalation fired exactly when it
+should. What follows attacks the *cost* of getting there.
+
+- **A contract test owes a satisfiability proof, not just a failure
+  proof.** The build rung's obligation today is "the tests fail before
+  implementation" — half a contract. The other half is "a compliant
+  implementation makes them pass," and nothing asks for it. The
+  reviewer supplied it in round 3 by writing its own stub from the spec
+  alone and scoring it: 48 PASS and exactly the 2 defects. Every row
+  that survived to round 3 — one unsatisfiable, three vacuous — falls
+  out of that one run and out of nothing else in the process. The
+  author should ship the reference stub and paste its all-green run
+  (filed on #204, where it is the mirror image of the existing
+  mutation-test step: that one proves a test can fail, this one proves
+  it can pass).
+- **Two reviewers are consensus only if both ran the same evidentiary
+  protocol.** One reviewer cleared rounds 2 and 3; the other found four
+  construction-proven defects at those same heads. The difference is
+  method, not diligence — reading the ledger's claims and running one
+  scratch copy, versus building an independent implementation. The
+  clearing reviewer's "all green on a scratch copy" was itself weaker
+  than it read: under a file-override env var one check silently
+  vanished through an `os.path.exists` guard with no `else`, so the
+  scratch run exercised fewer assertion sites than the real path. The
+  consensus axis had quietly degraded to one voice while still
+  reporting as two. This is also the sharpest measurement so far for
+  the model-tier trade-off (#105) — cheap reviewer clears, expensive
+  reviewer catches, same diff, twice — and deserves measuring rather
+  than asserting.
+- **Count convergence, not rounds.** Open blocking rows went 14 → 7 → 4
+  while new findings arrived 9 then 5, because each repair introduced
+  them. Escalating on "open blocking rows did not strictly decrease, or
+  a ledger claim failed verification" would have stopped this after
+  round 2 (#8).
+- **A repair sweeps the class, not the cited line.** A YAML-1.1 `on:` →
+  `True` trap was fixed at one line in round 1 and is live at another
+  line in the same file by round 3. When a reviewer names a class, grep
+  the class and report the sweep.
+- **Pin a spec's literal strings once.** A user-visible string
+  transcribed into both the plan and the test can disagree — and did
+  (the plan ordered the second of three prescribed forms, the gate
+  pinned the third). The same string wrapping across lines in the spec
+  broke a fixed-string match independently. Extract to one fixture both
+  cite.
+- **The human-override exit has no claim and no lock** (#222). The
+  escalating persona released `in-progress` so "a peer or a human can
+  pick it up", and two actors picked it up four minutes apart, writing
+  over each other in the same shared worktree — an interactive Claude
+  session and an Antigravity session running an operator prompt file.
+  Nothing was lost only because one side noticed foreign edits and
+  stopped, which is a detection accident, not a control. Two details
+  generalize: a worktree path that lives only in a prompt string is not
+  a lock, and agy sessions are invisible to `ListAgents` and cannot
+  receive messages, so cross-harness coordination must live in the
+  filesystem or the tracker — never in a message.
 
 ### The two rules that generalize
 1. **One scar, one rule.** Every countermeasure traces to a specific
@@ -266,7 +393,11 @@ only distrusts the model ships the other two layers' lies.**
 2. **The stable countermeasures never ask the model for testimony**:
    independent recomputation, mutation testing, read-back-and-fail-
    closed plumbing, gates that evaluate declarations instead of
-   trusting them.
+   trusting them — and, from #202, the *constructive* form: build the
+   compliant implementation yourself and score the gate against it.
+   Mutation testing asks whether a green check can be made to fail;
+   the constructive check asks whether a red one can be made to pass.
+   A pre-implementation contract suite only answers to the second.
 
 ### Model A/B (batch 2, running — small sample)
 Flash's *shipped code* has not been shallower than Pro's ("Pro-
