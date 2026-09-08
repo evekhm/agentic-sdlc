@@ -258,9 +258,9 @@ previews. The cadence:
 **The labels are the state machine** (#4, `intent/4-labels/`). Five
 are human-facing: `intent:new` (intake — filed by people, by the
 maintainer's watchers at 3σ (#11), or by any seat recording a gap the
-loop exposed; the system files its own improvements, and only a
-reviewer's findings on the PR under review are barred from becoming
-new issues), `in-progress` (the claim mutex above), `hold`, `blocked`,
+loop exposed; the system files its own improvements. One exception: a
+reviewer keeps its findings on the PR under review in that PR's
+thread), `in-progress` (the claim mutex above), `hold`, `blocked`,
 and `bootstrap`. The lifecycle stage is a single `status:*` label — the
 ladder `status:planning` → `status:spec` → `status:build` →
 `status:implementing` → `status:in-review` — and **at most one is set
