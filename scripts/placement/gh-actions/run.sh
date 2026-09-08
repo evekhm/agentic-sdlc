@@ -55,6 +55,36 @@ binding="$(python3 "$REPO_ROOT/scripts/ops/execution.py" --binding "$PERSONA")" 
     || die "$PERSONA has no execution binding in config/execution.yaml"
 max_cost_usd="$(awk '{print $3}' <<<"$binding")"
 
+# The declared budget becomes the enforced ceiling here (#108). This is
+# the gap docs/SPEC.md named in its own words: "the remaining gap is
+# that nothing yet carries `max_cost_usd` from this file into that
+# ceiling". The adapter is where the carry belongs. work.sh stays blind
+# to config/execution.yaml so that a launch is described by its flags
+# and not by a file it reads behind the caller's back, and D2 keeps
+# execution.py the single parser of that file.
+#
+# Fail-closed, and the reason is specific. execution.py --check already
+# refuses a binding whose max_cost_usd is not a positive number, but
+# --check runs in CI and this runs at launch. If a binding ever reached
+# here unreadable, the export below would set WORK_MAX_USD to the empty
+# string, and work.sh reads empty as "no ceiling" — a parse failure
+# would silently buy an unlimited run. Re-testing the value here is
+# what makes that impossible; the rule is the same one work.sh applies
+# to the variable it receives.
+#
+# On this placement the point is sharper than on vm-local: nobody is
+# watching. Before this line every unattended dispatch ran uncapped,
+# because unattended.yml sets no WORK_MAX_USD and work.sh's ceiling is
+# opt-in.
+grep -qE '^[0-9]+(\.[0-9]+)?$' <<<"$max_cost_usd" \
+    || die "$PERSONA has max_cost_usd '$max_cost_usd', which is not a number; refusing to dispatch a run with no ceiling"
+awk -v m="$max_cost_usd" 'BEGIN { exit (m > 0) ? 0 : 1 }' \
+    || die "$PERSONA has max_cost_usd $max_cost_usd; a ceiling of zero cannot authorise a run"
+# An explicit WORK_MAX_USD from the caller wins, so one run can be
+# raised or lowered from the command line without editing the config
+# every other run reads.
+export WORK_MAX_USD="${WORK_MAX_USD:-$max_cost_usd}"
+
 # The NAME, never the value. `authority.token` is the one place the
 # secret's name is written (#1, D6) and D3 forbids restating it in
 # config/execution.yaml, so it is read back out of the persona source

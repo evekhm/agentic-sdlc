@@ -11,26 +11,56 @@
 #   events        the GitHub event names, for repo-event only
 #   placement     an adapter directory name under scripts/placement/
 #                 (D17 — a name with no adapter fails --check)
-#   max_cost_usd  the declared dollar budget for one run (D8; turn and
+#   max_cost_usd  the enforced dollar ceiling for one run (D8; turn and
 #                 time caps stay in personas/<name>.yaml limits).
-#                 DECLARED, NOT ENFORCED: --check requires a positive
-#                 number and the adapter prints it, so the number is
-#                 stated once and visible in the run log — but nothing
-#                 meters spend against it yet, and a run that passes it
-#                 is not stopped. Read it as the budget this duty is
-#                 expected to fit in, not as a ceiling the machine holds.
+#                 ENFORCED as of #108: every placement adapter exports
+#                 this number as WORK_MAX_USD before it execs work.sh,
+#                 which passes it to Claude Code as --max-budget-usd
+#                 (pre-emptive: the run is stopped when it crosses) and
+#                 measures Antigravity runs against it post-hoc from the
+#                 result envelope (agy has no ceiling flag). An
+#                 unreadable or non-positive value REFUSES the dispatch
+#                 rather than launching without a ceiling.
+#
+#                 This is a RUNAWAY STOP, not a budget. Set it well above
+#                 what the duty actually costs, because crossing it
+#                 truncates the run: for Claude Code the session dies
+#                 mid-work and the persona posts nothing, so a ceiling
+#                 tuned to the median buys a half-finished review and
+#                 pays for it anyway. Measure before lowering one —
+#                 scripts/ops/session_spend.sh, or total_cost_usd in the
+#                 job log.
 
 personas:
+  # 2.00 while the number was decorative; 8.00 now that it stops a run.
+  # Measured over six argus dispatches through 2026-09-07 that produced a
+  # real review and reported a cost, all printing max_cost_usd 2.0 and
+  # none of them capped: $1.1612 on PR #188 (job 101668418781), the ONE
+  # run under 2.00 — this repository's gate-1a evidence, which would have
+  # finished with 40% of the old budget unspent; $3.1617, $3.0297,
+  # $2.6985, $2.2795, four rounds of one review conversation on PR #221
+  # (branch fix/167-agy-adc-credential), the rounds that landed the #167
+  # fix; and $2.75 on PR #233. At 2.00, five of these six runs would
+  # have been cut off mid-review.
+  # 8.00 is ~2.5x the observed maximum: high enough that no honest review
+  # reaches it, low enough that a loop stuck re-reading the same diff
+  # stops inside one run instead of overnight.
   argus:
     trigger: repo-event
     events: [pull_request]
     placement: gh-actions
-    max_cost_usd: 2.00
+    max_cost_usd: 8.00
+  # Same number, different enforcement path: agy takes no ceiling flag,
+  # so atlas is measured against this after the fact. Atlas's own costs
+  # are not in the sample above — its envelope reports .usage rather than
+  # total_cost_usd, and #150 is why session_spend.sh cannot price it yet.
+  # Matching argus is the defensible placeholder for a reviewer doing the
+  # same duty on the same pull requests; retune it once #150 lands.
   atlas:
     trigger: repo-event
     events: [pull_request]
     placement: gh-actions
-    max_cost_usd: 2.00
+    max_cost_usd: 8.00
   athena:    { trigger: manual, placement: vm-local, max_cost_usd: 5.00 }
   daedalus:  { trigger: manual, placement: vm-local, max_cost_usd: 5.00 }
   odyssey:   { trigger: manual, placement: vm-local, max_cost_usd: 10.00 }

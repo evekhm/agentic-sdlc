@@ -614,7 +614,11 @@ start the row rather than a decision about the number.
 Four further environment variables exist for the case the MODEs do not
 cover — a launch with no operator watching it — and each is opt-in, so
 an unset variable leaves argv and behaviour exactly as an attended run
-has them. The spend ceiling requires two enforcement paths (PR #184):
+has them. Opt-in is the launcher's contract, not the system's: the
+placement adapters always supply the spend ceiling from the persona's
+binding (#108), so no dispatch that goes through one is uncapped, and
+"unset" describes a launcher invoked directly and by hand. The spend
+ceiling requires two enforcement paths (PR #184):
 Claude Code enforces the ceiling pre-emptively during execution, while
 for Antigravity the dispatcher reads the run's final `.usage` report and
 exits 1 if the session exceeded the ceiling. A permission mode is passed
@@ -787,21 +791,43 @@ between machines never edits a harness pin and never touches a persona
 source. A binding is four keys and no others: `trigger`
 (`repo-event`, `scheduled` or `manual`), `events` (required for
 `repo-event`, forbidden otherwise), `placement`, and `max_cost_usd`.
-That last key is **declared, not enforced**, and the distinction is
-load-bearing: the gate checks it is a positive number and the adapter
-prints it in its report line, so the intended budget is stated in one
-place and visible in every run log — but nothing meters spend against
-it or stops a run that passes it. The enforcement half of #25's D8
-("exceeding a cap is a green exit with a comment naming the cap") was
-blocked on a spend reading the harness did not expose. That premise no
-longer holds: a harness that accepts a spend ceiling and reports what a
-run cost is what `ops.dispatch` now passes and reads, so the remaining
-gap is that nothing yet carries `max_cost_usd` from this file into that
-ceiling. Until something does, the value here is still a declared
-budget rather than a ceiling. v1 binds five personas —
-argus and atlas on `pull_request` at `gh-actions`, athena, daedalus and
-odyssey `manual` at `vm-local`; cassandra carries no binding, because
-her cadence is #11's.
+That last key is **enforced** (#108). The gate checks it is a positive
+number and the adapter prints it in its report line, so the intended
+budget is stated in one place and visible in every run log; the adapter
+then exports it as `WORK_MAX_USD` before it execs `ops.dispatch`, which
+is what turns the number into a ceiling the machine holds. Both
+enforcement paths already existed and were already tested — pre-emptive
+for Claude Code via `--max-budget-usd`, post-hoc from the result
+envelope for Antigravity, which takes no ceiling flag — so what #108
+closed was the carry between the two halves, not either half. Until it
+closed, `unattended.yml` set no ceiling and every unattended dispatch
+ran uncapped while a config file declared a budget for it.
+
+The carry lives in the adapter rather than in `ops.dispatch`, so that a
+launch stays described by its flags rather than by a file the launcher
+reads behind the caller's back, and so that D2's single parser of
+`config/execution.yaml` keeps its monopoly. It is fail-closed in a
+specific sense: a binding whose `max_cost_usd` is unreadable or not
+positive **refuses the dispatch**, because the alternative — exporting
+an empty value, which the launcher reads as "no ceiling" — would let a
+parse failure silently buy an unlimited run. An explicit `WORK_MAX_USD`
+from the caller still wins, so one run can be retuned from a command
+line without editing the file every other run reads.
+
+A ceiling that stops a run is a **runaway stop and not a budget**, and
+the difference decides the numbers. Crossing it truncates the session:
+under Claude Code the run dies mid-work and the persona posts nothing,
+so the ceiling is paid for and nothing is delivered. Tuning one to the
+median therefore buys half-finished reviews at full price. The
+reviewers' declared 2.00 was set while the number was decorative and
+was already below five of the six argus reviews measured through
+2026-09-07 (the one under it, the gate-1a review on PR #188, finished
+at $1.16) — which is the general hazard in switching a declared number
+to an enforced one: it was never true, and nothing failed, because
+nothing read it. v1 binds five personas — argus and atlas on
+`pull_request` at `gh-actions`, athena, daedalus and odyssey `manual`
+at `vm-local`; cassandra carries no binding, because her cadence is
+#11's.
 
 `scripts/ops/execution.py` is the only reader of that file, in every
 context that needs it: `--check` is the gate, `--subscribers <event>`

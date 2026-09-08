@@ -498,6 +498,93 @@ pass "D3: the key value appears nowhere in the output"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "T5: something was written or launched"; }
 pass "T5: no GitHub write and no launch"
 
+banner "#108 the declared budget reaches the launch as an enforced ceiling"
+# Before this, config/execution.yaml's max_cost_usd was printed in the
+# adapter's report line and nowhere else, and unattended.yml set no
+# WORK_MAX_USD, so every unattended dispatch ran uncapped. The wiring in
+# work.sh (--max-budget-usd) already existed and was already tested; the
+# gap was that nothing carried the number into it.
+#
+# The expected value is READ from the binding rather than written here.
+# A test that hardcoded 2.00 would pass while agreeing with nothing, and
+# would have to be edited every time the operator retunes a budget —
+# which is the one thing this change is meant to make cheap.
+want="$(python3 "$T/scripts/ops/execution.py" --binding argus | awk '{print $3}')"
+[ -n "$want" ] || fail "#108: the fixture's argus binding declares no max_cost_usd"
+OUT="$(ARGUS_APP_PRIVATE_KEY="stub-key-value" STUB_REPOS="evekhm/agentic-sdlc" \
+  HEADLESS=1 DRY_RUN=1 \
+  "$T/scripts/placement/gh-actions/run.sh" 30 --as argus 2>&1)" \
+  || { printf '%s\n' "$OUT" >&2; fail "#108: the headless dry run failed"; }
+grep -qF -- "--max-budget-usd $want" <<<"$OUT" \
+  || { printf '%s\n' "$OUT" >&2; fail "#108: the launch argv carries no --max-budget-usd $want; the declared budget is still not enforced"; }
+pass "#108: argus's declared max_cost_usd ($want) reaches the launch as --max-budget-usd"
+# The caller still wins, so one run can be retuned from the command line
+# without editing the config every other run reads.
+OUT="$(ARGUS_APP_PRIVATE_KEY="stub-key-value" STUB_REPOS="evekhm/agentic-sdlc" \
+  HEADLESS=1 DRY_RUN=1 WORK_MAX_USD=0.25 \
+  "$T/scripts/placement/gh-actions/run.sh" 30 --as argus 2>&1)" \
+  || { printf '%s\n' "$OUT" >&2; fail "#108: the headless dry run with an explicit ceiling failed"; }
+grep -qF -- "--max-budget-usd 0.25" <<<"$OUT" \
+  || { printf '%s\n' "$OUT" >&2; fail "#108: an explicit WORK_MAX_USD did not override the declared budget"; }
+pass "#108: an explicit WORK_MAX_USD overrides the declared budget for one run"
+# MUTATION. The assertion above must be able to fail: if the export were
+# removed the run would simply carry no ceiling, and a test that only
+# ever looks for a flag it expects to find cannot tell "enforced" from
+# "absent". Strip the export from a COPY of the adapter and confirm red.
+MUT="$(fixture_tree)"
+sed -i '/^export WORK_MAX_USD=/d' "$MUT/scripts/placement/gh-actions/run.sh"
+OUT="$(ARGUS_APP_PRIVATE_KEY="stub-key-value" STUB_REPOS="evekhm/agentic-sdlc" \
+  HEADLESS=1 DRY_RUN=1 \
+  "$MUT/scripts/placement/gh-actions/run.sh" 30 --as argus 2>&1)" \
+  || { printf '%s\n' "$OUT" >&2; fail "#108: the mutated adapter did not even run"; }
+grep -qF -- "--max-budget-usd" <<<"$OUT" \
+  && fail "#108: the mutant still carries a ceiling, so the assertion above proves nothing"
+pass "#108: removing the export makes the launch uncapped again (the assertion is load-bearing)"
+
+banner "#108 an unreadable budget refuses the dispatch instead of running uncapped"
+# Fail-closed. execution.py --check already refuses a binding whose
+# max_cost_usd is not a positive number, but --check runs in CI and the
+# adapter runs at launch. Without this the empty string would be
+# exported, work.sh reads empty as "no ceiling", and a parse failure
+# would quietly buy an unlimited run — the exact shape #108 calls out
+# ("an unreadable or missing ledger is a refusal, not a pass").
+for bad in "not-a-number" "0"; do
+  BADTREE="$(fixture_tree)"
+  # argus is the first block-style binding in the file, so the first
+  # indented max_cost_usd line is its own.
+  sed -i "0,/^    max_cost_usd:/s/^    max_cost_usd: .*/    max_cost_usd: $bad/" \
+    "$BADTREE/config/execution.yaml"
+  [ "$(python3 "$BADTREE/scripts/ops/execution.py" --binding argus | awk '{print $3}')" = "$bad" ] \
+    || fail "#108: the fixture edit did not reach argus's binding for '$bad'; the scenario would pass vacuously"
+  : > "$WRITES"
+  set +e
+  OUT="$(ARGUS_APP_PRIVATE_KEY="stub-key-value" STUB_REPOS="evekhm/agentic-sdlc" \
+    HEADLESS=1 DRY_RUN=1 \
+    "$BADTREE/scripts/placement/gh-actions/run.sh" 30 --as argus 2>&1)"
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] \
+    || { printf '%s\n' "$OUT" >&2; fail "#108: max_cost_usd '$bad' exited 0; an unreadable ceiling must refuse"; }
+  grep -q "max_cost_usd" <<<"$OUT" \
+    || { printf '%s\n' "$OUT" >&2; fail "#108: the refusal for '$bad' does not name max_cost_usd"; }
+  [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "#108: '$bad' refused but something was still written or launched"; }
+  pass "#108: max_cost_usd '$bad' refuses before the launch (exit $rc), naming the key"
+done
+
+banner "#108 every placement adapter carries the ceiling, including ones added later"
+# Greped off the sources rather than exercised one adapter at a time,
+# for the same reason D16 is: a placement added next month is covered
+# without anyone remembering to write a scenario for it. Two adapters
+# exist today; the loop does not care how many there are.
+n=0
+for adapter in "$REPO"/scripts/placement/*/run.sh; do
+  n=$(( n + 1 ))
+  grep -q '^export WORK_MAX_USD=' "$adapter" \
+    || fail "#108: $(basename "$(dirname "$adapter")")/run.sh does not export WORK_MAX_USD, so that placement dispatches with no ceiling"
+done
+[ "$n" -ge 2 ] || fail "#108: only $n placement adapter(s) were found; the glob is wrong"
+pass "#108: all $n placement adapters export WORK_MAX_USD from the declared binding"
+
 banner "T4/T5 a failing preflight stops the adapter before work.sh"
 : > "$WRITES"
 set +e
