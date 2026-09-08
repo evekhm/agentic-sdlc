@@ -35,13 +35,24 @@ order:
 3. #64 implementation rung on agy (odyssey; prompt
    `~/waves/w4-64-odyssey.txt`, launch line `~/waves/launch.sh 64i`),
    merge on smoke.
-4. Demo run per the merged #64 plan: #98 (spec merged, plan rung
-   ready) runs build, implement, review and merge with no human
-   write; that run's job logs are the evidence.
+4. #147 minimal, after #64's PR merges (both touch unattended.yml):
+   the working personas become label-triggered on the runner. Today
+   `config/execution.yaml` has athena, daedalus and odyssey as
+   `trigger: manual, placement: vm-local` and `unattended.yml` fires
+   only on `pull_request`; the change adds `issues: [labeled]`, maps
+   `status:spec` / `status:build` / `status:implementing` to the
+   persona that owns the stage, and runs it on gh-actions. Prompt
+   `~/waves/w4-147-odyssey.txt` (being drafted), merge on smoke.
+5. Demo run: the operator launches one rung by hand with the one-line
+   prompt ("work issue #98"), and from there the loop carries it: PR,
+   runner reviews, #64 merge, advancer flips the label, the runner
+   dispatches the next persona, until the issue is done. The job logs
+   and the issue thread are the evidence, and the verifier's job on
+   that run is to watch and write down what broke, not to gate it.
 
-Deferred until after the demo: #239, #236, #238, #147, #148, #191,
-wave-3 rows other than the demo issue, and the old verifier queue
-(#185, #135, #202, #69).
+Deferred until after the demo: #239, #236, #238, #148, #191, the
+other wave-3 rows, and the old verifier queue (#185, #135, #202,
+#69).
 
 ## Gate 1: unattended review runs on every rung — MET 2026-09-08
 
