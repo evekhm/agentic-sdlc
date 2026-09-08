@@ -820,18 +820,14 @@ under Claude Code the run dies mid-work and the persona posts nothing,
 so the ceiling is paid for and nothing is delivered. Tuning one to the
 median therefore buys half-finished reviews at full price. The
 reviewers' declared 2.00 was set while the number was decorative and
-was already below three of the four argus reviews measured on
-2026-09-07 — rounds 1–3 of one review conversation on PR #221 (jobs
-101816531601, 101813589686, 101810893006), at $2.6985, $3.0297 and
-$3.1617 — which is the general hazard in switching a declared number
+was already below five of the six argus reviews measured through
+2026-09-07 (the one under it, the gate-1a review on PR #188, finished
+at $1.16) — which is the general hazard in switching a declared number
 to an enforced one: it was never true, and nothing failed, because
-nothing read it. The fourth run measured that day, job 101668418781
-on PR #188, is this repository's evidence that an unattended review
-can happen at all; it cost $1.1612 and would have survived the old
-ceiling, finishing with 40% of the budget unspent. v1 binds five
-personas — argus and atlas on `pull_request` at `gh-actions`, athena,
-daedalus and odyssey `manual` at `vm-local`; cassandra carries no
-binding, because her cadence is #11's.
+nothing read it. v1 binds five personas — argus and atlas on
+`pull_request` at `gh-actions`, athena, daedalus and odyssey `manual`
+at `vm-local`; cassandra carries no binding, because her cadence is
+#11's.
 
 `scripts/ops/execution.py` is the only reader of that file, in every
 context that needs it: `--check` is the gate, `--subscribers <event>`
