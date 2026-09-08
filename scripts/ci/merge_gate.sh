@@ -8,10 +8,12 @@
 # path that declines exits 0. With loop.autonomous_merge false it
 # evaluates, logs the verdict and writes nothing (D18).
 #
-# State-carrying comments count only from a trusted writer (D22): the
-# merge actor App and github-actions[bot]. A marker posted by any other
-# login is prose. Both threads are read to exhaustion; an unreadable
-# thread declines, because unreadable is not absent (D13).
+# State-carrying comments count only from a trusted writer (D23): the
+# merge actor App alone, resolved from the token in scope via `gh api
+# user` and never guessed. A marker posted by any other login,
+# `github-actions[bot]` included, is prose. Both threads are read to
+# exhaustion; an unreadable thread declines, because unreadable is not
+# absent (D13).
 #
 # Consensus-ledger machine block this gate reads. The ledger, its
 # schema and the recorder that writes it belong to #8/#9; until the
@@ -46,16 +48,23 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 R="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must name <owner>/<repo>}"
 LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
 DRY_RUN="${DRY_RUN:-0}"
-MERGE_ACTOR="${MERGE_ACTOR_LOGIN:-evekhm-merge-actor-app[bot]}"
 ATLAS_LOGIN="${ATLAS_LOGIN:-evekhm-atlas-app[bot]}"
-GATE_CHECK_NAME="${GATE_CHECK_NAME:-merge-gate}"
-TRUSTED="$(jq -nc --arg a "$MERGE_ACTOR" '[$a, "github-actions[bot]"]')"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 log() { printf '%s\n' "$*" >&2; }
 finish() { log "verdict: $*"; exit 0; }
 decline() { log "Decline: $*"; finish "no merge for #$TARGET"; }
 norm_login() { sed -E 's#^app/##; s/\[bot\]$//' <<<"$1"; }
+
+# --- the merge actor's own login (S3, D23): derived from the token in
+# scope via `gh api user`, never guessed. A stale or absent env-var
+# guess proved nothing and could name nobody, or worse, match by
+# coincidence; an unresolved identity fails closed rather than trusting
+# one.
+if ! MERGE_ACTOR="$(gh api user 2>/dev/null | jq -r '.login // empty')" || [ -z "$MERGE_ACTOR" ]; then
+    decline "cannot resolve the merge actor's login via 'gh api user' — failing closed rather than trusting a guessed identity (S3)"
+fi
+TRUSTED="$(jq -nc --arg a "$MERGE_ACTOR" '[$a]')"
 
 # --- loop limits (D18, D20): unreadable is fail-closed --------------------------
 read_limit() { python3 "$REPO_ROOT/scripts/ops/execution.py" --loop "$1" 2>/dev/null; }
@@ -67,7 +76,7 @@ fi
 [ "$AUTONOMOUS" = "true" ] || AUTONOMOUS=false
 
 # --- the pull request --------------------------------------------------------------
-if ! PR_JSON="$(gh pr view "$TARGET" --json number,state,headRefName,headRefOid,headRepository,baseRefName,statusCheckRollup,body,labels,author,closingIssuesReferences)"; then
+if ! PR_JSON="$(gh pr view "$TARGET" --json number,state,headRefName,headRefOid,headRepository,baseRefName,body,labels,author,closingIssuesReferences)"; then
     log "cannot read pull request #$TARGET"
     exit 1
 fi
@@ -206,6 +215,37 @@ if [ -n "$over_budget" ]; then
     finish "no merge for #$TARGET"
 fi
 
+# --- conjunct 2's state (D24): read once, used here for D10 and again below ------
+# `mergeStateStatus` and the check roll-up with each check run's owning
+# workflow-run id (`gh pr view --json statusCheckRollup` exposes neither
+# the merge state nor that id) come from one GraphQL read. GitHub
+# computes `mergeStateStatus` lazily: a read immediately after a push
+# often returns UNKNOWN and a read seconds later returns the verdict, so
+# UNKNOWN is re-read up to three more times before it is treated as
+# unevaluable. Read once here — before D10, which needs it for a
+# `behind` marker — and reused at conjunct (2) below without a second
+# GraphQL call.
+GRAPHQL_ROLLUP='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){mergeStateStatus commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}}}}'
+read_merge_state() { # sets MERGE_STATE, CHECKS_TSV (name<TAB>state<TAB>run-id); returns 1 unreadable
+    local owner="${R%%/*}" repo="${R#*/}" out
+    out="$(gh api graphql -f query="$GRAPHQL_ROLLUP" -F owner="$owner" -F repo="$repo" -F pr="$PR" 2>/dev/null)" || return 1
+    jq -e '.data.repository.pullRequest != null' <<<"$out" >/dev/null 2>&1 || return 1
+    MERGE_STATE="$(jq -r '.data.repository.pullRequest.mergeStateStatus // "UNKNOWN"' <<<"$out")"
+    CHECKS_TSV="$(jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? |
+        if .__typename == "CheckRun" then [(.name // "?"), ((.conclusion // .status) // ""), ((.checkSuite.workflowRun.databaseId) // "")]
+        else [(.context // "?"), (.state // ""), ""] end | @tsv' <<<"$out")"
+    return 0
+}
+MERGE_STATE_RETRY_SLEEP="${MERGE_STATE_RETRY_SLEEP:-2}"
+merge_state_attempt=0; MERGE_STATE_READ_OK=1; MERGE_STATE="UNKNOWN"; CHECKS_TSV=""
+while :; do
+    if read_merge_state; then MERGE_STATE_READ_OK=1; else MERGE_STATE_READ_OK=0; fi
+    [ "$MERGE_STATE_READ_OK" = 1 ] && [ "$MERGE_STATE" != "UNKNOWN" ] && break
+    [ "$merge_state_attempt" -ge 3 ] && break
+    merge_state_attempt=$((merge_state_attempt + 1))
+    [ "$MERGE_STATE_RETRY_SLEEP" = 0 ] || sleep "$MERGE_STATE_RETRY_SLEEP"
+done
+
 # --- consensus (conjuncts 3, 4, 5, 11) from the ledger on the pull request ---------
 declare -A C WHY
 for i in 1 2 3 4 5 6 7 8 9 10 11; do C[$i]=0; WHY[$i]=""; done
@@ -275,6 +315,10 @@ if [ "$STATUS" = "status:review-stuck" ]; then
         [ -n "$first_displaced" ] || first_displaced="$displaced"
         case "$reason" in
             budget|non-monotonic) live="$reason";;
+            behind) # D28: clears on the head's OWN mergeStateStatus, never on
+                    # head-oid equality — the head that is no longer behind is
+                    # by construction a different one.
+                    if [ "$MERGE_STATE_READ_OK" != 1 ] || [ "$MERGE_STATE" = "BEHIND" ] || [ "$MERGE_STATE" = "UNKNOWN" ]; then live="$reason"; fi;;
             *) if [ "$moid" = "$HEAD" ] || [ "$CONSENSUS_OK" != 1 ]; then live="$reason"; fi;;
         esac
     done <<<"$MARKERS"
@@ -329,29 +373,40 @@ if [ -z "$AUTHOR" ]; then WHY[7]="author unreadable"
 elif [ "$(norm_login "$AUTHOR")" = "$(norm_login "$MERGE_ACTOR")" ]; then WHY[7]="author $AUTHOR is the merging identity"
 else C[7]=1; WHY[7]="author $AUTHOR, merger $MERGE_ACTOR"; fi
 
-# --- conjunct 2 ------------------------------------------------------------------------
-# The gate's own check run is excluded: it is in progress while this
-# evaluates and would make (2) false on every run. Required contexts
-# come from branch protection when that endpoint is readable; otherwise
-# every remaining check on the head is required, and there must be one.
-CHECKS="$(prq '(.statusCheckRollup // []) | .[] | "\(.name // .context // "?")\t\(.conclusion // .state // "")"' | awk -F'\t' -v g="$GATE_CHECK_NAME" '$1 != g')"
-REQUIRED="$(gh api "repos/$R/branches/$DEFAULT_BRANCH/protection/required_status_checks" 2>/dev/null | jq -r '.contexts[]?' || true)"
-missing=""; failing=""
-if [ -n "$REQUIRED" ]; then
-    while IFS= read -r ctx; do
-        st="$(awk -F'\t' -v c="$ctx" '$1 == c {print $2}' <<<"$CHECKS" | tail -1)"
-        [ -n "$st" ] || { missing="$missing $ctx"; continue; }
-        [ "$st" = "SUCCESS" ] || failing="$failing $ctx=$st"
-    done <<<"$REQUIRED"
-    if [ -n "$missing" ]; then WHY[2]="required check(s) absent from the head:$missing"
-    elif [ -n "$failing" ]; then WHY[2]="required check(s) not success:$failing"
-    else C[2]=1; WHY[2]="every required check is success"; fi
+# --- conjunct 2 (D24): GitHub's own merge-state verdict, never branch protection ---
+# `mergeStateStatus` and the check roll-up were already read above (with
+# the bounded UNKNOWN re-read) because D10's `behind` clearing needs the
+# same values; nothing here issues a second GraphQL call. The gate's own
+# run is excluded by IDENTITY — the one roll-up entry whose
+# `checkSuite.workflowRun.databaseId` equals this job's `GITHUB_RUN_ID`
+# — never by name, so a foreign job named `merge-gate` still counts.
+if [ "$MERGE_STATE_READ_OK" != 1 ]; then
+    WHY[2]="the merge-state/check roll-up is unreadable — unevaluable (D24)"
+    ledger_append "refusal:unknown" "$RUNG"
+elif [ "$MERGE_STATE" = "UNKNOWN" ]; then
+    WHY[2]="mergeStateStatus is still UNKNOWN after $merge_state_attempt re-read(s) — unevaluable (D24)"
+    ledger_append "refusal:unknown" "$RUNG"
+elif [ "$MERGE_STATE" = "BLOCKED" ] || [ "$MERGE_STATE" = "DIRTY" ] || [ "$MERGE_STATE" = "DRAFT" ] || [ "$MERGE_STATE" = "HAS_HOOKS" ]; then
+    WHY[2]="mergeStateStatus is $MERGE_STATE"
+elif [ "$MERGE_STATE" = "BEHIND" ]; then
+    WHY[2]="mergeStateStatus is BEHIND"
+    ledger_append "refusal:behind" "$RUNG"
+    if [ "$AUTONOMOUS" = "true" ]; then escalate behind
+    else log "autonomous_merge is false — behind recorded, no escalation (D27)"; fi
+elif [ "$MERGE_STATE" = "CLEAN" ] || [ "$MERGE_STATE" = "UNSTABLE" ]; then
+    RUN_ID="${GITHUB_RUN_ID:-}"
+    OTHER="$(awk -F'\t' -v id="$RUN_ID" '$3 == "" || $3 != id' <<<"$CHECKS_TSV")"
+    n_other="$(grep -c . <<<"$OTHER" || true)"
+    failing="$(awk -F'\t' '{ st = ($2 == "" ? "PENDING" : toupper($2)); if (st != "SUCCESS") printf " %s=%s", $1, st }' <<<"$OTHER")"
+    if [ "$n_other" -eq 0 ]; then
+        WHY[2]="mergeStateStatus $MERGE_STATE but no check besides the gate's own run"
+    elif [ -n "$failing" ]; then
+        WHY[2]="mergeStateStatus $MERGE_STATE but check(s) not success:$failing"
+    else
+        C[2]=1; WHY[2]="mergeStateStatus $MERGE_STATE, all $n_other other check(s) success"
+    fi
 else
-    n_checks="$(grep -c . <<<"$CHECKS" || true)"
-    failing="$(awk -F'\t' '$2 != "SUCCESS" {printf " %s=%s", $1, ($2 == "" ? "pending" : $2)}' <<<"$CHECKS")"
-    if [ "$n_checks" -eq 0 ]; then WHY[2]="no check besides the gate itself on $HEAD"
-    elif [ -n "$failing" ]; then WHY[2]="check(s) not success:$failing"
-    else C[2]=1; WHY[2]="all $n_checks checks on the head are success"; fi
+    WHY[2]="unrecognised mergeStateStatus '$MERGE_STATE' — unevaluable"
 fi
 
 # --- verdict ---------------------------------------------------------------------------

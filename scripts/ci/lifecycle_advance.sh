@@ -535,14 +535,19 @@ edit_labels() { # issue-number add-csv remove-csv (either may be empty)
 # --- loop ledger (#64 D13, D22) ------------------------------------------------
 # One container comment per issue, `<!-- loop-ledger:<n> -->` ...
 # `<!-- loop-ledger-end -->`, read only when a trusted writer posted it
-# (D22): the merge actor App or github-actions[bot]. Three row kinds and
-# no others — dispatch (rung entered, merged head, event, pr, at, cost),
-# terminal (the review rung), refusal:<reason>. A row that will not
-# parse makes the whole ledger unreadable, and unreadable is never
-# absent. The same reader lives in scripts/ci/merge_gate.sh; D19 permits
-# no new shared file.
+# (D23): the merge actor alone — `github-actions[bot]` is not trusted.
+# Three row kinds and no others — dispatch (rung entered, merged head,
+# event, pr, at, cost), terminal (the review rung), refusal:<reason>. A
+# row that will not parse makes the whole ledger unreadable, and
+# unreadable is never absent. The same reader lives in
+# scripts/ci/merge_gate.sh; D19 permits no new shared file.
 MERGE_ACTOR="${MERGE_ACTOR_LOGIN:-evekhm-merge-actor-app[bot]}"
-TRUSTED_WRITERS="$(jq -nc --arg a "$MERGE_ACTOR" '[$a, "github-actions[bot]"]')"
+TRUSTED_WRITERS="$(jq -nc --arg a "$MERGE_ACTOR" '[$a]')"
+# D25: MERGE_ACTOR_TOKEN reaches this script as env of the one step that
+# runs it, and only the ledger-row write (below) and the escalate.sh
+# call the workflow makes in that same step read it; every other gh
+# call in this script keeps GH_TOKEN as github.token.
+MERGE_ACTOR_TOKEN="${MERGE_ACTOR_TOKEN:-${GH_TOKEN:-}}"
 LEDGER_ROW_RE='^<!-- loop-ledger-row: (dispatch|terminal|refusal:[a-z-]+) rung:[0-9]+ head-oid:[0-9a-f]{40}( [a-z-]+:[^ ]+)* -->$'
 LEDGER_ID=""; LEDGER_BODY=""; LEDGER_ROWS=""
 
@@ -583,12 +588,12 @@ ledger_append() { # <issue> <kind> <rung> <head-oid> <pr> [extra-field ...] — 
     f="$(mktemp)"
     if [ -n "$LEDGER_ID" ]; then
         awk -v l="$line" '/<!-- loop-ledger-end -->/ { print l } { print }' <<<"$LEDGER_BODY" >"$f"
-        gh api -X PATCH "repos/$GITHUB_REPO/issues/comments/$LEDGER_ID" -F body=@"$f" >/dev/null \
+        GH_TOKEN="$MERGE_ACTOR_TOKEN" gh api -X PATCH "repos/$GITHUB_REPO/issues/comments/$LEDGER_ID" -F body=@"$f" >/dev/null \
             || { rm -f "$f"; return 1; }
     else
         printf '### Loop ledger for #%s\n\n<!-- loop-ledger:%s -->\n%s\n<!-- loop-ledger-end -->\n' \
             "$n" "$n" "$line" >"$f"
-        gh api -X POST "repos/$GITHUB_REPO/issues/$n/comments" -F body=@"$f" >/dev/null \
+        GH_TOKEN="$MERGE_ACTOR_TOKEN" gh api -X POST "repos/$GITHUB_REPO/issues/$n/comments" -F body=@"$f" >/dev/null \
             || { rm -f "$f"; return 1; }
     fi
     rm -f "$f"
