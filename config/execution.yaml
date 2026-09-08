@@ -33,13 +33,15 @@
 
 personas:
   # 2.00 while the number was decorative; 8.00 now that it stops a run.
-  # Measured over the four argus dispatches on 2026-09-07 that produced a
-  # real review and reported a cost: $1.16, $2.70, $3.03, $3.16 (jobs
-  # 101668418781, 101816531601, 101813589686, 101810893006). THREE OF THE
-  # FOUR were already over 2.00, including the 07:03 review on PR #188
-  # that is this repository's evidence for gate 1a — so switching
-  # enforcement on at the old number would have killed the review the
-  # milestone rests on, and every review of a PR big enough to matter.
+  # Measured over six argus dispatches through 2026-09-07 that produced a
+  # real review and reported a cost, all printing max_cost_usd 2.0 and
+  # none of them capped: $1.1612 on PR #188 (job 101668418781), the ONE
+  # run under 2.00 — this repository's gate-1a evidence, which would have
+  # finished with 40% of the old budget unspent; $3.1617, $3.0297,
+  # $2.6985, $2.2795, four rounds of one review conversation on PR #221
+  # (branch fix/167-agy-adc-credential), the rounds that landed the #167
+  # fix; and $2.75 on PR #233. At 2.00, five of these six runs would
+  # have been cut off mid-review.
   # 8.00 is ~2.5x the observed maximum: high enough that no honest review
   # reaches it, low enough that a loop stuck re-reading the same diff
   # stops inside one run instead of overnight.
