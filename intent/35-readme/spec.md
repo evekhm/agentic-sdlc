@@ -26,46 +26,42 @@ replaced, migrated or deleted. This is the first version.
 
 These `##` sections, in this order (D2; the fixed count was lifted
 2026-09-03, see D2/D4; the list was rewritten 2026-09-08 by the
-product owner, see D1, from an operator walkthrough into an
-introduction to the system — what it is, what it demonstrates, how it
-was and is being built, and what it adds to the playbook):
+product owner, see D1, and cut the same day to eight sections that
+describe the system as designed: the actors, the flow, the
+orchestrator, the harnesses, the playbook mapping, how to run it):
 
-1. **What this repository is** — the story of one change through the
-   loop, the diagram, and the self-building premise.
-2. **The goal: an orchestrator with a YOLO switch** — the end state
-   (labeling an issue is the entire human act), the three seats that
-   make it trustworthy (advisor, verifier, maintainer), and the
-   tracker items that are the pieces of the switch.
-3. **The playbook, and what this adds to it** — the six-stage loop as
-   the article states it, and the five additions this repository
-   makes on top of it.
-4. **The loop, stage by stage** — plan, design, build, implement,
-   review and maintain in prose (D7), the deterministic transition,
-   the halt labels and the defect path (D10).
-5. **The cast** — the personas built and the seats agreed, the
-   sub-agents, tiers, the compiler.
-6. **Distrust is structural** — the mechanisms that hold without
-   anyone's attention, and the field notes they came from.
-7. **How it built itself, and where it stands** — the bootstrap
-   ladder, the critical-path gates, and today's position between YOLO
-   off and on.
-8. **What it costs, and how we know** — the cost discipline and the
-   measurement subsystem, built and agreed.
-9. **Running it yourself** — prerequisites (D11), who may file (D9),
+1. **What this is** — the two kinds of actors (persona, owner), the
+   five rungs and what a merge means, the diagram, the self-building
+   premise.
+2. **The cast** — one line per persona and seat, the owner, the
+   sub-agents, the tiers and their model bindings.
+3. **The flow, rung by rung** — plan, design, build, implement,
+   review, close and maintain in prose (D7), the deterministic
+   transition, the halt labels and the defect path (D10).
+4. **The orchestrator** — label in, merged code out; the one door
+   `/work <n>`; the stop conditions; the self-improving loop.
+5. **Two harnesses, two model families** — the concrete harnesses,
+   pins, the reviewer family split, the cost thesis (D6).
+6. **The playbook, and what this adds** — stages and plays, the
+   mapping onto the rungs, the five additions.
+7. **Running it yourself** — prerequisites (D11), who may file (D9),
    the one command (D5), what a merge means (D8).
-10. **Where the rules actually live** — the document map (D3).
+8. **Where the rules live** — the document map (D3).
 
 Every issue or pull request README cites is a link to its tracker
-page (product owner, 2026-09-08).
+page (product owner, 2026-09-08). README describes the target design
+and does not narrate build status; status lives in
+`docs/CRITICAL_PATH.md` and the pinned tracker (product owner,
+2026-09-08, second correction).
 
 (#68 / PR #69 adds a read-only board section, "See who is doing what",
-after 9 when it lands; that PR extends this list.)
+after 7 when it lands; that PR extends this list.)
 
 ## Decisions
 
 | ID | Decision |
 |----|----------|
-| D1 | **One reader: a person arriving at the repository.** *Amended 2026-09-08 by the product owner: the reader is no longer "the operator at the keyboard" and README no longer opens by addressing them.* README introduces the system to anyone who lands on it — an attendee, an engineer evaluating the approach, the presenter — as a story of what the system is, what it demonstrates and how it is being built, and never an agent. Agents are pointed at AGENTS.md by their compiled prompts and must never be told to read README; a document with two audiences acquires two voices and then two truths. README describes the system as conceived, so seats and rungs that are agreed on the tracker but not yet built appear in it, each marked as such with its issue. Testable: the opening does not address the reader by role, no sentence in the file instructs an agent, and every capability README names as not yet built cites an issue. |
+| D1 | **One reader: a person arriving at the repository.** *Amended 2026-09-08 by the product owner: the reader is no longer "the operator at the keyboard" and README no longer opens by addressing them.* README introduces the system to anyone who lands on it — an attendee, an engineer evaluating the approach, the presenter — as a story of what the system is, what it demonstrates and how it is being built, and never an agent. Agents are pointed at AGENTS.md by their compiled prompts and must never be told to read README; a document with two audiences acquires two voices and then two truths. README describes the system as conceived, so seats and rungs that are agreed on the tracker but not yet built appear in it, each marked as such with its issue. *Amended again 2026-09-08 by the product owner: README describes the target design only. It does not say what is built today, what is open, or that a person merges today; the issue link on a part is its only status marker. Build status lives in `docs/CRITICAL_PATH.md` and the pinned tracker.* Testable: the opening does not address the reader by role, no sentence in the file instructs an agent, every seat or rung that lives on the tracker cites its issue, and the file contains no "today", "open" or "unbuilt" status narration. |
 | D2 | **The section list above is ordered, and grows only by editing it.** *Amended 2026-09-03 by the product owner together with D4: the fixed count of nine is lifted.* Headings appear in the listed order and none is nested deeper than `###`; a new topic is either a link from the last section or a deliberate addition to the list above in the same change — never a drop-in section the list does not name, which is the mechanism that stops the welcome document from becoming a fourth standard (AGENTS.md, "No document sprawl"). Testable: every `## ` heading in README.md appears in the list above, in order. |
 | D3 | **Explains, never duplicates; and loses every disagreement.** Every rule README mentions that is stated normatively elsewhere appears as at most one sentence plus a link to its owner: AGENTS.md (the cross-harness standard), INTENT.md (why the system exists), `docs/SPEC.md` (what is built today), REVIEW.md (the review protocol), `docs/CONTEXT.md` (prior art), `scripts/auth/README.md` and `scripts/setup/` (setup). README is normative for nothing and says so in one line: where it and any of those differ, the other wins (`docs.structure`). Testable: README contains no table (`grep -c '^|' README.md` is 0), no label-semantics list, and no severity-tier list; every rule sentence is followed by a link. |
 | D4 | **At most one diagram.** *Superseded in part 2026-09-03 by the product owner: the original 150-line ceiling and 25-line section limit are lifted; no line or section-length cap applies.* Original rationale, kept for the record: a walkthrough an attendee will not finish is a transcript with a filename. Testable now: exactly one fenced diagram block. |
@@ -92,30 +88,32 @@ after 9 when it lands; that PR extends this list.)
   semantics (except the halt labels required by D10), no severity-tier list, and no `status:*` → `status:*`
   mapping; it names all five stages in ladder order (D3, D7).
 - Exactly one fenced command block exists and its only line is
-  `/work <n>`; no fenced block contains `scripts/ops/work.sh`; no
-  harness executable, vendor, product, model-family name or model ID
-  appears anywhere in the file (D5, D6).
+  `/work <n>`; no fenced block contains `scripts/ops/work.sh` (D5).
+  Harness, vendor and model names appear only as facts of the current
+  bindings and each points at the `config/` file that owns it (D6,
+  amended 2026-09-08).
 - `bash scripts/ci/sanitize_check.sh` exits 0 with README tracked, and
   README contains no absolute home path (D6).
-- Section 9 states that anyone files and the system files its own
+- Section 7 states that anyone files and the system files its own
   issues (the maintainer's watchers, the loop's failures), that a
   reviewer's findings on the PR under review stay in that thread, and
-  that every issue starts `intent:new` with no `status:*`; it links
-  AGENTS.md (D9). (Section numbers in this list follow the 2026-09-08
-  section list.)
-- Section 9 states all three clauses: merge is acceptance, a closed PR
+  links AGENTS.md (D9). (Section numbers in this list follow the
+  eight-section list of 2026-09-08.)
+- Section 7 states all three clauses: merge is acceptance, a closed PR
   is a rejection not relitigated, and an edit at the gate is the
   decision (D8).
-- Sections 3 and 5 describe two independent reviewers on different
-  model families without naming either family, and section 9 states
-  the manual path as running the one command on the PR number, which
-  launches neither reviewer without a named persona (#36 D9).
-- Section 4 states the ratified repair path (spec-unchanged repair
+- Sections 2 and 5 describe two independent reviewers on different
+  model families and name which family each reads on, pointing at
+  `config/deployments.yaml` (D6).
+- Section 3 states the ratified repair path (spec-unchanged repair
   skips the triple; spec-changing repair re-enters at plan), cites #32
   and links INTENT.md (D10).
-- Section 10 links AGENTS.md, INTENT.md, `docs/SPEC.md`, REVIEW.md and
+- Section 8 links AGENTS.md, INTENT.md, `docs/SPEC.md`, REVIEW.md and
   `docs/CONTEXT.md`, one sentence each, and states that README loses
   any disagreement with them (D3).
+- README contains no build-status narration: `grep -n -i -E
+  '\btoday\b|unbuilt|is open|not yet' README.md` matches nothing (D1,
+  second amendment).
 - Every `#<n>` in README is a markdown link to that issue or pull
   request on the tracker; `grep -E '(^|[^/[])#[0-9]+' README.md`
   matches nothing.
