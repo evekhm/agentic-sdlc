@@ -13,7 +13,7 @@ Consequences observed on 2026-09-08:
 - An intent PR, a plan PR, and a README PR each drew two full reviews. PR #260 had eleven pushes; each push woke both reviewers.
 - Argus runs at REVIEW tier (Claude Opus) with an $8.00 ceiling per run. Every push to any PR can spend up to that ceiling on depth only needed at the code gate.
 - Wall clock delays accumulate. Each early rung waits for two reviewer rounds before merge, on artifacts where one reviewer suffices.
-- The verifier seat (#204) was specified as "the review stage given depth" and assigned to Argus. Today Argus spends its budget on breadth across every rung.
+- The verifier seat (#204) was specified as "the review stage given depth" and recommended to be carried by Argus. Today Argus spends its budget on breadth across every rung.
 
 ## Proposed outcome
 
@@ -23,7 +23,7 @@ Consequences observed on 2026-09-08:
    - the diff touches a trust-bearing path: `.github/workflows/**`, `scripts/auth/**`, `scripts/ops/post.sh`, `scripts/ops/work.sh`, `scripts/ci/**`, `personas/**`, `config/**`, `REVIEW.md`, `AGENTS.md`;
    - the PR carries `review:deep`;
    - the PR's ledger has an open `security` row (security already needs both reviewers; unchanged).
-   Argus at the code gate carries the verifier duties of #204: re-run the gates, mutation-test the tests, read the job log behind every green check. #204 is resolved by this: the verifier is Argus's protocol at the code gate, and it gets no separate name or identity.
+   Verification is a rung-scoped checklist inside the review protocol, run by every assigned reviewer (#204). Atlas carries it at every gate: at plan, the intent lost nothing from the issue; at design, no open question and every acceptance row runnable without a model; at build, the contract tests fail at the plan's base; at implement, the gates re-run and the job log behind every green check says what the check claims. Argus adds the deep checks where it is assigned (code gate, trust-bearing paths, `review:deep`, open `security` row): mutation-test the tests, re-run the gates, read the full diff. #204 resolves into this: no separate name or identity; Atlas is the carrier on every pull request, Argus the second family at the code gate.
 3. **A push re-triggers a review only when there is something to verify.** `synchronize` wakes a reviewer only when that reviewer has an open blocking row on the PR, or when `review:deep` was applied after its last round. A push to a PR with a clean ledger gets CI and nothing else. `opened`, `reopened` and `ready_for_review` always trigger the assigned set. Draft PRs trigger nothing.
 4. **Consensus follows assignment.** Where only Atlas is assigned, consensus is Atlas's clean ledger plus green CI. Where both are assigned, the existing rules hold: independent round 1, dual sign-off on `security`, the distinct-family constraint (#198). The merge identity (#64, #251) merges on that consensus in autonomous mode; in manual mode the owner merges.
 5. **`review:deep` is a grant a persona may apply.** A persona applies it through the trusted posting path (`scripts/ops/post.sh`, hold re-read before the write) with a comment that names the criterion id from the list below. The grant is consumed on use: the reviewer workflow removes the label after the deep round is posted, so a standing label cannot re-arm the loop. One deep grant per PR per rung. The existing admin path and the manual dispatch path stay.
@@ -65,7 +65,7 @@ Who applies which: Daedalus at build (DEEP-3, DEEP-5, DEEP-7, written into plan.
 - Distinct model families remain required whenever both reviewers are assigned (#198).
 - `security` findings require dual sign-off; an open `security` row triggers Argus assignment.
 - Cost ceilings per run remain unchanged; savings come from fewer runs.
-- No new persona or identity; the verifier role is Argus's protocol at the code gate (#204 resolves into this).
+- No new persona, no new identity. The verifier is a checklist in the review protocol: Atlas carries it at every rung, Argus adds depth where it is assigned (#204 closes into this).
 - Skills are harness-agnostic and compiled by `scripts/sync_agents.py` (`AGENTS.md`). The criteria skill is declared by five personas and compiled across harnesses.
 - Every GitHub write from an unattended run goes through `scripts/ops/post.sh` (`docs/SPEC.md`, `personas/skills/trusted-posting.md`). Applying `review:deep` uses this path.
 
@@ -78,3 +78,4 @@ Who applies which: Daedalus at build (DEEP-3, DEEP-5, DEEP-7, written into plan.
 5. **How is the deep review criteria skill structured?** Either the criteria live in a dedicated skill file under `personas/skills/` referenced by five personas, or the criteria are placed directly in `personas/skills/review-protocol.md`.
 6. **When is the `review:deep` label consumed and cleared?** Either the workflow step removes the label immediately upon dispatch to prevent re-entrant runs, or the reviewer removes the label only after posting a completed deep review.
 7. **How do manual deep dispatches interact with the per-rung grant limit?** Either a manual deep dispatch consumes the rung's single `review:deep` allocation, or manual dispatch remains an unmetered out-of-band path.
+8. **Where does the per-rung verification checklist live?** Either the per-rung checklist lives in `personas/skills/review-protocol.md`, or it lives in `REVIEW.md`, with one home chosen by the spec.
