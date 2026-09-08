@@ -240,6 +240,20 @@ rule are in [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md).
 
 ## Two harnesses, two model families
 
+The goal is a system mature enough to run every seat on Gemini 3.8
+Flash through Antigravity — cheap, fast, and already true for all five
+tiers there today
+([#271](https://github.com/evekhm/agentic-sdlc/issues/271)). Nothing
+about the design requires Claude Code. Where mixing in Claude pays off
+is the frontier tier: a team already invested in Claude can keep its
+hardest judgment calls — the spec gate, architecture, the advisor seat
+— on Claude's frontier model, and let that model's edge in reasoning
+lead the process forward while every stage mature enough to run
+deterministically settles onto the cheap Antigravity pin. Claude Code
+carries more of that judgment today because the process is still
+being specified; each check that lands moves one more stage onto the
+cheap pin.
+
 A harness is the program a persona runs inside: Claude Code
 (Anthropic) or Antigravity (Google, via `agy`). A persona names only a
 tier — fast, mechanical, implementation, review or frontier — in a
@@ -257,18 +271,13 @@ families, enforced by CI
 ([#198](https://github.com/evekhm/agentic-sdlc/issues/198)).
 
 **The cost thesis.** A stage that is well specified and well gated can
-run on the cheapest capable model. Today every Antigravity tier does:
-one model line, Gemini 3.8 Flash, graded by thinking level
-([#271](https://github.com/evekhm/agentic-sdlc/issues/271)). The pin
-still stays free per persona: Athena and Daedalus are both Frontier
-tier, yet Athena runs Claude Fable ($10.00 / $50.00 per 1M tokens) and
-Daedalus runs Flash-high ($0.75 / $3.75) — the tier names the
-judgment, the pin decides the cost. Keep a seat like Nestor on the
-pricier model where a wrong call is expensive; move a seat to Flash
-once its process earns it, the way Daedalus and Atlas already have.
-Claude Code carries more judgment today because the process is still
-being specified — each check that lands moves another stage onto the
-cheap pin.
+run on the cheapest capable model. The pin stays free per persona:
+Athena and Daedalus are both Frontier tier, yet Athena runs Claude
+Fable ($10.00 / $50.00 per 1M tokens) and Daedalus runs Flash-high
+($0.75 / $3.75) — the tier names the judgment, the pin decides the
+cost. Keep a seat like Nestor on the pricier model where a wrong call
+is expensive; move a seat to Flash once its process earns it, the way
+Daedalus and Atlas already have.
 
 $/1M tokens, at or under 200k tokens (this system's own context
 ceiling, AGENTS.md): input / cache write (5m TTL) / cache read /
