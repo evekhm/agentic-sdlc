@@ -107,7 +107,7 @@ This task STARTS FROM SCRATCH for `docs/SPEC.md` and the `README.md` reword, and
 with:
 > exactly one operational command shown as an instruction (`scripts/ops/work.sh <n>`) and one observational command (`scripts/ops/board.sh`).
 
-**2. `docs/SPEC.md` `ops.board`:** Adopt the `ops.board` capability entry verbatim from PR #69 (`docs/SPEC.md:869-886`) and append it to the Capabilities section of `main`'s `docs/SPEC.md` (before `## Agreed, not yet built`).
+**2. `docs/SPEC.md` `ops.board`:** Adopt the `ops.board` capability entry verbatim from PR #69 (`docs/SPEC.md:869-892`) and append it to the Capabilities section of `main`'s `docs/SPEC.md` (before `## Agreed, not yet built`).
 
 **3. `README.md` rewording:** At `README.md:6-7`, replace:
 > Your entire job is two actions,
@@ -136,13 +136,16 @@ T1–T4 applied.
 | 2 | `bash scripts/ops/tests/work_test.sh` | exit 0 | no regressions in `work.sh` |
 | 3 | `bash scripts/ci/sanitize_check.sh` | exit 0, `PASS` | house rule |
 | 4 | `bash scripts/ci/spec_check.sh origin/main <body-file>` | exit 0 | AT-13 |
-| 5 | `git diff --name-only origin/main` | exactly 5 files (`board.sh`, `github.sh`, `board_test.sh`, `README.md`, `SPEC.md`) | D10 boundary |
+| 5 | `git diff --name-only origin/main` | the five listed paths (`board.sh`, `github.sh`, `board_test.sh`, `README.md`, `SPEC.md`) are present, plus the plan sync of `intent/68-live-board/plan.md`, and no path from D10's NOT-list appears | D10 boundary |
 
-The whole diff is exactly five files:
-`scripts/ops/board.sh`, `scripts/ops/lib/github.sh`, `scripts/ops/tests/board_test.sh`, `README.md`, `docs/SPEC.md`.
+The whole diff is the five listed files plus the plan sync of
+`intent/68-live-board/plan.md`:
+`scripts/ops/board.sh`, `scripts/ops/lib/github.sh`, `scripts/ops/tests/board_test.sh`, `README.md`, `docs/SPEC.md`, `intent/68-live-board/plan.md`.
 
-**Done when:** all five are green and step 5 lists those five paths
-and nothing else.
+**Done when:** all five gates above are green and step 5 confirms the
+five listed paths are present and that no path from D10's NOT-list
+(`work.sh`, `claim.sh`, `personas/**`, `config/**`,
+`.github/workflows/**`, `scripts/placement/**`) appears in the diff.
 
 ---
 
@@ -150,7 +153,7 @@ and nothing else.
 
 - **Branch:** `odyssey/68-live-board`.
 - **Closing keyword: none.** The body carries `Refs #68` and must not carry `Closes #68`.
-- **`docs/SPEC.md` must be in the diff.** T4 satisfies this. The PR must carry `Spec-impact: none - intent/** only, not a behavior-bearing path` in the body to pass `spec_check.sh` on the intent files, but the code files themselves are validated by the `docs/SPEC.md` updates. Wait, the spec states: "This spec's PR carries `Spec-impact: none — intent/** only, not a behavior-bearing path`; the `docs/SPEC.md` upsert accompanies the implementing PR." Since the implementer's PR touches behavior-bearing paths and updates `docs/SPEC.md`, it does not need the `Spec-impact` exception tag.
+- **`docs/SPEC.md` must be in the diff.** T4 satisfies this. The implementer's PR touches behavior-bearing paths (`scripts/ops/board.sh`, `scripts/ops/lib/github.sh`) and upserts `docs/SPEC.md` in the same diff, so it must NOT carry the `Spec-impact: none` marker — that marker is the waiver `scripts/ci/spec_check.sh` accepts instead of the upsert, not a companion to it, and stamping it here would falsely claim no spec impact on a PR that has one.
 - **Body** names the five changed files, and the T5 table with each command's actual exit code.
 
 Open questions: none
