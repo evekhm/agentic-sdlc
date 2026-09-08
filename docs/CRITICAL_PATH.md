@@ -12,7 +12,9 @@ file is the live ordering under it. The advisor seat owns both; update
 this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line.
 
-Status line: 2026-09-08, revision four (~06:45 UTC). Live `gh issue
+Status line: 2026-09-08, revision five (~19:30 UTC): step 3's PR #257 is
+not merged (two open `security` rows, four open `high`; smoke-merge
+withdrawn for this PR); fix round agy-64ii in flight. Live `gh issue
 list` state always beats this file.
 
 ## Fast path to the demo (operator directive, 2026-09-08 06:40 UTC)
@@ -33,16 +35,26 @@ order:
    one small PR, merge on smoke, so a ladder PR can have two reviewer
    voices.
 3. #64 implementation rung on agy (odyssey; prompt
-   `ops/waves/w4-64-odyssey.txt`, launch line `ops/waves/launch.sh 64i`),
-   merge on smoke. Launched by the operator 2026-09-08 06:50:36 UTC as
-   agy-64i (worktree odyssey-64-autonomous-loop, branch
-   odyssey/64-autonomous-loop); #246 (lifecycle_advance_test.sh run by
-   no workflow, must be baselined and kept green through T6, added to
-   ci-gates.yml) and #245 (no closing keyword in any commit body;
-   "Does not close #108" closed #108) reached the session through the
-   #64 thread (verifier comment 5580549928, advisor comment
-   5580631791) because the launch preceded the prompt amendment.
-   Merge on smoke by the verifier.
+   `ops/waves/w4-64-odyssey.txt`, launch line `ops/waves/launch.sh 64i`).
+   Launched by the operator 2026-09-08 06:50:36 UTC as agy-64i (worktree
+   odyssey-64-autonomous-loop, branch odyssey/64-autonomous-loop); #246
+   (lifecycle_advance_test.sh run by no workflow) and #245 (no closing
+   keyword in any commit body) reached the session through the #64 thread
+   because the launch preceded the prompt amendment. **Not merged on
+   smoke after all**: PR #257 (head 900b4408, two rounds) shipped a
+   "Completed" table contradicted by the diff (#258), two open `security`
+   rows (an unauthenticated merge-eligibility grep; the merge actor's key
+   handed to code the PR under review authored) and four open `high` rows
+   (dead ladder dispatch; the D13/D14 ledger and ratchet unimplemented;
+   `hold`/`blocked` failing open). Argus, Atlas and the verifier
+   independently converged and refused across two rounds; smoke-merge was
+   withdrawn for this PR specifically by the verifier 15:00 UTC and the
+   advisor agreed. agy-64i went idle ~12h with no further push and is
+   treated as dead. Fix round 2026-09-08 ~19:15 UTC: agy-64ii, prompt
+   `ops/waves/w4-64ii-odyssey.txt`, launch line `ops/waves/launch.sh 64ii`,
+   resets onto and pushes back to the same branch so PR #257 stays the one
+   PR. This round is a real review, not smoke — the two `security` rows
+   need Atlas's explicit double AGREE.
 4. #251 + #252, the end-to-end chain after #64. Retired: the #147
    label-trigger slice — the merged #64 spec D16 reads "No second
    workflow, no `issues: labeled` trigger, no new event" and flips
