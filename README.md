@@ -1,279 +1,390 @@
 # agentic-sdlc
 
-You are the operator at the keyboard — the presenter running this
-workshop, or an attendee following along on your own clone. The first
-four sections tell you what this repository is and why; the rest walk
-one change through the whole loop. Your entire job is two actions,
-repeated: typing a number, and merging a pull request.
+A software development lifecycle in which agents do the work and
+humans keep the judgment. This repository is a working, clonable
+instance of that idea: a cast of AI personas that plan, design, build,
+implement, review and maintain software, wired to real GitHub
+identities, gated by merges, measured in dollars, and built by
+following the very loop it demonstrates.
 
-## The loop in one picture
+It exists to make a claim concrete. The
+[AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
+argues that code is no longer the bottleneck and that the human-speed
+stages around it are. This repository takes the playbook at its word,
+runs it end to end on more than one harness and more than one model
+family, and records what it took.
 
-This repository builds its own development lifecycle. A cast of
-personas is defined once as source files and compiled into the prompts
-their harnesses run; each works one rung of a five-rung ladder that
-ends, every rung, in a pull request a human merges. Why any of this
-exists is [INTENT.md](INTENT.md).
+## What this repository is
+
+Picture a change arriving as a GitHub issue. Nobody writes code yet.
+A product-owner persona turns the idea into an `intent.md` and opens
+a pull request. Someone merges it, and that merge is the only signal
+anything else needs: a deterministic workflow reads which artifact
+landed, moves a label, and the next persona picks the item up on its
+own. The intent becomes a `spec.md` with numbered decisions, the spec
+becomes a `plan.md` committed before any code, the plan becomes a diff
+with tests, and two independent reviewers on two different model
+families read the result and post findings. Each rung ends in a pull
+request; each merge is an acceptance; the git history is the audit
+trail the playbook asks for.
 
 ```text
 issue filed (intent:new)
    |
    v
-plan  ->  design  ->  build  ->  implement  ->  review
+plan  ->  design  ->  build  ->  implement  ->  review  ->  (close)
  |          |          |           |              |
 intent.md  spec.md   plan.md      code         findings
+                                                  |
+                          maintain: watchers file the next intent
 ```
 
-One pull request per rung. Nothing advances because a session declares
-itself done; it advances because you merged something.
+The unusual part is that the system in this repository is itself the
+software under development. The personas, their compiler, the label
+state machine, the reviewers and the cost tooling were all specified,
+planned, implemented and reviewed by the personas, through the loop,
+one rung at a time. The folders under [`intent/`](intent/) are the
+change records of that bootstrap. When you watch a rung run here, you
+are watching the system extend itself.
 
-## Why this exists
+## The playbook, and what this adds to it
 
-Three motivations stack on top of each other.
+The playbook describes six stages, each ending with a committed
+artifact whose commit starts the next stage: plan writes `intent.md`,
+design writes `spec.md`, build writes `plan.md` and then the diff,
+test proves it, deploy reviews it against a repo-root `REVIEW.md` and
+ships it up to a human gate, and maintain watches control bands and
+writes a fresh `intent.md` when one breaks. Humans stay above the
+loop, at the gates. The distilled reference we design against is
+[`docs/BLOG.md`](docs/BLOG.md); how each play scores against what is
+merged here is the reference standard in
+[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md).
 
-**The playbook made concrete.** The AI-native SDLC playbook
-([`docs/BLOG.md`](docs/BLOG.md)) argues that code is no longer the
-bottleneck; planning, review and governance are. It proposes a loop in
-which every stage commits an artifact and that commit starts the next
-stage. The playbook describes the loop in prose, for one harness.
-Nothing demonstrated the whole loop with real GitHub identities, more
-than one harness, review by two model families and cost discipline in
-one clonable repository. This repository is that demonstration.
+The playbook is written for one vendor's tooling and describes the
+loop in prose. This repository adds five things on top of it.
 
-**One workflow, each harness where it fits best.** The goal is not to
-crown a harness. It is to run one lifecycle across several of them and
-to place each role on the harness and model family that returns the
-most per dollar. The working thesis: a fast, inexpensive model family
-is the workhorse and carries the bulk of the mechanical, implementation
-and review-reading work; a frontier family is uniquely strong at design
-and at the hardest code, and far more expensive, so it is spent only
-where its reasoning changes the outcome — interrogating a spec, a
-tricky design, the implementation nobody else can land. The best result
-at the best cost comes from making them work together, and the persona
-compiler plus the pins in `config/` are what let the placement change
-without touching the workflow. Which family sits where is a fact in
-[`config/model_tiers.yaml`](config/model_tiers.yaml) and
-[`config/deployments.yaml`](config/deployments.yaml), and appears in no
-other document.
+**One persona, every harness.** A persona is defined once, in a
+vendor-free source file that names its stage, its protocol, its
+authority and the kind of work it does. A compiler emits the prompt
+files each harness actually loads, and a CI gate fails the build if a
+compiled file drifts from its source. Which harness and which model
+family run a persona is a one-line pin in [`config/`](config/), so the
+same lifecycle can be moved between vendors without touching the
+lifecycle.
 
-**A workshop that proves it live.** The format is a presenter-driven
-demo plus a take-home template. Because the demo is the system building
-itself, every rung the audience watches is a real change landing in
-this repository, and the presenter's whole job is the two actions
-above.
+**Two model families in the review seat, on purpose.** The two
+reviewers are pinned to different families so that a blind spot in
+one is not a blind spot in both, and consensus between them means
+something. Which family sits where is a fact in `config/` and appears
+in no persona, prompt or document.
+
+**Real identities and mechanical authority.** Each persona is its own
+GitHub App. Authorship, claims, branch namespaces and what a persona
+may write are enforced by the platform, not requested in a prompt.
+
+**Cost as a first-class subsystem.** Every tier of work is routed to
+the cheapest capable model; sessions are measured in dollars; every
+dispatch carries a spend ceiling. The claim being tested is that an
+inexpensive model family can carry the volume while a frontier family
+is spent only where its judgment changes the outcome.
+
+**A living spec beside the change records.** The playbook's
+`intent.md`, `spec.md` and `plan.md` are per-change. This repository
+also keeps [`docs/SPEC.md`](docs/SPEC.md), the current-state truth of
+what is built, upserted by every behavior-changing pull request. The
+change triple says what was asked and decided; the living spec says
+what is true now.
+
+## The loop, stage by stage
+
+Lifecycle state lives in GitHub issue labels, never in a chat
+transcript. An issue enters with `intent:new` and no stage label,
+which is exactly what makes it stage *plan* to a session that has
+never seen it.
+
+**Plan.** The product owner writes `intent.md` into
+`intent/<n>-<slug>/`: problem, outcome, constraints, open questions.
+Merging it moves the item to design.
+
+**Design.** The same persona turns that into `spec.md`, then turns
+adversary against her own draft: one ambiguity at a time, two
+defensible readings, never a recommendation, every resolution a
+numbered decision. A spec is approved only when its open questions
+are empty, and nothing is dispatched against a draft. Merging it moves
+the item to build.
+
+**Build.** The architect writes `plan.md`, the order of work and the
+check that proves each decision landed, committed before any code
+exists. Contract tests are written to fail, and every assertion cites
+the decision it derives from. Merging the plan moves the item to
+implement.
+
+**Implement.** The implementer is dispatched at a pinned commit
+against the approved spec and the committed plan, works test-first
+in its own branch namespace, and opens one pull request carrying the
+diff, any plan correction, and the living-spec upsert.
+
+**Review.** Two reviewers read the change against
+[REVIEW.md](REVIEW.md): severity tiers, per-finding ids, a bounded
+round funnel, consensus keyed to decision ids. A third round
+(`review:3`) escalates the item to `status:review-stuck` for a human.
+Today the review rung is where the
+ladder ends and a human closes the item; a deterministic close rung
+that verifies delivery before closing is agreed and in flight (#148).
+
+**Maintain.** Deterministic watchers compare live metrics to control
+bands and respond in proportion: log at one sigma, diagnose read-only
+at two, and at three file a new `intent:new` issue. That issue is how
+the loop closes on itself. The stage is reserved in the schema and
+its persona exists; the watchers are the open rung of the bootstrap
+(#11).
+
+The transition between stages has no model in it. On a merge to the
+default branch a workflow reads which artifact file was added, looks
+the next stage up in `personas/lifecycle.json`, moves the label and
+posts a stamped comment. The merge is the gate; the label is its
+shadow. Defects in merged work take a shorter path: a repair whose
+spec entry is unchanged skips the intent, spec and plan and goes
+issue, fix pull request with a regression check, review, merge; a
+repair that changes a spec entry is a change and re-enters at plan
+(#32, [INTENT.md, "Defect repair"](INTENT.md)).
 
 ## The cast
 
-Six personas, each its own GitHub App with its own bot identity, each
-defined once in `personas/<name>.yaml` with no vendor named:
+Each persona is defined in [`personas/`](personas/) by five facts:
+the stage it owns, the protocol it runs, the authority it holds, the
+tier it thinks at, and the GitHub identity it acts as. Never the
+model behind it.
 
-- **Athena**, the product owner, works the plan and design rungs at the
-  frontier tier. Her protocol is adversarial: one ambiguity at a time,
-  two defensible readings, never a recommendation, every resolution a
-  numbered decision.
-- **Daedalus**, the architect, works the build rung at the frontier
-  tier: the order of work and the check that proves each decision
-  landed.
-- **Odyssey**, the implementer, works the implement rung at the
-  implementation tier, dispatched at a pinned commit against an
-  approved spec and a committed plan.
-- **Argus** and **Atlas**, the two reviewers, work the review rung at
-  the review tier on two distinct model families, comment-only.
-- **Cassandra**, the maintainer, watches metrics against control bands
-  and files a new intent when one breaks, at the fast tier. Maintain
-  has no rung on the ladder yet.
+- **Athena, the product owner.** Owns the two gates where words become
+  commitments: intake to `intent.md`, and `spec.md` under the
+  adversarial protocol. May touch `intent/` and nothing else. Thinks
+  at the frontier tier.
+- **Daedalus, the architect.** Turns an approved spec into a
+  micro-stepped plan and the failing contract tests. Reads code
+  freely, writes none. Frontier tier.
+- **Odyssey, the implementer.** Dispatched at a pinned commit, works
+  test-first, ships one pull request per rung, never writes the
+  default branch. Implementation tier, escalating when debugging
+  demands it.
+- **Argus and Atlas, the two reviewers.** The same protocol, two
+  independent voices, two model families. Comment-only: neither
+  approves, merges, closes nor edits a label. Review tier.
+- **Cassandra, the maintainer.** Watchers, control bands, proportional
+  response, and the new intent that closes the loop. Fast tier for
+  sweeps, review tier for diagnosis.
+- **Nestor, the advisor.** The standing frontier-judgment seat: process
+  decisions, dispatch-prompt authoring, help at the spec gate,
+  stewardship of the playbook. Owns no rung, so no dispatcher can
+  ever resolve to it, and never implements or reviews. Specified and
+  planned, not yet compiled (#199).
 
-Five sub-agents with no GitHub identity — mechanic, coder,
-contract-writer, scanner, explorer — do the delegated work a persona
-hands off so that raw material never enters the persona's own context.
+Two further seats are on the record. The **verifier** is not a new
+persona but the review stage given depth: independently re-running
+every gate, mutation-testing the tests, reading the job log behind
+every green check, and four mechanizable ladder checks; the
+recommendation is that Argus carries it (#204). A dedicated **merge
+identity**, so that no persona ever merges its own pull request,
+arrives with the autonomous loop (#64, #251).
 
-**Tiers, not prices.** A persona declares the kind of work it does,
-on a five-grade ladder: fast (sweeps, lookups, routing), mechanical
-(batch edits, greps, test runs), implementation (coding against a
-dispatch-ready spec), review (evidence-based reading), frontier
-(design, interrogation, the hardest debugging). Each harness binds the
-tiers to its own models in `config/model_tiers.yaml`; adjacent tiers may
-share a model. Repinning a persona to another harness is a one-line
-change in `config/` followed by a compiler run — the tier ladder is
-[AGENTS.md, "Subagent model tiers"](AGENTS.md#subagent-model-tiers).
+Five sub-agents with no GitHub identity do the delegated work a
+persona hands off, so raw material never enters the persona's own
+context: **mechanic** for fully specified edits and test runs,
+**coder** for dispatch-ready implementation, **contract-writer** for
+acceptance tests that cite decision ids, **scanner** for wrapping
+deterministic check scripts, and **explorer** for read-only fan-out
+that returns conclusions rather than file dumps.
 
-**The compiler.** [`scripts/sync_agents.py`](scripts/sync_agents.py)
-reads `personas/` and `config/` and emits the prompt files each harness
-actually loads. The generated files are committed, and a CI gate
-recompiles them and fails the build if they drift from their sources.
-It exists because the predecessor repository hand-maintained one prompt
-per harness and they diverged within days; "one persona, every
-harness" is a demonstrated fact here rather than a claim. What it
-emits and how is [`docs/SPEC.md`](docs/SPEC.md) `personas.compiler`.
+**Tiers, not prices.** Work is graded on a five-step ladder: fast,
+mechanical, implementation, review, frontier. A persona names the
+grade its work needs; each harness binds the grades to its own
+models in [`config/model_tiers.yaml`](config/model_tiers.yaml).
+Moving a persona to another harness is one line in
+[`config/deployments.yaml`](config/deployments.yaml) and a compiler
+run. The compiler, [`scripts/sync_agents.py`](scripts/sync_agents.py),
+is byte-deterministic so the drift gate is simply rebuild and diff.
 
-## How it builds itself
+## Distrust is structural
 
-The system could not run its own loop before the loop existed, so its
-backlog is organised as a bootstrap ladder, indexed by one pinned
-tracker issue that lists every rung and ticks items off as they land:
+The most durable lesson of building this was that a rule stated in a
+prompt is a suggestion, and the system holds only where the rule is
+in a file, a gate or an independent reader. Several mechanisms follow
+from that.
+
+The **labels are the state machine**, and the machine fails closed.
+Exactly one `status:*` label is legal at a time; two at once means two
+state machines disagree, so automation applies `hold` and stops.
+`hold` is an absolute circuit breaker that nothing steps past.
+`blocked` means a session stopped and reported rather than guessed.
+
+**All unattended GitHub writes go through one posting path** that
+re-reads `hold` immediately before writing, so a post suppressed by
+the breaker is a deliberate, clean stop rather than a retry around it.
+
+**Dispatch has one door.** A single script resolves an issue or pull
+request number to its stage and owning persona from the labels and
+starts that persona under its own identity. Nothing else is passed,
+because a flag naming a stage would let a session work a rung the
+labels say is not current.
+
+**Authority is checked, not trusted.** Branch protection and persona
+branch namespaces bound what each identity can write, the review
+mutex keeps a persona from reviewing its own rung, and the
+distinct-family constraint on the reviewers is declared in config and
+becoming a CI gate (#198), so a re-pin cannot silently collapse both
+reviewers onto one family.
+
+The field notes behind these rules are the fabrication catalog in
+[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md): the model fabricates, the
+prompt author fabricates, the environment fabricates green and red,
+and the loop fabricates convergence. Two rules generalize from it:
+one scar, one rule, and stable countermeasures never ask the model
+for testimony. The next step, agreed and open, turns every entry in
+the catalog into a permanent eval in CI (#254) and puts deterministic
+hooks behind the advisory rules (#255).
+
+## How it built itself, and where it stands
+
+The system could not run its own loop before the loop existed, so the
+backlog was organised as a bootstrap ladder, indexed by one pinned
+tracker issue (#12).
 
 - **Rung 1, wizard of Oz.** A human authored the persona sources, the
-  config and the review protocol. Personas ran by hand, as sub-agents
-  of the operator's own session.
+  config and the review protocol. Personas ran by hand as sub-agents
+  of the operator's own session. Done.
 - **Rung 2, the machinery.** The compiler, the CI gates, the label
-  taxonomy, the bot identities, the one-command dispatcher, this
-  document, and launching any persona on its own harness.
+  taxonomy, the six bot identities, the one-door dispatcher, this
+  document, and launching any persona on its own harness. Done, with
+  harness-agnostic launch and the session close-out still landing
+  (#43, #85).
 - **Rung 3, unattended personas.** The reviewers as event-driven
-  workflows and the product owner picking up `intent:new` on her own,
-  which first needs the execution model that decides where each persona
-  runs.
+  workflows running on a hosted runner under their own identities,
+  which met its gate on 2026-09-08 when both reviewers posted real
+  rounds from the runner itself. The product owner picking up
+  `intent:new` on her own is open (#10), and the reviewer-consensus
+  merge is implementing (#64).
 - **Rung 4, maintain.** Deterministic watchers and a seeded incident
-  that files a new intent — the loop closing on itself.
+  that files a new intent. Open (#11).
 - **Rung 5, packaging.** The personas compiled into an installable
-  plugin for the take-home.
+  plugin, published from an in-repo marketplace, so an attendee can
+  install the whole cast with one command. Open (#31).
 
-From rung 2 on, every feature of this repository is delivered through
-the repository's own ladder: an `intent/<n>-<slug>/` folder holding the
-intent, the spec and the plan; a spec authored under the persona's own
-App identity; a persona-namespaced branch; commits that cite reviewer
-finding ids. The audit trail the playbook asks for is the git history.
-Where the system cut a corner it wrote that down too, as an explicit,
-non-precedent deviation in the spec that cut it. What is merged and
-behaving today — and what is agreed but not yet built — is
-[`docs/SPEC.md`](docs/SPEC.md); trust it over any narrative, this one
-included.
+From rung 2 on, every feature was delivered through the repository's
+own ladder: an `intent/<n>-<slug>/` folder, a spec authored under the
+persona's App identity, a persona-namespaced branch, commits that cite
+reviewer finding ids. Twenty-one change folders exist today.
 
-## Before you start
+The live ordering of what remains is
+[`docs/CRITICAL_PATH.md`](docs/CRITICAL_PATH.md), stated as three
+gates. Gate one, unattended review on every rung, is met. Gate two
+turns the trigger into a label and the merge into a decision: a
+`mode:autonomous` switch and per-issue overrides (#147), an enforced
+budget guard and queue driver (#108), the consensus merge (#64), and
+the deterministic close (#148). Gate three makes issues dispatch-ready
+by construction: typed intake (#117), the repair path through the same
+one command (#82), and one invocation that drives all five rungs from
+a single session (#89). Alongside them: a live board of who owns which
+issue at which rung (#68), the past of one issue as a trace (#71), a
+CI gate on the distinct-family constraint (#198), and the ops scripts
+repackaged as skills both harnesses can load (#122).
 
-**A clone of this repository**, on a branch you can push.
+The end state has a name in the playbook document: the switch from
+YOLO off to YOLO on. Today a human fires each session and merges on a
+verifier's agreement. The target is that labeling an issue is the
+entire human act; dispatch, implementation, review, consensus merge
+and close run unattended, and the human is only the escalation path.
+The demo claim this builds toward is that a backlog closes itself on
+the cheapest capable model, safely, because every unit of distrust is
+structural rather than in anyone's attention.
 
-**The six persona private keys.** Each persona is its own GitHub App,
-and its key is what lets your machine act as that persona; keys live
-outside the repository and are never committed. Registering the Apps
-and minting a token is [`scripts/auth/README.md`](scripts/auth/README.md).
+## What it costs, and how we know
 
-**`gh` and `jq`**, authenticated against this repository. Labels and
-backlog are provisioned idempotently by
-[`scripts/setup/`](scripts/setup/), run once per fork.
+Cost discipline here is curriculum, not just tooling. A working
+context has a hard ceiling; read-many work is delegated so the parent
+receives a summary and never the raw material; polling cadence is
+matched to the model's cache lifetime; spend is ranked in dollars,
+never in tokens. Those rules are in
+[AGENTS.md](AGENTS.md#context-and-cost-discipline) with the measured
+sessions that taught them.
 
-## File the change
+What is built: a script that prices a session transcript from either
+harness and reports cache hit rate and tokens per message, and a
+per-dispatch spend ceiling that is enforced, not printed. What is
+agreed and open: a cost ledger where every run posts a deterministic
+spend marker on its issue and one loader builds views per issue, pull
+request, persona, model and configuration (#104); provenance written
+by the invoking script rather than self-reported by the model (#190);
+model routing keyed on persona and stage with escalation as a
+recorded, once-per-rung hop (#107); and flow metrics beside the cost
+ones, because the first traced issue showed under half an hour of
+agent work waiting more than two hours for a human merge (#71).
 
-**Humans file issues.** No persona opens an intake issue — Atlas
-included: a reviewer's findings belong in the pull request thread that
-raised them, never as new issues. Search the tracker before you file,
-every time, per [AGENTS.md, "Before filing an
-issue"](AGENTS.md#before-filing-an-issue).
+## Running it yourself
 
-Every issue enters with `intent:new` and no `status:*` label. That is
-not decoration: it is precisely what makes the item's current rung
-`plan` to a session that has never seen it. Say what the problem is and
-what would be true if it were solved — the first rung writes the rest.
+You need a clone on a branch you can push, the persona App private
+keys, and `gh` and `jq` authenticated against the repository. Keys
+live outside the repository and are never committed; registering the
+Apps is [`scripts/auth/README.md`](scripts/auth/README.md), and labels
+and backlog are provisioned idempotently by
+[`scripts/setup/`](scripts/setup/).
 
-## Type the number
+Humans file issues. No persona opens an intake issue, Atlas included:
+a reviewer's findings belong in the pull request thread that raised
+them. Search the tracker before you file, every time
+([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)).
+Say what the problem is and what would be true if it were solved; the
+first rung writes the rest.
 
-Your whole typed input, at every rung, for every item:
+Then, at every rung, for every item, your whole typed input is:
 
 ```bash
 scripts/ops/work.sh <n>
 ```
 
-`<n>` is an issue or pull request number; a pull request resolves to
-the issue it closes. Nothing else is passed — no stage, folder, branch
-or artifact — because a flag naming one would let a session work a rung
-the labels say is not current. It reads the labels and the repository,
-prints what it resolved (stage, label, artifact owed, owning persona,
-intent folder, branch, and the one-line brief the session is handed)
-and starts that session; where a persona's pinned harness cannot be
-started for you it prints the equivalent instruction and exits cleanly.
-It refuses, before anything starts, when the item is on hold, closed,
-blocked, claimed by another actor, or in contradictory state. Full
-contract: [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`.
+`<n>` is an issue or pull request number. The script prints what it
+resolved (stage, artifact owed, owning persona, branch, the one-line
+brief the session is handed) and starts that session; where a
+persona's pinned harness cannot be started for you it prints the
+equivalent instruction and exits. It refuses, before anything starts,
+when the item is on hold, closed, blocked, claimed by another actor or
+in contradictory state. Because the review rung has two owners it
+prints both instructions and launches neither unless you name one.
+Full contract: [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`.
 
-## What happens at each gate
-
-**Plan.** Athena writes `intent.md` into `intent/<n>-<slug>/`: problem,
-outcome, constraints, open questions. Merging it moves the item to
-design.
-
-**Design.** Athena turns that into `spec.md` — numbered decisions with
-rationale plus an acceptance list, approved only with no open question
-left. Merging it moves the item to build.
-
-**Build.** Daedalus writes `plan.md`: the order of work and the check
-proving each decision landed. Merging it moves the item to implement.
-
-**Implement.** Odyssey writes the code and the tests against that plan.
-Merging that pull request moves the item to review.
-
-**Review.** Two reviewers read the change and post findings; this rung
-ends the ladder and the human closes the item. Which label means which rung,
-and what each posts, is [`docs/SPEC.md`](docs/SPEC.md) `lifecycle.labels`.
-
-The transition itself is a deterministic workflow with no model call:
-on a merge to the default branch it reads which artifact file was
-added, looks the next stage up in `personas/lifecycle.json`, moves the
-label and posts a stamped comment. The merge is the gate; the label is
-its shadow.
-
-## What you merge
-
-A merged pull request is the human product owner's acceptance of the
-artifact it carries — the whole meaning of the gate, and the same
-meaning at all five rungs. A closed pull request is a rejection, and a
-rejection is not relitigated. When a decision in the artifact is wrong,
-**edit it in the pull request**: the edited row *is* the decision, so
-you never comment asking for a change and wait for a session to make
-it. You are the sole merge authority on every path. See [REVIEW.md,
-"Merge is the escape hatch"](REVIEW.md#merge-is-the-escape-hatch).
-
-## Review
-
-Two independent reviewers read every implementing pull request, pinned
-to different model families so a blind spot in one is not a blind spot
-in both. Which family backs which reviewer is a fact in `config/` and
-appears in no document, prompt or persona source: a reviewer's identity
-is its role, its finding namespace and its account. Both are
-comment-only — neither approves, merges, closes, nor edits a label.
-
-Until the automation lands, review is dispatched by hand like every
-other rung: the one command, on the pull request number. Because that
-rung has two owners it prints both instructions and launches neither
-unless you name one with `--as <persona>`. The protocol — severity
-tiers, the round funnel, the ledger, consensus — is
-[REVIEW.md](REVIEW.md), as `review.policy` in [`docs/SPEC.md`](docs/SPEC.md).
-
-## When something is wrong
-
-`hold` halts all automation absolutely while it is present; it is the
-circuit breaker and nothing steps past it. `blocked` means a session
-stopped and reported rather than guessed. More than one `status:*`
-label is corrupted state rather than a state, and is reported, never
-guessed at. A third reviewer iteration, `review:3`, escalates the item
-to `status:review-stuck` for a human. Each label's semantics are
-[`docs/SPEC.md`](docs/SPEC.md) `lifecycle.labels`.
-
-When merged work turns out to be wrong, file the defect as its own
-issue. If its `docs/SPEC.md` entry is unchanged, the repair skips the
-intent/spec/plan triple: issue, fix pull request with a regression
-check, review, human merge. A repair that changes a spec entry is a
-change, and re-enters at plan. Ratified on #32; the rule is stated
-normatively in [INTENT.md, "Defect repair"](INTENT.md).
+What your merge means is the same at every gate. A merged pull
+request is the product owner's acceptance of the artifact it carries.
+A closed pull request is a rejection, and a rejection is not
+relitigated. When a decision in the artifact is wrong, edit it in the
+pull request: the edited row *is* the decision, so you never comment
+asking for a change and wait for a session to make it
+([REVIEW.md, "Merge is the escape hatch"](REVIEW.md#merge-is-the-escape-hatch)).
+Until the consensus merge lands, a human is the merge authority on
+every path.
 
 ## Where the rules actually live
 
-- [AGENTS.md](AGENTS.md) — the cross-harness standard every session
+- [AGENTS.md](AGENTS.md), the cross-harness standard every session
   reads: working the tracker, run folders, cost discipline, the tier
   ladder, the context ceiling.
-- [INTENT.md](INTENT.md) — why this system exists, what the workshop
-  sets out to prove, and the questions still open.
-- [`docs/SPEC.md`](docs/SPEC.md) — the living spec: what is built
+- [INTENT.md](INTENT.md), the founding intent: why this system exists,
+  what the workshop sets out to prove, and the questions still open.
+- [`docs/SPEC.md`](docs/SPEC.md), the living spec: what is built
   today, keyed by capability, and what is agreed but not yet built.
-  Trust it over memory.
-- [REVIEW.md](REVIEW.md) — the protocol both reviewers compile against.
-- [`docs/BLOG.md`](docs/BLOG.md) — the playbook this loop implements.
-- [`docs/CONTEXT.md`](docs/CONTEXT.md) — the prior art it was built on,
-  and what was adopted from each.
-- [`config/`](config/) — the only place a harness, vendor or model
-  family is named: tier bindings, deployment pins, tools.
-- The pinned tracker issue in this repository's issue tracker — the
-  live dashboard of the ladder. There is deliberately no status file.
+  Trust it over any narrative, this one included.
+- [REVIEW.md](REVIEW.md), the protocol both reviewers compile against.
+- [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md), the process, the field notes
+  and the play-by-play scorecard against the playbook;
+  [`docs/CRITICAL_PATH.md`](docs/CRITICAL_PATH.md), the live ordering.
+- [`docs/BLOG.md`](docs/BLOG.md), the playbook distilled;
+  [`docs/CONTEXT.md`](docs/CONTEXT.md), the prior art and what was
+  adopted from each.
+- [`config/`](config/), the only place a harness, vendor or model
+  family is named.
+- The pinned tracker issue (#12), the live dashboard of the ladder.
+  There is deliberately no status file.
 
 This file explains and never duplicates: it is normative for nothing,
 and wherever it and one of those documents disagree, the other is
-right. A new topic is a link from this section, or a deliberate
-addition to the section list in this document's own spec under
-`intent/`, never a drop-in section that list does not name.
+right. Its section list is governed by its own spec in
+[`intent/35-readme/`](intent/35-readme/spec.md), and grows only by
+editing that list.

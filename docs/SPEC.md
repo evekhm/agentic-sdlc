@@ -29,10 +29,12 @@ reading order, run-folder bookkeeping, living-spec rule, context and
 cost discipline, five-tier ladder, session handoff, tracker
 workflow). CLAUDE.md and GEMINI.md are thin harness adapters that add
 only harness-specific mechanics. INTENT.md is the founding
-system-level intent (change #0). `README.md` is the operator-facing
-entry point (#35, `intent/35-readme/`): it addresses one reader, the
-operator at the keyboard, and never an agent — no compiled prompt
-points an agent at it. It explains and never duplicates, so every
+system-level intent (change #0). `README.md` is the entry point for
+a person arriving at the repository (#35, `intent/35-readme/`): it
+introduces the system as conceived — what it is, what it demonstrates,
+how it is being built, what it adds to the playbook — marking
+agreed-but-unbuilt seats and rungs with their issue, and it never
+addresses an agent — no compiled prompt points an agent at it. It explains and never duplicates, so every
 rule it mentions that is normative elsewhere is at most one sentence
 plus a link to its owner, it is normative for nothing itself, and
 wherever it and a document it links disagree the other one wins. It

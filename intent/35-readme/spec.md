@@ -25,33 +25,39 @@ replaced, migrated or deleted. This is the first version.
 ## Section list
 
 These `##` sections, in this order (D2; the fixed count was lifted
-2026-09-03, see D2/D4):
+2026-09-03, see D2/D4; the list was rewritten 2026-09-08 by the
+product owner, see D1, from an operator walkthrough into an
+introduction to the system — what it is, what it demonstrates, how it
+was and is being built, and what it adds to the playbook):
 
-1. **The loop in one picture** — what this repo is, and the diagram.
-2. **Why this exists** — the playbook made concrete, one workflow with
-   each harness where it fits, the workshop (added 2026-09-03).
-3. **The cast** — the six personas, the sub-agents, tiers, the
-   compiler (added 2026-09-03).
-4. **How it builds itself** — the bootstrap ladder and the
-   self-hosting rule (added 2026-09-03).
-5. **Before you start** — clone, the six App private keys, `gh`, `jq`.
-6. **File the change** — and who may file (the intake rule, D9).
-7. **Type the number** — the one command (D5).
-8. **What happens at each gate** — the five rungs, one short
-   paragraph each, and the deterministic transition.
-9. **What you merge** — the gate is the acceptance (D8).
-10. **Review** — two reviewers, two model families, by hand today.
-11. **When something is wrong** — the halt labels and the defect path.
-12. **Where the rules actually live** — the document map (D3).
+1. **What this repository is** — the story of one change through the
+   loop, the diagram, and the self-building premise.
+2. **The playbook, and what this adds to it** — the six-stage loop as
+   the article states it, and the five additions this repository
+   makes on top of it.
+3. **The loop, stage by stage** — plan, design, build, implement,
+   review and maintain in prose (D7), the deterministic transition,
+   the halt labels and the defect path (D10).
+4. **The cast** — the personas built and the seats agreed, the
+   sub-agents, tiers, the compiler.
+5. **Distrust is structural** — the mechanisms that hold without
+   anyone's attention, and the field notes they came from.
+6. **How it built itself, and where it stands** — the bootstrap
+   ladder, the critical-path gates, and the end state.
+7. **What it costs, and how we know** — the cost discipline and the
+   measurement subsystem, built and agreed.
+8. **Running it yourself** — prerequisites (D11), who may file (D9),
+   the one command (D5), what a merge means (D8).
+9. **Where the rules actually live** — the document map (D3).
 
 (#68 / PR #69 adds a read-only board section, "See who is doing what",
-between 10 and 11 when it lands; that PR extends this list.)
+after 8 when it lands; that PR extends this list.)
 
 ## Decisions
 
 | ID | Decision |
 |----|----------|
-| D1 | **One reader: the operator at the keyboard.** README addresses the presenter or attendee who has already cloned the repo and holds the six App private keys — not a contributor, not an agent. Agents are pointed at AGENTS.md by their compiled prompts and must never be told to read README; a document with two audiences acquires two voices and then two truths. Testable: the opening paragraph names that reader, and no sentence in the file instructs an agent. |
+| D1 | **One reader: a person arriving at the repository.** *Amended 2026-09-08 by the product owner: the reader is no longer "the operator at the keyboard" and README no longer opens by addressing them.* README introduces the system to anyone who lands on it — an attendee, an engineer evaluating the approach, the presenter — as a story of what the system is, what it demonstrates and how it is being built, and never an agent. Agents are pointed at AGENTS.md by their compiled prompts and must never be told to read README; a document with two audiences acquires two voices and then two truths. README describes the system as conceived, so seats and rungs that are agreed on the tracker but not yet built appear in it, each marked as such with its issue. Testable: the opening does not address the reader by role, no sentence in the file instructs an agent, and every capability README names as not yet built cites an issue. |
 | D2 | **The section list above is ordered, and grows only by editing it.** *Amended 2026-09-03 by the product owner together with D4: the fixed count of nine is lifted.* Headings appear in the listed order and none is nested deeper than `###`; a new topic is either a link from the last section or a deliberate addition to the list above in the same change — never a drop-in section the list does not name, which is the mechanism that stops the welcome document from becoming a fourth standard (AGENTS.md, "No document sprawl"). Testable: every `## ` heading in README.md appears in the list above, in order. |
 | D3 | **Explains, never duplicates; and loses every disagreement.** Every rule README mentions that is stated normatively elsewhere appears as at most one sentence plus a link to its owner: AGENTS.md (the cross-harness standard), INTENT.md (why the system exists), `docs/SPEC.md` (what is built today), REVIEW.md (the review protocol), `docs/CONTEXT.md` (prior art), `scripts/auth/README.md` and `scripts/setup/` (setup). README is normative for nothing and says so in one line: where it and any of those differ, the other wins (`docs.structure`). Testable: README contains no table (`grep -c '^|' README.md` is 0), no label-semantics list, and no severity-tier list; every rule sentence is followed by a link. |
 | D4 | **At most one diagram.** *Superseded in part 2026-09-03 by the product owner: the original 150-line ceiling and 25-line section limit are lifted; no line or section-length cap applies.* Original rationale, kept for the record: a walkthrough an attendee will not finish is a transcript with a filename. Testable now: exactly one fenced diagram block. |
@@ -82,19 +88,21 @@ between 10 and 11 when it lands; that PR extends this list.)
   model-family name or model ID appears anywhere in the file (D5, D6).
 - `bash scripts/ci/sanitize_check.sh` exits 0 with README tracked, and
   README contains no absolute home path (D6).
-- Section 3 states that humans file, that no persona — Atlas included
+- Section 8 states that humans file, that no persona — Atlas included
   — files intake issues, and that every issue starts `intent:new` with
-  no `status:*`; it links AGENTS.md (D9).
-- Section 6 states all three clauses: merge is acceptance, a closed PR
+  no `status:*`; it links AGENTS.md (D9). (Section numbers in this
+  list follow the 2026-09-08 section list.)
+- Section 8 states all three clauses: merge is acceptance, a closed PR
   is a rejection not relitigated, and an edit at the gate is the
   decision (D8).
-- Section 7 describes two independent reviewers on different model
-  families without naming either family, and states the manual path as
-  running the one command on the PR number, which prints both
-  instructions and launches neither without `--as <persona>` (#36 D9).
-- The defect section states the ratified repair path (spec-unchanged
-  repair skips the triple; spec-changing repair re-enters at plan),
-  cites #32 and links INTENT.md (D10).
+- Sections 2 and 4 describe two independent reviewers on different
+  model families without naming either family, and section 8 states
+  the manual path as running the one command on the PR number, which
+  prints both instructions and launches neither without a named
+  persona (#36 D9).
+- Section 3 states the ratified repair path (spec-unchanged repair
+  skips the triple; spec-changing repair re-enters at plan), cites #32
+  and links INTENT.md (D10).
 - Section 9 links AGENTS.md, INTENT.md, `docs/SPEC.md`, REVIEW.md and
   `docs/CONTEXT.md`, one sentence each, and states that README loses
   any disagreement with them (D3).
