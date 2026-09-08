@@ -19,12 +19,42 @@ jobs:
       checks: read
       statuses: read
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted ref
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.base_ref || 'main' }}
           fetch-depth: 0
+
+      - name: Generate token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.MERGE_ACTOR_APP_ID }}
+          private-key: ${{ secrets.MERGE_ACTOR_APP_PRIVATE_KEY }}
+
       - name: Run merge gate
         env:
-          MERGE_ACTOR_APP_PRIVATE_KEY: ${{ secrets.MERGE_ACTOR_APP_PRIVATE_KEY }}
-          MERGE_ACTOR_APP_ID: ${{ secrets.MERGE_ACTOR_APP_ID }}
-        run: bash scripts/ci/merge_gate.sh
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          TARGET=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            TARGET="${{ github.event.pull_request.number }}"
+          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
+            TARGET="${{ github.event.issue.number }}"
+          elif [ "${{ github.event_name }}" = "check_suite" ]; then
+            TARGET=$(gh api repos/${{ github.repository }}/commits/${{ github.event.check_suite.head_sha }}/pulls -q '.[0].number' 2>/dev/null || true)
+          elif [ "${{ github.event_name }}" = "status" ]; then
+            TARGET=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls -q '.[0].number' 2>/dev/null || true)
+          fi
+          
+          if [ -z "$TARGET" ] || [ "$TARGET" = "null" ]; then
+            echo "No PR target resolved for this event. Exiting."
+            exit 0
+          fi
+          
+          if [ ! -f scripts/ci/merge_gate.sh ]; then
+            echo "scripts/ci/merge_gate.sh not found on trusted ref, skipping."
+            exit 0
+          fi
+          
+          bash scripts/ci/merge_gate.sh "$TARGET"

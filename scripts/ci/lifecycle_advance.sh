@@ -857,22 +857,31 @@ $marker"
         remove="${remove:+$remove,}intent:new"
     fi
 
-    # D14 Monotonic progress check
-    # For now, stub the highest merged rank as 0 if loop ledger is absent.
-    HIGHEST_MERGED_RANK=0
-    # Search for <!-- loop-ledger:
-    LEDGER_COMMENT=$(echo "$recent" | grep -A 1000 "<!-- loop-ledger:$issue -->" || true)
-    if [[ -n "$LEDGER_COMMENT" ]]; then
-        # very naive parse of the ledger for highest rank
-        # We will assume it's valid.
-        HIGHEST_MERGED_RANK=$(echo "$LEDGER_COMMENT" | grep -o "rank:[0-9]*" | cut -d: -f2 | sort -nr | head -1 || echo 0)
+# D14 Monotonic progress check
+    # Locate ledger by paginating exhaustively (D13)
+    ALL_COMMENTS="$(gh api --paginate "repos/$GITHUB_REPO/issues/$issue/comments" -q '.[].body' 2>/dev/null)" || {
+        fail_issue "could not read comments for #$issue to find loop ledger"
+        continue
+    }
+    
+    LEDGER_COMMENT="$(echo "$ALL_COMMENTS" | awk '/<!-- loop-ledger:'"$issue"' -->/{flag=1; print; next} /<!-- loop-ledger-end -->/{if(flag){print; flag=0; next}} flag' || true)"
+    
+    if [[ -z "$LEDGER_COMMENT" ]]; then
+        HIGHEST_MERGED_RANK=0
+    else
+        HIGHEST_MERGED_RANK=$(echo "$LEDGER_COMMENT" | grep -oE 'rung:[0-9]+' | grep -oE '[0-9]+' | sort -nr | head -1 || echo 0)
     fi
+    if [[ -z "$HIGHEST_MERGED_RANK" ]]; then HIGHEST_MERGED_RANK=0; fi
 
-    if [[ "$target_rank" -lt "$HIGHEST_MERGED_RANK" ]]; then
+if [[ "$target_rank" -gt 0 && "$target_rank" -eq "$HIGHEST_MERGED_RANK" ]] && echo "$LEDGER_COMMENT" | grep -qF "head-oid:$AFTER"; then
+        log "    #$issue is already recorded at rank $target_rank for head $AFTER — idempotent green exit"
+        continue
+    elif [[ "$target_rank" -lt "$HIGHEST_MERGED_RANK" ]] || ( [[ "$target_rank" -gt 0 && "$target_rank" -eq "$HIGHEST_MERGED_RANK" ]] && ! echo "$LEDGER_COMMENT" | grep -qF "head-oid:$AFTER" ); then
         echo "::error::lifecycle_advance: refusal reason-code: non-monotonic for #$issue" >&2
         fail_issue "refusal reason-code: non-monotonic for #$issue"
-        # Write refusal row to ledger (stubbed)
-        post_comment "$issue" "<!-- loop-ledger-row: refusal:non-monotonic ... -->" || true
+        # Write refusal row to ledger
+        post_comment "$issue" "<!-- loop-ledger-row: refusal:non-monotonic rung:$target_rank head-oid:$AFTER pr:${BEST_PR[$issue]:-} -->" || true
+        bash "$REPO_ROOT/scripts/ci/escalate.sh" "$issue" --reason "non-monotonic" --head "$AFTER" 2>/dev/null || true
         continue
     fi
 
@@ -891,9 +900,22 @@ $marker"
         continue
     fi
 
-    # Determine persona from the rung
-    PERSONA=$(jq -r --arg a "$stage.md" '.stages[] | select(.artifact == $a) | .owner // empty' "$LIFECYCLE_JSON" 2>/dev/null || true)
+# Determine persona from the rung by scanning personas/*.yaml for the NEW stage
+    NEW_STAGE=$(jq -r --arg t "$target" '.stages[] | select(.label == $t) | .stage' "$LIFECYCLE_JSON" 2>/dev/null || true)
+    PERSONA=""
+    if [[ -n "$NEW_STAGE" && "$NEW_STAGE" != "null" ]]; then
+        for p_file in "$REPO_ROOT"/personas/*.yaml; do
+            if grep -q "kind: persona" "$p_file" 2>/dev/null; then
+                if python3 -c "import sys, yaml; d=yaml.safe_load(open(sys.argv[1])); sys.exit(0 if sys.argv[2] in d.get('stage', []) else 1)" "$p_file" "$NEW_STAGE" 2>/dev/null; then
+                    PERSONA=$(basename "$p_file" .yaml)
+                    break
+                fi
+            fi
+        done
+    fi
+
     if [[ -n "$PERSONA" ]]; then
+
         BINDING=$(python3 "$REPO_ROOT/scripts/ops/execution.py" --binding "$PERSONA" 2>/dev/null || true)
         if echo "$BINDING" | grep -q "^ladder "; then
             PLACEMENT=$(echo "$BINDING" | awk '{print $2}')

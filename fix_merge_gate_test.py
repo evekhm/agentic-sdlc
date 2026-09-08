@@ -1,80 +1,7 @@
-#!/usr/bin/env bash
-# Tests for scripts/ci/merge_gate.sh (#64)
+import sys
+content = open('scripts/ci/tests/merge_gate_test.sh').read()
 
-set -euo pipefail
-
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-MERGE_GATE="$REPO/scripts/ci/merge_gate.sh"
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-
-pass() { echo "PASS: $*"; }
-fail() { echo "FAIL: $*" >&2; exit 1; }
-banner() { printf '\n--- %s\n' "$*"; }
-
-mkdir -p "$WORK/bin"
-export PATH="$WORK/bin:$PATH"
-export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
-
-# stubs
-for tool in claude gemini agy curl; do
-  cat > "$WORK/bin/$tool" <<STUB
-#!/usr/bin/env bash
-echo "\$tool stub called" >&2
-exit 1
-STUB
-  chmod +x "$WORK/bin/$tool"
-done
-
-cat > "$WORK/bin/gh" <<'STUB'
-#!/usr/bin/env bash
-if [[ "$*" == *"pr view"* ]]; then
-  echo '{"number":123,"body":"Refs #456","baseRefName":"main","headRepository":{"nameWithOwner":"evekhm/agentic-sdlc"},"author":{"login":"someone"},"statusCheckRollup":{"state":"SUCCESS"}}'
-  exit 0
-fi
-if [[ "$*" == *"issue view"* ]]; then
-  echo '{"labels":[]}'
-  exit 0
-fi
-if [[ "$*" == *"api"* ]]; then
-  echo '[]'
-  exit 0
-fi
-STUB
-chmod +x "$WORK/bin/gh"
-
-cat > "$WORK/bin/python3" <<'STUB'
-#!/usr/bin/env bash
-if [[ "$*" == *"--loop max_rung_dispatches_per_issue"* ]]; then
-  echo "12"
-  exit 0
-fi
-if [[ "$*" == *"--loop max_cost_usd_per_issue"* ]]; then
-  echo "50.00"
-  exit 0
-fi
-if [[ "$*" == *"--loop autonomous_merge"* ]]; then
-  echo "true"
-  exit 0
-fi
-# fallback to real python3
-exec /usr/bin/python3 "$@"
-STUB
-chmod +x "$WORK/bin/python3"
-
-if [ ! -f "$MERGE_GATE" ]; then
-  fail "merge_gate.sh does not exist"
-fi
-
-# Dry run test
-export DRY_RUN=1
-bash "$MERGE_GATE" 123 2> stderr.log || true
-if ! grep -q "Decline: Consensus ledger missing" stderr.log; then
-  cat stderr.log >&2
-  fail "Failed to decline on missing consensus ledger"
-fi
-pass "Dry run works and fails closed on missing consensus ledger"
-
+replacement = """
 # R1-9 test gaps
 # 1. Missing limits
 cat > "$WORK/bin/python3" <<'STUB'
@@ -175,7 +102,7 @@ if [[ "$*" == *"pr view"* ]]; then
 fi
 if [[ "$*" == *"issue view"* ]]; then echo '{"labels":[]}'; exit 0; fi
 if [[ "$*" == *"api"* ]]; then
-  echo -e "<!-- loop-ledger:456 -->\n<!-- loop-ledger-row: dispatch: 1 ... -->\n<!-- loop-ledger-row: dispatch: 2 ... -->\n<!-- loop-ledger-row: dispatch: 3 ... -->\n<!-- loop-ledger-row: dispatch: 4 ... -->\n<!-- loop-ledger-row: dispatch: 5 ... -->\n<!-- loop-ledger-row: dispatch: 6 ... -->\n<!-- loop-ledger-row: dispatch: 7 ... -->\n<!-- loop-ledger-row: dispatch: 8 ... -->\n<!-- loop-ledger-row: dispatch: 9 ... -->\n<!-- loop-ledger-row: dispatch: 10 ... -->\n<!-- loop-ledger-row: dispatch: 11 ... -->\n<!-- loop-ledger-row: dispatch: 12 ... -->\n"
+  echo '["<!-- loop-ledger:456 -->\\n<!-- loop-ledger-row: dispatch: 1 ... -->\\n<!-- loop-ledger-row: dispatch: 2 ... -->\\n<!-- loop-ledger-row: dispatch: 3 ... -->\\n<!-- loop-ledger-row: dispatch: 4 ... -->\\n<!-- loop-ledger-row: dispatch: 5 ... -->\\n<!-- loop-ledger-row: dispatch: 6 ... -->\\n<!-- loop-ledger-row: dispatch: 7 ... -->\\n<!-- loop-ledger-row: dispatch: 8 ... -->\\n<!-- loop-ledger-row: dispatch: 9 ... -->\\n<!-- loop-ledger-row: dispatch: 10 ... -->\\n<!-- loop-ledger-row: dispatch: 11 ... -->\\n<!-- loop-ledger-row: dispatch: 12 ... -->"]'
   exit 0
 fi
 if [[ "$*" == *"issue comment"* ]]; then exit 0; fi
@@ -187,5 +114,11 @@ if ! grep -q "max_rung_dispatches_per_issue exceeded" stderr.log; then
 fi
 pass "Halts on budget exceeded"
 
-echo "merge_gate_test.sh: all scenarios passed"
-exit 0
+"""
+
+start_idx = content.find("echo \"merge_gate_test.sh: all scenarios passed\"")
+
+new_content = content[:start_idx] + replacement.strip() + "\n\n" + content[start_idx:]
+
+with open('scripts/ci/tests/merge_gate_test.sh', 'w') as f:
+    f.write(new_content)
