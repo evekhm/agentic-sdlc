@@ -12,7 +12,7 @@ file is the live ordering under it. The advisor seat owns both; update
 this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line.
 
-Status line: 2026-09-08, revision four (~08:00 UTC). Live `gh issue
+Status line: 2026-09-08, revision four (~06:45 UTC). Live `gh issue
 list` state always beats this file.
 
 ## Gate 1: unattended review runs on every rung — MET 2026-09-08
@@ -46,12 +46,16 @@ earlier framing: the "not met" text above implied 1b would be
 measured only after #207 *lands* (merges), but `unattended.yml` checks
 out the PR head, so a work.sh fix decides its own review dispatch —
 "after it merges" was the wrong horizon for that class of change; the
-review ran, and counted, on #207's own open PR.
+review ran, and counted, on #207's own open PR. Confirmed on a PR
+other than the fixing one: run 34194196957, job 101958310240, on PR
+#235 (the #64 plan, cut after #233 merged) logs the same stage and
+claim lines, a claude `end_turn` at 2.33 USD, and the round-1 argus
+comment 5580331864 at 06:27:45 inside the job window.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | 1 | #207 | The claim mutex refuses every ladder PR's review for its whole open window, and the derived stage is never `review`. Two walls; 1b is measurable only after this lands. | implementation PR #233 merged ec18f8d 05:41 UTC 2026-09-08; issue at status:in-review, claim released. Nothing closes it unattended yet (that is #148), so the operator closes it by hand |
-| 2 | #167 | atlas could not see its model on the runner; every atlas job died at launch until the credential path was repaired. | done: PR #221 (fix/167-agy-adc-credential) merged 06:09 UTC 2026-09-08, issue closed, PR #215 closed as superseded. Datum: atlas job 101933518377 on PR #221 itself succeeded with a real model call (agy, gemini-3.1-pro-low-thinking, round-3 comment 04:07:40 under evekhm-atlas-app), so both runner reviewers now run unattended |
+| 2 | #167 | atlas could not see its model on the runner; every atlas job died at launch until the credential path was repaired. | done: PR #221 (fix/167-agy-adc-credential) merged 06:09 UTC 2026-09-08, issue closed, PR #215 closed as superseded. Datum: atlas job 101933518377 on PR #221 itself succeeded with a real model call (agy, gemini-3.1-pro-low-thinking, round-3 comment 04:07:40 under evekhm-atlas-app), so both runner reviewers now run unattended. Atlas has since refused the ladder PR #235 at the persona layer (ISSUE_ATLAS), so 'both reviewers run unattended' holds on argus for ladder PRs and on atlas only for PRs whose issue carries no claim |
 | 3 | #169 | jsonschema is missing on the runner, so a persona cannot run the compiler gate. | done: PR #214 merged 07:50, issue closed |
 | 4 | #168 | Permission posture for a persona on a CI runner: bypass or allowlist. An operator decision, not a build. | open, intent:new |
 | 5 | #191 | Claims land under the bare human login. Identity as a hard claim-time parameter; needed before any board reading is trustworthy. | open |
@@ -78,9 +82,12 @@ That is the first measured datum for the cheap-model story.
 evekhm-daedalus-app on gemini-3.1-pro-low-thinking, one file,
 intent/64-autonomous-loop/plan.md, +158). Argus posted round 1
 unattended at 06:27 (reviewed-head 09d1bc1 against the plan's own base
-pin bf78de9); the atlas check is green with no comment at write time,
-and the verifier decides from the job log whether that was a review or
-a refusal. The verifier is briefed to be strict on this PR: it is the
+pin bf78de9); the atlas check is green but the job (101958310297) is a refusal at
+the persona layer: the compiled resume protocol's refusals 5 (mutex
+held by daedalus) and 6 (stage owned by daedalus) fire even though
+work.sh bypassed the claim, so only one runner reviewer can reach this
+PR and the verifier's own review is the second voice under #204. That
+defect is filed as ISSUE_ATLAS. The verifier is briefed to be strict on this PR: it is the
 plan under which merge becomes a decision, so its acceptance rows are
 the gate.
 
@@ -103,7 +110,7 @@ whichever merges second rebases.
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | 6 | #147 | `mode:autonomous` and per-issue override labels honored by work.sh, unattended.yml and the driver. The switch itself. | open, intent:new |
-| 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | PR #232 open (evekhm-odyssey-bot, odyssey/108-ci-spend-ceiling), head 77501a8 after three follow-ups (ceiling header, the docs/SPEC.md twin, the measured-run count). Verifier escalated 07:20 (comment 5580232140); advisor ruling: merges after the B1 clause fix, a rebase and real reviews, and the 8.00 ceiling is the operator's number (not objected to). Two overrun data live on it: 2.75 (argus on PR #233, run 34186361378) and 2.28 (argus on PR #221) against the declared 2.0. Argus refused the PR at 06:26 because #108 is intent:new with no review stage to derive (the #82 class), so under the #221 precedent the verifier's own review under the argus seat (#204 D15) is the review of record |
+| 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | PR #232 open (evekhm-odyssey-bot, odyssey/108-ci-spend-ceiling), head 77501a8 after three follow-ups (ceiling header, the docs/SPEC.md twin, the measured-run count). Verifier escalated 06:18 (comment 5580232140); advisor ruling: merges after the B1 clause fix, a rebase and real reviews, and the 8.00 ceiling is the operator's number (not objected to). Three overrun data live on it: 2.75 (argus on PR #233, run 34186361378), 2.28 (argus on PR #221) and 2.33 (argus on PR #235, run 34194196957) against the declared 2.0; across six measured argus runs the ceiling has never bound. Argus refused the PR at 06:26 because #108 is intent:new with no review stage to derive (the #82 class), so under the #221 precedent the verifier's own review under the argus seat (#204 D15) is the review of record |
 | 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at status:build with the agy-64 daedalus claim; plan PR #235 open (keystone paragraph above). #151 closed; PR #228 merged 05:45 UTC 2026-09-08 |
 | 9 | #148 | A deterministic closer after review. Removes the last by-hand step. Today's by-hand closes (#207 at status:in-review with its PR merged) are exactly what it removes. | open, intent:new |
 
@@ -154,8 +161,7 @@ Needed for the demo story, not for the mechanism.
   (plan T3); until then the seat runs by hand from a local charter
   file on claude-fable-5-1.
 - **#204** (verifier as the review stage of `argus`): spec PR #211
-  open, mergeable, in the verifier queue after #232. Blocks nothing
-  above.
+  merged 27bf420c 06:30 UTC 2026-09-08. Blocks nothing above.
 
 ## Decisions only the operator can make
 

@@ -469,7 +469,7 @@ structural — in files, gates, and an independent reviewer — rather
 than in anyone's attention.
 
 ---
-Status snapshot (2026-09-08, ~08:00 UTC): gate 1 met, both halves.
+Status snapshot (2026-09-08, ~06:45 UTC): gate 1 met, both halves.
 1a on PR #188 (argus, 2026-09-07), 1b on PR #233 itself (#207's
 implementation, run 34186361378), and atlas's first real unattended
 model call on PR #221 (#167 fix, job 101933518377, agy on
@@ -477,7 +477,9 @@ gemini-3.1-pro-low-thinking). The first agy wave (five sessions,
 04:06–04:16 UTC, launched by hand from a machine-local launcher)
 produced five PRs that all merged on verifier review by 06:09: #233
 (#207), #228 (#151, the #64 spec amendment), #229 (#98 spec), #230
-(#68 spec), #231 (#85 spec). Gate 2 is open: the #64 plan PR #235 is
+(#68 spec), #231 (#85 spec). Atlas's compiled resume protocol still
+refuses ladder PRs whose rung is claimed (refusals 5 and 6), seen on
+PR #235; filed as ISSUE_ATLAS. Gate 2 is open: the #64 plan PR #235 is
 up with an unattended argus round 1, the #216 fix PR #237 and the
 #108 ceiling PR #232 are in the verifier queue, and the wave-3 plan
 rungs for #98 and #68 are ready to launch. Filed today by the
