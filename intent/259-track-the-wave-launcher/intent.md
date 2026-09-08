@@ -161,8 +161,9 @@ launch of one row recorded in a run folder.
   `config/execution.yaml`** — read, never copied; possibly a new data
   file beside them.
 - **`scripts/ops/tests/`**, **`scripts/ci/sanitize_check.sh`** — the
-  untracked scripts carry `$HOME/.secrets/...` and `~/projects/...`
-  literals that the sanitize gate's `home` rule rejects; the tracked
+  untracked scripts carry hard-coded home-directory paths to the
+  operator PAT and to the checkout, which the sanitize gate's `home`
+  rule rejects; the tracked
   form resolves the operator PAT and the repo root the way `claim.sh`
   and `work.sh` do.
 - **`scripts/ci/lifecycle_advance.sh`** (`#64` D16/D17) — the
