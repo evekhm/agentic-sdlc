@@ -74,18 +74,20 @@ thinks at, and the GitHub identity it acts as.
 - **Odyssey, the implementer.** Writes the code that makes the tests
   pass. Starts at a pinned commit in its own branch namespace. One
   pull request per rung. Implementation tier.
-- **Atlas, the reviewer of everything.** Reads every pull request at
-  every rung on Gemini, the cheap seat. Posts findings with severity
-  and ids. Never approves, merges, closes or edits a label. Review
-  tier.
-- **Argus, the deep reviewer.** Joins at the code gate, on any change
-  to a trust-bearing path, and on a `review:deep` grant. Runs the same
-  protocol on Claude, the other family. At the code gate it is the
-  verifier: it re-runs every gate, mutation-tests the tests, and reads
-  the job log behind every green check. Comment-only like Atlas.
-  Review tier
-  ([#265](https://github.com/evekhm/agentic-sdlc/issues/265),
-  [#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
+- **Atlas, the reviewer and verifier of every gate.** Reads every pull
+  request at every rung on Gemini, the cheap seat. Posts findings with
+  severity and ids. Runs the verification checklist for the rung: the
+  intent lost nothing from the issue, the spec has no open question and
+  every acceptance row is runnable, the contract tests fail before the
+  code exists, the job log behind every green check says what the
+  check claims. Never approves, merges, closes or edits a label. Review
+  tier ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
+- **Argus, the second family at the code gate.** Joins at the implement
+  rung, on any change to a trust-bearing path, and on a `review:deep`
+  grant. Runs the same protocol on Claude, the other family, plus the
+  deep checks: mutation-tests the tests, re-runs the gates, reads the
+  diff in full. Comment-only like Atlas. Review tier
+  ([#265](https://github.com/evekhm/agentic-sdlc/issues/265)).
 - **The merge identity.** Merges in autonomous mode when the assigned
   reviewers are clean. It belongs to no persona, so no persona merges
   its own work
@@ -143,9 +145,14 @@ checks that compiled files match their sources, that nothing leaks a
 credential or a path, and that the living spec was updated.
 
 **Review.** Atlas reads every pull request against
-[REVIEW.md](REVIEW.md) and posts findings with severity and ids. Argus
-joins at the code gate, on trust-bearing paths, and on a `review:deep`
-grant. Any persona may apply that grant when the change meets a named
+[REVIEW.md](REVIEW.md), posts findings with severity and ids, and runs
+the verification checklist for the rung: at plan, the intent carries
+every item from the issue; at design, no open question and every
+acceptance row runnable; at build, the contract tests fail; at
+implement, the job log behind every green check says what the check
+claims ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
+Argus joins at the code gate, on trust-bearing paths, and on a
+`review:deep` grant, and adds the deep checks there. Any persona may apply that grant when the change meets a named
 criterion: privileged operations, a plan deviation, a large diff, an
 escalated tier, a second review round. The grant is consumed on use.
 A push re-triggers a review only when a reviewer has an open finding
@@ -199,9 +206,9 @@ The playbook keeps a human at every merge. Autonomous mode goes one
 step further: consensus between two model families reaches the
 default branch
 ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)). Three
-seats make that safe. Nestor holds the judgment. Argus at the code
-gate checks the evidence. Cassandra refills the backlog from
-measurements.
+seats make that safe. Nestor holds the judgment. Atlas verifies every
+gate and Argus adds a second family at the code gate. Cassandra
+refills the backlog from measurements.
 
 Dispatch has one door. Inside a harness session the instruction is
 `/work <n>`. The command resolves the number to its rung and owning
@@ -292,7 +299,7 @@ Registering the Apps is [`scripts/auth/README.md`](scripts/auth/README.md).
 Labels and backlog come from [`scripts/setup/`](scripts/setup/).
 
 Anyone files issues, and the system files its own: Cassandra's
-watchers when a control band breaks, and the verifier and the advisor
+watchers when a control band breaks, and the reviewers and the advisor
 when a rung goes wrong. Search the tracker first
 ([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)).
 A reviewer keeps its findings on the pull request it reviews. State
