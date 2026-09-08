@@ -4,6 +4,22 @@
 **Author:** athena (`evekhm-athena-app[bot]`) ·
 **Open questions:** none
 
+## Amendment r1 (2026-09-08)
+
+The round-3 review raised two high findings (R3-1, R3-2) and one normal finding (AT-6):
+- **R3-1** (Argus, high): the `consensus-timeout` escalation path has no trigger. D3's event list is closed, `escalate.sh` has exactly two callers, and the deadline sweep that detects a stale or missing reviewer verdict is explicitly out of scope for #64 because it is #8/#9's work.
+- **R3-2** (Argus, high): the two new state-carrying comment types this spec introduces, the escalation marker and the loop ledger, have no author-matching rule.
+- **AT-6** (Atlas, normal): the permission-key spelling trap.
+
+**AT-6 is closed as no-action.** D4 already uses the underscore spelling for the App manifest and acceptance 19 the hyphenated spelling for workflow `permissions:`, so the scenario does not apply.
+
+**D3, D8, D9, and D13** are unchanged in text and only qualified by the new decisions below.
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| D21 | **The deadline sweep trigger is #8/#9's work.** The `consensus-timeout` escalation this spec describes has no trigger and no caller until the recorder (#8/#9) lands. No timeout escalation exists today. | Resolves R3-1. A caveat naming #8/#9 as the owner of the sweep trigger. |
+| D22 | **Trusted writers.** The trusted writer identities for the escalation marker and for the loop ledger are the merge actor (D4) and `github-actions[bot]`. The identity is checked before either comment is treated as state. | Resolves R3-2. Provides the author-matching rule called for by REVIEW.md's fork-gate policy. |
+
 The accepted intent (`intent.md`, merged in 0b15da4) carried five Open
 questions, a per-issue ceiling, and a monotonic-progress invariant to
 this rung. No human was live in the design session, so each is
