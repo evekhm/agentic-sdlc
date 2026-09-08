@@ -58,6 +58,7 @@ closing_refs() {
 #   sets BRANCH_ISSUE  the issue number in an <actor>/<n>-<slug> head
 #                      branch, or empty when the branch does not match
 #        BRANCH_REF    that head branch, or empty
+#        PR_HEAD_REPO  the full name of the head repository, or empty
 #   returns non-zero only when the pull request cannot be READ
 #
 # The fallback when a pull-request body carries no closing keyword; one
@@ -73,8 +74,10 @@ branch_issue() {
     local pr_view head_ref
     BRANCH_ISSUE=""
     BRANCH_REF=""
+    PR_HEAD_REPO=""
     pr_view="$(gh_json "repos/$GITHUB_REPO/pulls/$1")" || return 1
     head_ref="$(jq -r '.head.ref // ""' <<<"$pr_view")"
+    PR_HEAD_REPO="$(jq -r '.head.repo.full_name // ""' <<<"$pr_view")"
     if [[ "$head_ref" =~ ^[a-z][a-z-]*/([0-9]+)- ]]; then
         BRANCH_REF="$head_ref"
         BRANCH_ISSUE="${BASH_REMATCH[1]}"
@@ -87,6 +90,7 @@ branch_issue() {
 #        ISSUE_JSON     the issue's API response
 #        IS_PR          1 when the input number was a pull request, else 0
 #        PR_JSON        the input's own API response when IS_PR=1
+#        PR_HEAD_REPO   the head repository of the input when IS_PR=1, empty when it could not be read
 #
 # A pull request is not the unit of work; the issue is (#36, D9). A
 # closing keyword and a same-repo `#<n>` in the body first, then the
@@ -99,6 +103,7 @@ resolve_issue() {
     ISSUE_JSON=""
     IS_PR=0
     PR_JSON=""
+    PR_HEAD_REPO=""
 
     if ! view="$(gh_json "repos/$GITHUB_REPO/issues/$number")"; then
         die "cannot read #$number from $GITHUB_REPO"
@@ -110,6 +115,13 @@ resolve_issue() {
 
     IS_PR=1
     PR_JSON="$view"
+    # #207 D1(c): the head repository is a conjunct of the review-dispatch
+    # predicate, and this is the read that already answers it on the
+    # fallback path below. Non-fatal here: a pulls read that fails leaves
+    # PR_HEAD_REPO empty, which is not a same-repository head, and the
+    # fallback's own `[ -n "$BRANCH_ISSUE" ] || die` still reports an
+    # unresolvable pull request with the message it always did.
+    branch_issue "$number" || true
     closes="$(closing_refs "$(jq -r '.body // ""' <<<"$view")")"
     closes_count=0
     [ -z "$closes" ] || closes_count="$(grep -c . <<<"$closes")"
@@ -123,7 +135,6 @@ resolve_issue() {
         ISSUE="$closes"
         RESOLVED_VIA="Closes #$ISSUE in the body"
     else
-        branch_issue "$number" || die "cannot resolve PR #$number to an issue"
         [ -n "$BRANCH_ISSUE" ] || die "cannot resolve PR #$number to an issue"
         ISSUE="$BRANCH_ISSUE"
         RESOLVED_VIA="the branch name $BRANCH_REF"
