@@ -120,9 +120,9 @@ keep raw material out of a persona's context.
 frontier. A persona names the grade its work needs. Each harness binds
 the grades to models in
 [`config/model_tiers.yaml`](config/model_tiers.yaml). On Claude Code:
-Haiku, Sonnet 5, Sonnet 5, Opus, Fable 5.1. On Antigravity: Gemini
-3.8 Flash for the first three, Gemini 3.1 Pro for review and frontier.
-A new model version is a one-line change in that file.
+Haiku, Sonnet 5, Sonnet 5, Opus, Fable 5.1. On Antigravity: Gemini 3.8
+Flash for every tier, graded by thinking level, low through high. A
+new model version is a one-line change in that file.
 
 ## The flow, rung by rung
 
@@ -267,18 +267,25 @@ different model families, enforced by a CI gate
 other pin is free choice. Repin either reviewer on its own — land
 both on the same family and their agreement stops meaning anything.
 
-The cost thesis, and where it points: Gemini Flash already carries
-the volume — specs, plans, implementation. Gemini Pro and Claude Opus
-review it. Claude Fable is spent only where judgment changes the
-outcome, at the spec gate and the advisor seat. Claude Code is doing
-more of that judgment today because the process is still being
-built: specs are still being tightened, gates are still being
+The cost thesis: a stage that is well specified and well gated can run
+on the cheapest capable model, and today every Antigravity tier does —
+one model line, Gemini 3.8 Flash, graded only by thinking level, low
+through high. That is the target: as more of a stage's judgment
+becomes a deterministic check, the pin for that stage can drop.
+
+The pin stays a free choice per persona. Athena and Daedalus are both
+Frontier tier, yet Athena runs on Claude Code's `claude-fable-5-1`
+($10.00 / $50.00) and Daedalus runs on Antigravity's
+`gemini-3.8-flash-high` ($0.75 / $3.75): the tier names the judgment a
+stage needs, the pin decides what meeting it costs. The choice runs
+open in both directions. Keep a seat like Nestor, the advisor, on the
+pricier model where a wrong call is expensive. Route a seat onto Flash
+once its process is specified well enough, the way Daedalus and Atlas
+already are. Claude Code carries more of the system's judgment today
+because the process is still being specified: gates are still being
 written, the compiler is still new. Each round of that work turns a
-judgment call into a deterministic check, and every check that lands
-moves the target further: a mature, fully specified process is one
-where the cheap, low-latency model is the right pin for most stages,
-and Claude Code's job shrinks to the plumbing that stood the process
-up.
+judgment call into a deterministic check, and each check that lands
+makes the cheap pin the safer choice for one more stage.
 
 List rates, $ per million tokens, for the exact model id each tier
 pins in [`config/model_tiers.yaml`](config/model_tiers.yaml), for
@@ -292,28 +299,32 @@ predates this pricing and needs the same correction
 and `opus` are aliases the config leaves unpinned; the price shown is
 their current resolution. Re-check all of it before citing a number,
 since a rate or a pin can move — Gemini 3.8 Flash's rate is flat
-regardless of prompt size through 2026, then rises to $1.50 / $7.50 on
-2027-01-01; Gemini 3.1 Pro's rate is the one that changes with size,
-rising to $4.00 / $18.00 above 200k tokens:
+regardless of thinking level or prompt size through 2026, then rises
+to $1.50 / $7.50 on 2027-01-01:
 
 | Tier | Claude Code model id | $/1M tok in | $/1M tok out | Antigravity model id | $/1M tok in | $/1M tok out |
 |---|---|---|---|---|---|---|
-| Fast | `haiku` (Haiku 4.5) | $1.00 | $5.00 | `gemini-3.8-flash-medium` | $0.75 | $3.75 |
-| Mechanical / Implementation | `claude-sonnet-5` | $2.00 | $10.00 | `gemini-3.8-flash-high` | $0.75 | $3.75 |
-| Review | `opus` (Opus 5) | $5.00 | $25.00 | `gemini-3.1-pro-low-thinking` | $2.00 | $12.00 |
-| Frontier | `claude-fable-5-1` | $10.00 | $50.00 | `gemini-3.1-pro-low-thinking` | $2.00 | $12.00 |
+| Fast | `haiku` (Haiku 4.5) | $1.00 | $5.00 | `gemini-3.8-flash-low` | $0.75 | $3.75 |
+| Mechanical / Implementation | `claude-sonnet-5` | $2.00 | $10.00 | `gemini-3.8-flash-medium` | $0.75 | $3.75 |
+| Review | `opus` (Opus 5) | $5.00 | $25.00 | `gemini-3.8-flash-high` | $0.75 | $3.75 |
+| Frontier | `claude-fable-5-1` | $10.00 | $50.00 | `gemini-3.8-flash-high` | $0.75 | $3.75 |
 
-Antigravity pins the same model id, `gemini-3.1-pro-low-thinking`, to
-both Review and Frontier. A higher-thinking-budget sibling exists and
-answers under an interactive login; the runner's credential path
-offers only this one today — `config/model_tiers.yaml` has the
-evidence and [#167](https://github.com/evekhm/agentic-sdlc/issues/167).
-Claude Code pins Frontier to a separate, pricier model.
+Antigravity's rate is flat across the whole ladder: low, medium and
+high thinking all bill the same $0.75 in / $3.75 out. The
+thinking-level gradient spends more reasoning tokens at Review and
+Frontier; the price per token stays fixed. Claude Code carries the
+price spread instead: `haiku` through `claude-fable-5-1` spans a 10x
+range in the input rate alone. Gemini 3.1 Pro priced Review and
+Frontier here until the runner's ADC catalog turned out to carry no
+high-thinking Pro id at all
+([#271](https://github.com/evekhm/agentic-sdlc/issues/271)).
 
-The spread is widest at the top: Frontier costs 4-5x more on Claude
-Code than the tier Antigravity treats as its own ceiling. The more of
-the system's judgment a mature process can push down from Frontier to
-Review or below, the more of that spread it recovers.
+The spread lives on the Claude Code side. A seat that moves from
+Frontier to Review halves its Claude Code rate. A seat that moves to
+Antigravity at any tier drops to the flat Flash rate, and moving
+between Antigravity tiers costs nothing extra per token. The more of
+the system's judgment a mature process can push off Claude Code's
+frontier tier, the more of that spread it recovers.
 
 ## The playbook, and what this adds
 
