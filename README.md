@@ -281,25 +281,35 @@ and Claude Code's job shrinks to the plumbing that stood the process
 up.
 
 List rates, $ per million tokens, for the exact model id each tier
-pins in [`config/model_tiers.yaml`](config/model_tiers.yaml) (priced
-the same way in
-[`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh);
-re-check both before citing a number, since a rate or a pin can move).
-`haiku` and `opus` are aliases the config leaves unpinned; the price
-shown is their current resolution:
+pins in [`config/model_tiers.yaml`](config/model_tiers.yaml), for
+prompts at or under 200k tokens — this system's own context ceiling
+(AGENTS.md). Claude rates match
+[`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh); Gemini
+rates are the published Gemini API price
+([ai.google.dev/gemini-api/docs/pricing](https://ai.google.dev/gemini-api/docs/pricing)) —
+`session_spend.sh`'s Gemini table predates this pricing and needs the
+same correction, tracked separately. `haiku` and `opus` are aliases
+the config leaves unpinned; the price shown is their current
+resolution. Re-check all of it before citing a number, since a rate
+or a pin can move — Gemini 3.8 Flash's rate below rises to
+$1.50 / $7.50 on 2027-01-01, and both Gemini rates roughly double for
+prompts over 200k tokens:
 
 | Tier | Claude Code model id | $/1M tok in | $/1M tok out | Antigravity model id | $/1M tok in | $/1M tok out |
 |---|---|---|---|---|---|---|
-| Fast | `haiku` (Haiku 4.5) | $1.00 | $5.00 | `gemini-3.8-flash-medium` | $0.15 | $0.60 |
-| Mechanical / Implementation | `claude-sonnet-5` | $2.00 | $10.00 | `gemini-3.8-flash-high` | $0.15 | $0.60 |
-| Review | `opus` (Opus 5) | $5.00 | $25.00 | `gemini-3.1-pro-low-thinking` | $1.25 | $5.00 |
-| Frontier | `claude-fable-5-1` | $10.00 | $50.00 | `gemini-3.1-pro-low-thinking` | $1.25 | $5.00 |
+| Fast | `haiku` (Haiku 4.5) | $1.00 | $5.00 | `gemini-3.8-flash-medium` | $0.75 | $3.75 |
+| Mechanical / Implementation | `claude-sonnet-5` | $2.00 | $10.00 | `gemini-3.8-flash-high` | $0.75 | $3.75 |
+| Review | `opus` (Opus 5) | $5.00 | $25.00 | `gemini-3.1-pro-low-thinking` | $2.00 | $12.00 |
+| Frontier | `claude-fable-5-1` | $10.00 | $50.00 | `gemini-3.1-pro-low-thinking` | $2.00 | $12.00 |
 
 Antigravity pins the same model id, `gemini-3.1-pro-low-thinking`, to
-both Review and Frontier — Gemini's own frontier tier is its review
-tier. Claude Code pins Frontier to a separate, pricier model.
+both Review and Frontier. A higher-thinking-budget sibling exists and
+answers under an interactive login; the runner's credential path
+offers only this one today — `config/model_tiers.yaml` has the
+evidence and [#167](https://github.com/evekhm/agentic-sdlc/issues/167).
+Claude Code pins Frontier to a separate, pricier model.
 
-The spread is widest at the top: Frontier costs 8-10x more on Claude
+The spread is widest at the top: Frontier costs 4-5x more on Claude
 Code than the tier Antigravity treats as its own ceiling. The more of
 the system's judgment a mature process can push down from Frontier to
 Review or below, the more of that spread it recovers.
