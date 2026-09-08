@@ -534,6 +534,81 @@ edit_labels() { # issue-number add-csv remove-csv (either may be empty)
     log "    labels on #$n: +[${add:-}] -[${remove:-}]"
 }
 
+# --- loop ledger (#64 D13, D22) ------------------------------------------------
+# One container comment per issue, `<!-- loop-ledger:<n> -->` ...
+# `<!-- loop-ledger-end -->`, read only when a trusted writer posted it
+# (D22): the merge actor App or github-actions[bot]. Three row kinds and
+# no others — dispatch (rung entered, merged head, event, pr, at, cost),
+# terminal (the review rung), refusal:<reason>. A row that will not
+# parse makes the whole ledger unreadable, and unreadable is never
+# absent. The same reader lives in scripts/ci/merge_gate.sh; D19 permits
+# no new shared file.
+MERGE_ACTOR="${MERGE_ACTOR_LOGIN:-evekhm-merge-actor-app[bot]}"
+TRUSTED_WRITERS="$(jq -nc --arg a "$MERGE_ACTOR" '[$a, "github-actions[bot]"]')"
+LEDGER_ROW_RE='^<!-- loop-ledger-row: (dispatch|terminal|refusal:[a-z-]+) rung:[0-9]+ head-oid:[0-9a-f]{40}( [a-z-]+:[^ ]+)* -->$'
+LEDGER_ID=""; LEDGER_BODY=""; LEDGER_ROWS=""
+
+read_ledger() { # <issue> — sets LEDGER_*; returns 1 unreadable thread, 2 unparseable row
+    local n="$1" all mark any ok
+    LEDGER_ID=""; LEDGER_BODY=""; LEDGER_ROWS=""
+    all="$(gh api --paginate "repos/$GITHUB_REPO/issues/$n/comments?per_page=100" 2>/dev/null | jq -s 'add // []')" || return 1
+    jq -e 'type == "array"' <<<"$all" >/dev/null 2>&1 || return 1
+    mark="<!-- loop-ledger:$n -->"
+    LEDGER_ID="$(jq -r --argjson t "$TRUSTED_WRITERS" --arg m "$mark" \
+        '[.[] | select(((.user.login // "") | sub("^app/"; "")) as $l | $t | index($l) != null)
+              | select((.body // "") | contains($m))] | sort_by(.id) | .[0].id // empty' <<<"$all")"
+    [ -n "$LEDGER_ID" ] || return 0
+    LEDGER_BODY="$(jq -r --argjson i "$LEDGER_ID" '.[] | select(.id == $i) | .body' <<<"$all")"
+    LEDGER_ROWS="$(grep -oE '<!-- loop-ledger-row: [^>]*-->' <<<"$LEDGER_BODY" || true)"
+    any="$(grep -c 'loop-ledger-row' <<<"$LEDGER_BODY" || true)"
+    ok="$(grep -cE "$LEDGER_ROW_RE" <<<"$LEDGER_ROWS" || true)"
+    [ "$any" = "$ok" ] || return 2
+    return 0
+}
+ledger_rows() { grep -E "^<!-- loop-ledger-row: $1 " <<<"$LEDGER_ROWS" || true; }
+
+ledger_append() { # <issue> <kind> <rung> <head-oid> <pr> [extra-field ...] — idempotent on (kind, rung, head)
+    local n="$1" kind="$2" rung="$3" head="$4" pr="$5"; shift 5
+    local now row key line f
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    row="<!-- loop-ledger-row: $kind rung:$rung head-oid:$head pr:$pr at:$now${*:+ $*} -->"
+    key="<!-- loop-ledger-row: $kind rung:$rung head-oid:$head "
+    line="- \`$kind\` · rung $rung · head \`${head:0:12}\` · pr $pr · $now $row"
+    if grep -qF "$key" <<<"$LEDGER_BODY"; then
+        log "    loop ledger on #$n already carries ($kind, rung $rung, ${head:0:12}) — no write"
+        return 0
+    fi
+    if [ "$DRY_RUN" = "1" ]; then
+        log "    DRY-RUN loop-ledger append on #$n${LEDGER_ID:+ (comment $LEDGER_ID)}: $row"
+        return 0
+    fi
+    f="$(mktemp)"
+    if [ -n "$LEDGER_ID" ]; then
+        awk -v l="$line" '/<!-- loop-ledger-end -->/ { print l } { print }' <<<"$LEDGER_BODY" >"$f"
+        gh api -X PATCH "repos/$GITHUB_REPO/issues/comments/$LEDGER_ID" -F body=@"$f" >/dev/null \
+            || { rm -f "$f"; return 1; }
+    else
+        printf '### Loop ledger for #%s\n\n<!-- loop-ledger:%s -->\n%s\n<!-- loop-ledger-end -->\n' \
+            "$n" "$n" "$line" >"$f"
+        gh api -X POST "repos/$GITHUB_REPO/issues/$n/comments" -F body=@"$f" >/dev/null \
+            || { rm -f "$f"; return 1; }
+    fi
+    rm -f "$f"
+    LEDGER_BODY="$LEDGER_BODY
+$line"
+    log "    loop ledger on #$n: appended $kind row for rung $rung at ${head:0:12}"
+}
+
+# The loop bounds and the flag come from config/execution.yaml through the
+# one parser (D20). An unreadable bound fails the guard closed; an
+# unreadable flag reads as false (D18).
+read_loop() { python3 "$REPO_ROOT/scripts/ops/execution.py" --loop "$1" 2>/dev/null; }
+LOOP_LIMITS_OK=1
+MAX_DISPATCH="$(read_loop max_rung_dispatches_per_issue)" || LOOP_LIMITS_OK=0
+MAX_COST="$(read_loop max_cost_usd_per_issue)" || LOOP_LIMITS_OK=0
+AUTONOMOUS_MERGE="$(read_loop autonomous_merge || true)"
+[ "$AUTONOMOUS_MERGE" = "true" ] || AUTONOMOUS_MERGE=false
+
 # --- Per issue ----------------------------------------------------------------
 # `|| true` is required: grep exits 1 on an empty candidate list, and
 # set -e would abort on exactly the case that must fall through to the
@@ -804,6 +879,64 @@ $marker"
         fi
     fi
 
+    # --- D13 / D14 guards on the label write (#64) ---------------------------
+    # Both run in either flag setting (D18). The ratchet (D14) refuses a
+    # transition into a rung the ledger already records: no label, no
+    # comment, one refusal row, and the run ends red so the workflow's
+    # escalate step fires. A bound already reached (D13) refuses the same
+    # way in green. This script calls no escalation itself (D19).
+    if [ -n "$target" ] && [ "${target_rank:-0}" -gt 0 ]; then
+        guard_pr="${MERGE_PR[$issue]:-none}"
+        ledger_rc=0
+        read_ledger "$issue" || ledger_rc=$?
+        if [ "$ledger_rc" -eq 1 ]; then
+            fail_issue "cannot read the #$issue thread to find its loop ledger — unreadable is not absent (D13)"
+            continue
+        elif [ "$ledger_rc" -eq 2 ]; then
+            fail_issue "the loop ledger on #$issue carries a row this advancer cannot parse — unreadable is not absent (D13)"
+            continue
+        fi
+        highest_entered="$(ledger_rows '(dispatch|terminal)' | sed -nE 's/.* rung:([0-9]+) .*/\1/p' | sort -n | tail -1)"
+        : "${highest_entered:=0}"
+        at_head=0
+        ! ledger_rows '(dispatch|terminal)' | grep -qE " rung:$target_rank head-oid:$AFTER " || at_head=1
+        if [ "$target_rank" -lt "$highest_entered" ] \
+           || { [ "$target_rank" -eq "$highest_entered" ] && [ "$at_head" -eq 0 ]; }; then
+            echo "::error::lifecycle_advance: refusal reason-code: non-monotonic for #$issue — $trigger_desc would enter rung $target_rank ($target) while the loop ledger already records rung $highest_entered" >&2
+            FAILURES=$((FAILURES + 1))
+            ledger_append "$issue" "refusal:non-monotonic" "$target_rank" "$AFTER" "$guard_pr" \
+                || fail_issue "could not record the refusal row on #$issue"
+            continue
+        elif [ "$target_rank" -eq "$highest_entered" ]; then
+            log "    #$issue already recorded at rung $target_rank for ${AFTER:0:12} — idempotent, no write (D14)"
+            continue
+        fi
+        if [ "$LOOP_LIMITS_OK" != 1 ]; then
+            fail_issue "cannot read the loop bounds for #$issue (execution.py --loop) — failing closed (D13)"
+            continue
+        fi
+        dispatch_count="$(ledger_rows dispatch | grep -c . || true)"
+        costed="$(ledger_rows dispatch | grep -cE ' cost:[0-9]+(\.[0-9]+)? ' || true)"
+        if [ "$dispatch_count" != "$costed" ]; then
+            fail_issue "a dispatch row on #$issue carries no cost — the ledger is the only source of spend (D13)"
+            continue
+        fi
+        summed_cost="$(ledger_rows dispatch | sed -nE 's/.* cost:([0-9.]+) .*/\1/p' | awk '{ s += $1 } END { printf "%.2f", s }')"
+        over=""
+        if [ "$dispatch_count" -ge "$MAX_DISPATCH" ]; then
+            over="max_rung_dispatches_per_issue reached ($dispatch_count/$MAX_DISPATCH)"
+        elif ! awk -v s="$summed_cost" -v m="$MAX_COST" 'BEGIN { exit !(s + 0 < m + 0) }'; then
+            over="max_cost_usd_per_issue reached ($summed_cost/$MAX_COST)"
+        fi
+        if [ -n "$over" ]; then
+            echo "::notice::lifecycle_advance: refusal reason-code: budget for #$issue — $over; no label written, the workflow escalates (D13)" >&2
+            log "    refusal reason-code: budget for #$issue — $over"
+            ledger_append "$issue" "refusal:budget" "$target_rank" "$AFTER" "$guard_pr" \
+                || fail_issue "could not record the refusal row on #$issue"
+            continue
+        fi
+    fi
+
     # Bootstrap compression is an artifact-path note: a merge candidate
     # adds no files, so there is nothing to compress.
     compression=""
@@ -857,77 +990,65 @@ $marker"
         remove="${remove:+$remove,}intent:new"
     fi
 
-# D14 Monotonic progress check
-    # Locate ledger by paginating exhaustively (D13)
-    ALL_COMMENTS="$(gh api --paginate "repos/$GITHUB_REPO/issues/$issue/comments" -q '.[].body' 2>/dev/null)" || {
-        fail_issue "could not read comments for #$issue to find loop ledger"
-        continue
-    }
-    
-    LEDGER_COMMENT="$(echo "$ALL_COMMENTS" | awk '/<!-- loop-ledger:'"$issue"' -->/{flag=1; print; next} /<!-- loop-ledger-end -->/{if(flag){print; flag=0; next}} flag' || true)"
-    
-    if [[ -z "$LEDGER_COMMENT" ]]; then
-        HIGHEST_MERGED_RANK=0
-    else
-        HIGHEST_MERGED_RANK=$(echo "$LEDGER_COMMENT" | grep -oE 'rung:[0-9]+' | grep -oE '[0-9]+' | sort -nr | head -1 || echo 0)
-    fi
-    if [[ -z "$HIGHEST_MERGED_RANK" ]]; then HIGHEST_MERGED_RANK=0; fi
-
-if [[ "$target_rank" -gt 0 && "$target_rank" -eq "$HIGHEST_MERGED_RANK" ]] && echo "$LEDGER_COMMENT" | grep -qF "head-oid:$AFTER"; then
-        log "    #$issue is already recorded at rank $target_rank for head $AFTER — idempotent green exit"
-        continue
-    elif [[ "$target_rank" -lt "$HIGHEST_MERGED_RANK" ]] || ( [[ "$target_rank" -gt 0 && "$target_rank" -eq "$HIGHEST_MERGED_RANK" ]] && ! echo "$LEDGER_COMMENT" | grep -qF "head-oid:$AFTER" ); then
-        echo "::error::lifecycle_advance: refusal reason-code: non-monotonic for #$issue" >&2
-        fail_issue "refusal reason-code: non-monotonic for #$issue"
-        # Write refusal row to ledger
-        post_comment "$issue" "<!-- loop-ledger-row: refusal:non-monotonic rung:$target_rank head-oid:$AFTER pr:${BEST_PR[$issue]:-} -->" || true
-        bash "$REPO_ROOT/scripts/ci/escalate.sh" "$issue" --reason "non-monotonic" --head "$AFTER" 2>/dev/null || true
-        continue
-    fi
-
     edit_labels "$issue" "$target" "$remove" \
         || { fail_issue "could not set $target on #$issue"; continue; }
 
-    # D16, D17, D18 Dispatch
-    if [[ "$target" == "status:in-review" ]]; then
-        log "    #$issue is at review rung (terminal) — no dispatch"
+    # --- the rung after the label (#64 D16, D17, D18) --------------------------
+    [ "${target_rank:-0}" -gt 0 ] || continue
+    if [ -z "$(jq -r --arg t "$target" '.stages[] | select(.label == $t) | .advances_to // empty' "$LIFECYCLE_JSON")" ]; then
+        # D17: the last rung is terminal — one terminal row, no dispatch.
+        ledger_append "$issue" terminal "$target_rank" "$AFTER" "${MERGE_PR[$issue]:-none}" \
+            || fail_issue "could not record the terminal row on #$issue"
+        log "    #$issue is at the last rung ($target) — terminal, no dispatch"
         continue
     fi
-
-    AUTONOMOUS_MERGE=$(python3 "$REPO_ROOT/scripts/ops/execution.py" --loop autonomous_merge 2>/dev/null || true)
-    if [[ "$AUTONOMOUS_MERGE" != "true" ]]; then
-        log "    autonomous_merge is false — skipping dispatch for #$issue"
+    if [ "$AUTONOMOUS_MERGE" != "true" ]; then
+        log "    autonomous_merge is false — no dispatch for #$issue (D18)"
         continue
     fi
-
-# Determine persona from the rung by scanning personas/*.yaml for the NEW stage
-    NEW_STAGE=$(jq -r --arg t "$target" '.stages[] | select(.label == $t) | .stage' "$LIFECYCLE_JSON" 2>/dev/null || true)
-    PERSONA=""
-    if [[ -n "$NEW_STAGE" && "$NEW_STAGE" != "null" ]]; then
-        for p_file in "$REPO_ROOT"/personas/*.yaml; do
-            if grep -q "kind: persona" "$p_file" 2>/dev/null; then
-                if python3 -c "import sys, yaml; d=yaml.safe_load(open(sys.argv[1])); sys.exit(0 if sys.argv[2] in d.get('stage', []) else 1)" "$p_file" "$NEW_STAGE" 2>/dev/null; then
-                    PERSONA=$(basename "$p_file" .yaml)
-                    break
-                fi
-            fi
-        done
-    fi
-
-    if [[ -n "$PERSONA" ]]; then
-
-        BINDING=$(python3 "$REPO_ROOT/scripts/ops/execution.py" --binding "$PERSONA" 2>/dev/null || true)
-        if echo "$BINDING" | grep -q "^ladder "; then
-            PLACEMENT=$(echo "$BINDING" | awk '{print $2}')
-            if [[ "$DRY_RUN" == "1" ]]; then
-                log "    DRY-RUN scripts/placement/$PLACEMENT/run.sh $issue"
-            else
-                log "    Dispatching $PERSONA via $PLACEMENT for #$issue"
-                bash "$REPO_ROOT/scripts/placement/$PLACEMENT/run.sh" "$issue" || true
-            fi
-        else
-            log "    $PERSONA trigger is not ladder — no dispatch"
+    new_stage="$(jq -r --arg t "$target" '.stages[] | select(.label == $t) | .stage // empty' "$LIFECYCLE_JSON")"
+    persona=""
+    for p_file in "$REPO_ROOT"/personas/*.yaml; do
+        grep -q '^kind: persona$' "$p_file" 2>/dev/null || continue
+        if grep -qE "^stage: \[( *[a-z]+,)* *$new_stage( *, *[a-z]+)* *\]" "$p_file"; then
+            persona="$(basename "$p_file" .yaml)"
+            break
         fi
+    done
+    if [ -z "$persona" ]; then
+        log "    no persona declares stage '$new_stage' — no dispatch for #$issue"
+        continue
+    fi
+    if ! binding="$(python3 "$REPO_ROOT/scripts/ops/execution.py" --binding "$persona" 2>/dev/null)"; then
+        fail_issue "cannot read the execution binding for $persona — no dispatch for #$issue"
+        continue
+    fi
+    read -r trigger placement cap <<<"$binding"
+    if [ "$trigger" != "ladder" ]; then
+        log "    $persona's trigger is '$trigger' — only ladder bindings dispatch from here (D16)"
+        continue
+    fi
+    # D15: hold or blocked is re-read immediately before the dispatch.
+    if ! fresh="$(gh issue view "$issue" --repo "$GITHUB_REPO" --json labels 2>/dev/null)"; then
+        fail_issue "cannot re-read #$issue before dispatch (D15) — no dispatch"
+        continue
+    fi
+    if jq -e '[.labels[].name] | (index("hold") != null) or (index("blocked") != null)' <<<"$fresh" >/dev/null; then
+        log "    #$issue carries hold or blocked — no dispatch (D15)"
+        continue
+    fi
+    # The dispatch row is the count and the spend the bounds are judged
+    # on (D13); it is written before the adapter so a crashed dispatch
+    # still counts.
+    ledger_append "$issue" dispatch "$target_rank" "$AFTER" "${MERGE_PR[$issue]:-none}" \
+        "event:${GITHUB_RUN_ID:-local}" "cost:$cap" \
+        || { fail_issue "could not record the dispatch row on #$issue — no dispatch"; continue; }
+    if [ "$DRY_RUN" = "1" ]; then
+        log "    DRY-RUN scripts/placement/$placement/run.sh $issue"
+    else
+        log "    dispatching $persona via $placement for #$issue"
+        bash "$REPO_ROOT/scripts/placement/$placement/run.sh" "$issue" \
+            || fail_issue "placement $placement could not dispatch $persona for #$issue"
     fi
 done
 
