@@ -57,12 +57,12 @@
 #      (a dry run, an unlaunchable harness, or a multi-owner stage that
 #      deliberately launches nothing)
 #   2  the number was NOT WORKED, BY DESIGN — either this script refused
-#      (one of the eight refusal conditions: re-entrancy #134, the six D5
-#      conditions, or a number on no rung #129) or the launched persona itself
-#      reported `WORK-RESULT: refused|blocked`. One code, because a
-#      caller asks whether the number was worked, not which layer
-#      declined (#43, D23).
-#   1  unusable input: an unreadable number, a PR that resolves to no
+#      (an unresolvable pull request #216, one of the eight refusal
+#      conditions: re-entrancy #134, the six D5 conditions, or a number on
+#      no rung #129) or the launched persona itself reported
+#      `WORK-RESULT: refused|blocked`. One code, because a caller asks
+#      whether the number was worked, not which layer declined (#43, D23).
+#   1  unusable input: an unreadable number, a PR that closes more than one
 #      issue, a stage no label names, a persona with no harness pin, an
 #      unparsable source file, a missing compiled target, a token that
 #      could not be minted — or a headless session whose outcome could
@@ -224,8 +224,15 @@ jq -e '.stages | type == "array" and length > 0' "$LIFECYCLE_JSON" >/dev/null 2>
 # scripts/ops/post.sh so the dispatcher and the circuit breaker cannot
 # disagree about which issue a pull request belongs to. It sets ISSUE,
 # RESOLVED_VIA and ISSUE_JSON — and, when the number given was a pull
-# request, IS_PR and PR_JSON — reporting through this file's own die().
-resolve_issue "$NUMBER"
+# request, IS_PR and PR_JSON — reporting through this file's own die(),
+# or refusing (exit 2) when an input pull request resolves to no issue (#216).
+resolve_issue "$NUMBER" || {
+    rc=$?
+    if [ "$rc" -eq 2 ]; then
+        refuse "cannot resolve PR #$NUMBER to an issue"
+    fi
+    exit "$rc"
+}
 view="$ISSUE_JSON"
 
 # The pull request's own labels, kept because `view` is now the ISSUE's.

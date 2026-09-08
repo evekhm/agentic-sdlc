@@ -135,6 +135,20 @@ order:
   return nothing (15 minutes, three prompts, verifier seat); when that
   happens the seat reviews directly — full diff read plus a mutation
   battery — instead of re-prompting the subagent.
+- Before closing an old thread as superseded, read what it
+  accumulated. #8 was superseded by unattended.yml and #207 as an
+  event-driven review workflow, but it also carried the G1/G2 review
+  gates filed after the #117/#202 stall; closing it orphaned them and
+  left PLAYBOOK pointing at a closed issue. They live on #238 now.
+  (2026-09-08)
+- A bypass installed after an earlier refusal cannot reach it. #207
+  exempted the review dispatch from the claim mutex at
+  work.sh:453, but the closed, review-stuck and blocked refusals
+  fire at :288-296, before REVIEW_DISPATCH exists at :373; so a
+  review-stuck issue's PR is refused by both reviewers by
+  construction (seen on PR #223, resolves to #202). Test a bypass
+  against every refusal state in the file, not the one that was
+  observed. That is #239. (2026-09-08)
 
 ## Resuming in a fresh session
 
@@ -291,7 +305,7 @@ only distrusts the model ships the other two layers' lies.**
   fabricated reproductions, relocated into the repair ledger, and the
   countermeasure is mechanical: parse the ledger's claimed `file:line`
   cells, diff against `git diff --unified=0 <prev>..<head>`, refuse the
-  round by name before any model call (filed on #8).
+  round by name before any model call (filed on #238).
 - **The unsatisfiable test** (PR #202, R3-1): vacuous tests are the
   entry above — assertions that cannot fail. Their strictly worse
   sibling is an assertion that cannot *pass* for any spec-compliant
@@ -363,7 +377,7 @@ should. What follows attacks the *cost* of getting there.
   while new findings arrived 9 then 5, because each repair introduced
   them. Escalating on "open blocking rows did not strictly decrease, or
   a ledger claim failed verification" would have stopped this after
-  round 2 (#8).
+  round 2 (#238).
 - **A repair sweeps the class, not the cited line.** A YAML-1.1 `on:` →
   `True` trap was fixed at one line in round 1 and is live at another
   line in the same file by round 3. When a reviewer names a class, grep
@@ -539,6 +553,8 @@ the two in step.
    `bug`, so today every defect fix gets zero unattended review by
    construction). Exit criterion: one PR whose reviewer job log shows
    a model call succeeding and a review posted by the runner itself.
+   Met 2026-09-08 on both reviewers; the evidence is in
+   CRITICAL_PATH.md gate 1.
 3. **Trigger becomes a label** — #147 (`mode:autonomous` and
    per-issue overrides), #108 (budget guard + queue driver; agy has
    no runtime budget flag — post-hoc ceiling via #172), #64/#151
@@ -553,21 +569,24 @@ structural — in files, gates, and an independent reviewer — rather
 than in anyone's attention.
 
 ---
-Status snapshot (2026-09-07, ~07:30 UTC): wave-1 core track merged and
-closed (#131 #53 #92 #109 #180 #179). Batch 2: #187 (#52), #184
-(#172), #189 (#165) and #196 (#195, after one fix round) merged;
-#164 (#162, also closing #163) merged per operator direction with
-one security row deferred to #168. Fix round 2 fired and awaiting
-the verifier: #188 (#137) and #185 (#74; no closing keyword by
-design — whether it closes #74 is the operator's call at AGREE).
-#167 reopened (trailer close). The two standing seats are on the
-ladder: #199 (advisor persona `nestor`) has intent (PR #201) and spec
-(PR #205) merged and its plan PR #208 in review; #204 (verifier as
-the review stage of `argus`) has intent PR #206 merged and its spec
-in drafting. Filed since the last snapshot: #203 (claim.sh checks
-identity after posting), #207 (claim mutex blocks unattended review
-of ladder PRs — now first in roadmap item 2, ahead of the runner
-cluster, and the operator's stated next priority over #199's
-implementation dispatch). #181 kickoff prompts are written, not yet
-fired. Systemic trackers open: #191, #181, #167, #168/#169, #82,
-#198.
+Status snapshot (2026-09-08, ~06:45 UTC): gate 1 met, both halves.
+1a on PR #188 (argus, 2026-09-07), 1b on PR #233 itself (#207's
+implementation, run 34186361378), and atlas's first real unattended
+model call on PR #221 (#167 fix, job 101933518377, agy on
+gemini-3.1-pro-low-thinking). The first agy wave (five sessions,
+04:06–04:16 UTC, launched by hand from a machine-local launcher)
+produced five PRs that all merged on verifier review by 06:09: #233
+(#207), #228 (#151, the #64 spec amendment), #229 (#98 spec), #230
+(#68 spec), #231 (#85 spec). Atlas's compiled resume protocol still
+refuses ladder PRs whose rung is claimed (refusals 5 and 6), seen on
+PR #235; filed as #242. Gate 2 is open: the #64 plan PR #235 is
+up with an unattended argus round 1, the #216 fix PR #237 and the
+#108 ceiling PR #232 are in the verifier queue, and the wave-3 plan
+rungs for #98 and #68 are ready to launch. Filed today by the
+verifier: #236 (a second prompt literal in work.sh, guard still
+green), #238 (G1/G2 orphaned when #8 closed as superseded), #239 (a
+review-stuck issue's PR can never be reviewed; #202 is stuck in it),
+and #239 is the next gate-2 blocker. Standing seats: #199 at
+status:implementing awaiting the harness-pin decision; #204 spec PR
+#211 open. Systemic trackers open: #191, #181, #168, #82, #198, #147,
+#148.

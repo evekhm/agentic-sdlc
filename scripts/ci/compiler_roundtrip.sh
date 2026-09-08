@@ -63,6 +63,9 @@ python3 "$COMPILER" --root "$REPO" --out "$TMP/build-a" >/dev/null \
   || fail "sources do not compile"
 count="$(find "$TMP/build-a/.claude/agents" "$TMP/build-a/.agents/agents" -type f | wc -l)"
 echo "  ok: $count target files emitted from $(ls "$REPO"/personas/*.yaml | wc -l) sources"
+assert_in 'Exception, review dispatch (#207 D3)' \
+  "$TMP/build-a/.agents/agents/atlas/agent.md" \
+  "#242: atlas's compiled resume protocol carries the review-dispatch exemption on refusals 5/6"
 
 # --- 2. determinism -----------------------------------------------------------
 step "2. determinism: two builds are byte-identical"
