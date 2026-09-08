@@ -424,6 +424,106 @@ so far: not a capability gap but a diligence gap — which is precisely
 the kind the checklist-and-verifier architecture is built to absorb.
 Final scoring lands in the wave observations file when batch 2 merges.
 
+### The advisor seat, 2026-09-07 to 2026-09-08: lessons, and what the persona must carry (input to #199's implementation rung)
+
+Field lessons, each with the incident that taught it:
+- **Verify negatives like positives.** A subagent reported that
+  docs/SPEC.md carried no copy of a false sentence; it did, in
+  different wording (PR #232, 2026-09-08). A "not found" from a grep
+  proves the grep, not the absence. Re-check at the fetched ref before
+  relaying any claim to a reviewer, including a claim of absence.
+- **Re-fetch before handing over a SHA.** Instructions crossing with a
+  subagent still in flight produced a fourth commit after the head had
+  already been given to the verifier (PR #232: f02b15d, then
+  77501a8). The SHA you relay is the one you fetched after the
+  subagent went idle, never the one in its report.
+- **Predict horizons from what the runner checks out.**
+  `unattended.yml` checks out the PR head, so the work.sh fix in PR
+  #233 decided its own review dispatch and gate 1b was met on the PR
+  itself; the brief had said "after it merges". Before predicting when
+  a fix takes effect, read the workflow's checkout ref. (See the
+  Known-mechanics bullet on self-review dispatch above.)
+- **A close list is a read task first.** Closing #8 as superseded on
+  2026-09-08 dropped two gates (G1, G2) that had been filed on that
+  thread the day before; the verifier rehomed them as #238 and left a
+  pointer on #8. Before recommending that an old issue be closed as
+  superseded, read what accumulated on it and rehome anything live.
+- **A green reviewer check that finished in eleven seconds is a
+  refusal, not a review.** PR #232's two green checks were
+  stage-ownership refusals, flagged by its own author and missed by
+  everyone until the verifier read the log. A reviewer check counts as
+  evidence only with a run id, a duration in minutes and a cost. The
+  exit-2-renders-green class now has four instances: #191, #236, #239,
+  and PR #232's checks. #239 is the worst shape: work.sh refuses on
+  status:review-stuck, closed and blocked BEFORE the review-dispatch
+  retarget from #207, so a review-stuck issue can never get the review
+  that would clear it (#202 is stuck there today).
+- **Printed is not enforced.** (See the Known-mechanics bullet on
+  unenforced `max_cost_usd` above.) Six unattended argus runs were
+  measured with `max_cost_usd` printed at 2.0 and none capped: $1.16,
+  $3.16, $3.03, $2.70, $2.28, $2.75; PR #232 is the carry. A guard
+  exists when there is a datum of it firing; until then the record
+  says "declared".
+- **The repair-path ruling**, given twice (PR #221 for #167, PR #232
+  for #108), recorded so it is not re-derived: a PR authored under the
+  operator bot that repairs a gap the living spec already documents
+  merges without the ladder when (a) every false sentence in its text
+  is corrected before merge, (b) it is rebased and both runner
+  reviewers have actually run on the final head, (c) any config value
+  it sets is the operator's number, flagged to the operator and not
+  judged by the reviewer, (d) the author-identity mismatch (#204 D15
+  shape) is recorded as an observation, not a block, and (e) the
+  parent intent stays open, referenced with Refs. Anything that adds
+  behavior goes through the ladder.
+- **Claims outlive sessions.** agy sessions open their PR and exit
+  without releasing in-progress; lifecycle_advance does not release it
+  on merge; the claiming identity releases it (the wave launcher's
+  `--release` runs `claim.sh --release` under that persona's App
+  token). A Refs-only amendment PR on an intent:new issue leaves the
+  advancer with no first status to write, so the operator closes that
+  issue by hand (#151, 2026-09-08).
+- **Wave-launcher facts**, from `~/waves/launch.sh` (not yet in the
+  repo; an intent is pending the operator's go): one claim path only,
+  `scripts/ops/claim.sh`, never a second implementation; a key column
+  separate from the issue number so a later rung of the same issue can
+  be launched (`98p` = plan rung of #98); each prompt states that the
+  claim was made for it under a named session and stops if the last
+  claim on the thread names anyone else; agy exits 0 on refusal, so a
+  quiet window is not completion, the evidence is the PR and the
+  handoff comment; a `<slug>` placeholder left in a prompt file is a
+  fabrication vector, so prompt branch names are diffed against the
+  launcher table before launch.
+- **Standing seats are verified live, not from a handoff file**:
+  ListAgents plus a reply. The verifier seat changed session between
+  two handoffs on 2026-09-08 (e4 to 2e).
+- When a prediction in a brief fails, correct it in the dated record
+  (docs/CRITICAL_PATH.md, this file) the same day; the brief must not
+  stand as the last word.
+- Never embed Python in a shell command, not even for a one-line edit;
+  the advisor seat did it once on 2026-09-07 and the rule exists
+  because it hides logic from the transcript and from
+  sanitize_check.
+
+What personas/nestor.yaml must carry, for #199's implementer (rules,
+not prose):
+1. Every relayed claim, including a claim of absence, is verified at
+   the fetched ref before it reaches a reviewer or the operator.
+2. A SHA is relayed only after the seat fetched it itself, after the
+   subagent that produced it went idle.
+3. A prediction about when a fix takes effect names the checkout ref
+   it rests on.
+4. A recommendation to close an issue states what the thread
+   accumulated since filing and where anything live was rehomed.
+5. A reviewer check is evidence only with run id, duration and cost; a
+   green check without them is read as a refusal until the log says
+   otherwise.
+6. The repair-path ruling above is a standing rule of the seat.
+7. Every operator prompt is a file on disk plus one launch line with
+   an explicit model flag.
+8. The seat's own record (docs/CRITICAL_PATH.md, docs/PLAYBOOK.md, the
+   dated handoff file) is updated the day reality moves, and a failed
+   prediction is corrected there, dated.
+
 ## Roadmap: from YOLO off to YOLO on
 
 The four items below are the shape and the reasons. The live ordering
