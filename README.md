@@ -301,7 +301,7 @@ rising to $4.00 / $18.00 above 200k tokens:
 | Fast | `haiku` (Haiku 4.5) | $1.00 | $5.00 | `gemini-3.8-flash-medium` | $0.75 | $3.75 |
 | Mechanical / Implementation | `claude-sonnet-5` | $2.00 | $10.00 | `gemini-3.8-flash-high` | $0.75 | $3.75 |
 | Review | `opus` (Opus 5) | $5.00 | $25.00 | `gemini-3.1-pro-low-thinking` | $2.00 | $12.00 |
-| Frontier | `claude-fable-5-1` | $10.00 | $50.00 | `gemini-3.1-pro-high-thinking` | $2.00 | $12.00 |
+| Frontier | `claude-fable-5-1` | $10.00 | $50.00 | `gemini-3.1-pro-low-thinking` | $2.00 | $12.00 |
 
 Antigravity pins the same model id, `gemini-3.1-pro-low-thinking`, to
 both Review and Frontier. A higher-thinking-budget sibling exists and
