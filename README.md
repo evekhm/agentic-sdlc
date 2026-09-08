@@ -246,26 +246,39 @@ rule are in [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md).
 A harness is the program a persona runs inside. Claude Code is
 Anthropic's terminal agent. Antigravity is Google's agentic IDE with
 its `agy` command line. A persona is written once, in a vendor-free
-source file. The compiler
+source file, naming only the tier its work needs — fast, mechanical,
+implementation, review or frontier. The compiler
 [`scripts/sync_agents.py`](scripts/sync_agents.py) emits the prompt
 files each harness loads, and a CI gate fails when a compiled file
 drifts from its source.
 
-Each persona is pinned to one harness in
-[`config/deployments.yaml`](config/deployments.yaml). Athena, Odyssey,
-Argus and Cassandra run on Claude Code. Daedalus and Atlas run on
-Antigravity. A pin is one line. The persona source never changes.
+Which harness and model answer that tier is a pin in config — one
+line per persona in
+[`config/deployments.yaml`](config/deployments.yaml), resolved against
+the tier table in [`config/model_tiers.yaml`](config/model_tiers.yaml).
+The tier a persona names is a recommendation for the grade of
+judgment its stage needs. Which harness and model deliver that grade
+is free choice: repin any persona by editing its one line, and the
+persona source stays untouched.
 
-The two reviewers sit on different families on purpose. Argus reads
-on Claude. Atlas reads on Gemini. A blind spot in one family stays in
-one family, and their agreement means something. The constraint is
-declared in the same file and enforced by a CI gate
-([#198](https://github.com/evekhm/agentic-sdlc/issues/198)).
+The two reviewers are the one hard constraint: they must resolve to
+different model families, enforced by a CI gate
+([#198](https://github.com/evekhm/agentic-sdlc/issues/198)). Every
+other pin is free choice. Repin either reviewer on its own — land
+both on the same family and their agreement stops meaning anything.
 
-The cost thesis: Gemini Flash carries the volume of specs, plans and
-implementation. Gemini Pro and Claude Opus review it. Claude Fable is
-spent only where judgment changes the outcome, at the spec gate and in
-the advisor seat.
+The cost thesis, and where it points: Gemini Flash already carries
+the volume — specs, plans, implementation. Gemini Pro and Claude Opus
+review it. Claude Fable is spent only where judgment changes the
+outcome, at the spec gate and the advisor seat. Claude Code is doing
+more of that judgment today because the process is still being
+built: specs are still being tightened, gates are still being
+written, the compiler is still new. Each round of that work turns a
+judgment call into a deterministic check, and every check that lands
+moves the target further: a mature, fully specified process is one
+where the cheap, low-latency model is the right pin for most stages,
+and Claude Code's job shrinks to the plumbing that stood the process
+up.
 
 ## The playbook, and what this adds
 
