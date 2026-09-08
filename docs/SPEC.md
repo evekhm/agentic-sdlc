@@ -240,8 +240,15 @@ handed one reads the issue, derives the stage from its single
 `status:*` label, reuses or derives the intent folder, claims with
 `in-progress` plus one comment, works only the current stage's
 artifact, hands off in the Done/Decided/Next/Blocked format, and
-refuses in six stated conditions rather than guessing. Tests:
-`scripts/ci/tests/lifecycle_advance_test.sh`.
+refuses in six stated conditions rather than guessing. Refusals 5
+(`in-progress` held by another actor) and 6 (the derived stage is
+not one this actor owns) each carry a review-dispatch exception: on
+a dispatch that reviews a pull request, the rung's `in-progress` and
+`status:*` label belong to the issue's author, not to the reviewer,
+so the reviewer measures against the stage `review` instead and
+proceeds (#207 D3, #242). Tests:
+`scripts/ci/tests/lifecycle_advance_test.sh`,
+`scripts/ci/compiler_roundtrip.sh`.
 
 ### ci.gates
 `.github/workflows/ci-gates.yml` runs four deterministic gates on
