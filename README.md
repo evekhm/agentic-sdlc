@@ -119,10 +119,7 @@ keep raw material out of a persona's context.
 **Tiers.** Work is graded fast, mechanical, implementation, review or
 frontier. A persona names the grade its work needs. Each harness binds
 the grades to models in
-[`config/model_tiers.yaml`](config/model_tiers.yaml). On Claude Code:
-Haiku, Sonnet 5, Sonnet 5, Opus, Fable 5.1. On Antigravity: Gemini 3.8
-Flash for every tier, graded by thinking level, low through high. A
-new model version is a one-line change in that file.
+[`config/model_tiers.yaml`](config/model_tiers.yaml). 
 
 ## The flow, rung by rung
 
