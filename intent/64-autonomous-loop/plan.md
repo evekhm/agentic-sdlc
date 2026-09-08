@@ -1,6 +1,6 @@
 # Plan: the loop merges itself; the human is the escalation path
 
-**Issue:** #64 · **Spec:** spec.md (Approved, D1-D22, AT-1..AT-24) · **Author:** daedalus (`evekhm-daedalus-app[bot]`)
+**Issue:** #64 · **Spec:** spec.md (Approved, D1-D29, AT-1..AT-24) · **Author:** daedalus (`evekhm-daedalus-app[bot]`)
 
 Eight tasks. Each names the files it touches, the steps in order, the Decision rows it implements, the acceptance tests it makes pass, and its done-when. **Implement on top of `origin/main` at the SHA the dispatcher pins; this plan was verified at `bf78de9`.** Every `file:line` below was re-read at that commit.
 
@@ -9,6 +9,14 @@ Order: T1 (tests, all red) → T2 (config and parser) → T3 (permissions and wo
 ## The calls this plan makes
 
 **P1 · Merge gate ledger dependency:** As D5 conjuncts (3), (4), (5), and (11) rely on the recorder (#8/#9) which is not yet merged, `merge_gate.sh` parses `gh issue comments` for the loop ledger and `review-stuck` marker, but explicitly fails closed for the consensus ledger if it's missing (which it will be until #8/#9 lands).
+
+**P2 · Sync (Amendment r2, PR #257 round 4 → S1-S4 fix, odyssey):** Round 4 review found S1-S3 (PR #257 comments 5592288923, 5592295614) and Amendment r2 (D23-D29, spec.md) resolved them at the design level; this plan's T1/T3/T5/T6 did not anticipate that amendment and are extended here rather than rewritten, per D19's r2 scope note:
+- **T3 / `.github/workflows/lifecycle.yml`:** added `environment: merge-actor` and an `actions/create-github-app-token` mint step (D23), reaching `lifecycle_advance.sh` and, on a D14 refusal, `escalate.sh` as `MERGE_ACTOR_TOKEN`; `GH_TOKEN` for the label/comment writes stays `github.token` (D25/D26). `.github/workflows/merge-gate.yml` dropped its now-dead `GATE_CHECK_NAME` env (D24 excludes the gate's own check by `checkSuite.workflowRun.databaseId`, not by name).
+- **T5 / `scripts/ci/merge_gate.sh`:** trusted-writer identity is resolved via `gh api user` rather than trusted by env-var guess (S3); conjunct (2) is reimplemented on `mergeStateStatus` plus a `GRAPHQL_ROLLUP` check/status read with bounded retry on `UNKNOWN` (D24); `BEHIND` escalates with reason-code `behind`, gated by `loop.autonomous_merge` (D27) and self-clearing per D10's r2 amendment (D28).
+- **T4 / `scripts/ci/escalate.sh`:** S3's `gh api user` identity fix; `behind` added to the closed reason-code set (D24).
+- **T6 / `scripts/ci/lifecycle_advance.sh`:** the two ledger-row writes (`ledger_append`'s PATCH and POST) carry `GH_TOKEN="$MERGE_ACTOR_TOKEN"`; every other `gh` call in the script keeps the ambient `GITHUB_TOKEN` (D23/D25).
+- **T1 / test files:** `scripts/ci/tests/merge_gate_test.sh` was substantially rewritten — a `gh api graphql` stub replacing the old `required_status_checks` stub, `api user` stub for S3, and new scenarios MG-21..MG-30 for S3/D23/D24/D27/D28. `scripts/ci/tests/lifecycle_advance_test.sh` gained scenario S36c2 (github-actions[bot], trusted under the superseded D22, is no longer trusted under D23) and S36m (a static assertion that only `ledger_append`'s two writes carry `MERGE_ACTOR_TOKEN`, since the whole harness runs under `DRY_RUN=1` and never reaches a live write to capture a token from).
+- **Not done at runtime, by design:** S4 (the private key's exposure is bounded only by the off-repo `merge-actor` Environment setting) is precondition P1 in Amendment r2 — unverifiable from inside the loop, as D23 itself says — and S5-S8 (medium/low severity) are left as-is per the repo owner's standing merge policy (security/high findings block merge; the rest do not).
 
 ## T1 · The acceptance suite
 

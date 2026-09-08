@@ -1227,7 +1227,14 @@ not_invoked 'issue view' "S35: no issue is read — the range walk fails before 
 
 reset_fixtures
 
-# --- #64: the loop ledger guards the label write (D13, D14, D16-D18, D22) ---
+# --- #64: the loop ledger guards the label write (D13, D14, D16-D18, D23) ---
+# D23 narrows the trusted-writer set to the merge actor's own login
+# alone — github-actions[bot] no longer counts, so every ledger comment
+# below that must be TRUSTED is authored by MERGER instead. ACTIONS_BOT
+# stays defined for the one scenario (S36c2) that pins the narrowing
+# itself: a login this ladder used to trust is now exactly as untrusted
+# as any other forged login.
+MERGER='evekhm-merge-actor-app[bot]'
 ACTIONS_BOT='github-actions[bot]'
 ledger_comment() { # <login> <id> <issue> [row ...] — one trusted-or-not container comment
   local login="$1" id="$2" n="$3" r body
@@ -1244,7 +1251,7 @@ INTENT_TO="$(row intent.md advances_to)"
 banner "S36a · #64 D14 · a transition into a rung the ledger already records: no label, no comment, one refusal row, red"
 reset_fixtures
 issue_fixture 999 OPEN status:planning
-comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 900 999 \
+comments_fixture 999 "$(ledger_comment "$MERGER" 900 999 \
   "dispatch rung:3 head-oid:$C3 pr:none at:2026-01-01T00:00:00Z event:e1 cost:5.0")"
 run_fail "$C0" "$C1" "S36a: intent.md landing after rung 3 was entered ends red"
 has "refusal reason-code: non-monotonic for #999" "S36a: the reason code names the issue for the workflow's escalate step"
@@ -1257,14 +1264,14 @@ hasnt "escalate.sh" "S36a: the advancer calls no escalation itself (D19)"
 banner "S36b · #64 D14 · the same (rung, head-oid) already on the ledger is a no-op"
 reset_fixtures
 issue_fixture 999 OPEN status:planning
-comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 901 999 \
+comments_fixture 999 "$(ledger_comment "$MERGER" 901 999 \
   "dispatch rung:2 head-oid:$C1 pr:none at:2026-01-01T00:00:00Z event:e1 cost:5.0")"
 run "$C0" "$C1" "S36b: a re-run of a recorded transition exits 0"
 has "already recorded at rung 2" "S36b: the idempotency key is recognised"
 hasnt "--add-label" "S36b: no label is written"
 hasnt "loop-ledger-row: refusal" "S36b: nothing is refused"
 
-banner "S36c · #64 D22 · a ledger posted by an untrusted login is prose"
+banner "S36c · #64 D23 · a ledger posted by an untrusted login is prose"
 reset_fixtures
 issue_fixture 999 OPEN status:planning
 comments_fixture 999 "$(ledger_comment mallory 902 999 \
@@ -1273,12 +1280,21 @@ run "$C0" "$C1" "S36c: a forged ledger does not stop the ladder"
 has "--add-label $INTENT_TO" "S36c: the label is written past the forged rows"
 hasnt "non-monotonic" "S36c: no refusal is raised on prose"
 
+banner "S36c2 · #64 D23 · github-actions[bot] — trusted under the old D22 set — no longer counts"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 902 999 \
+  "dispatch rung:3 head-oid:$C3 pr:none at:2026-01-01T00:00:00Z event:e1 cost:5.0")"
+run "$C0" "$C1" "S36c2: a github-actions[bot] ledger does not stop the ladder either (D23)"
+has "--add-label $INTENT_TO" "S36c2: the label is written past the narrowed-out rows"
+hasnt "non-monotonic" "S36c2: no refusal is raised — the ledger this narrowed writer left is prose, exactly like mallory's"
+
 banner "S36d · #64 D13 · a dispatch bound already reached refuses the label write in green with one refusal row"
 reset_fixtures
 issue_fixture 999 OPEN status:planning
 rows=()
 for i in $(seq 1 12); do rows+=("dispatch rung:1 head-oid:$C0 pr:none at:2026-01-01T00:00:00Z event:e$i cost:1.0"); done
-comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 903 999 "${rows[@]}")"
+comments_fixture 999 "$(ledger_comment "$MERGER" 903 999 "${rows[@]}")"
 run "$C0" "$C1" "S36d: a tripped bound is a green exit"
 has "refusal reason-code: budget for #999" "S36d: the reason code is reported for the workflow's escalate step"
 has "loop-ledger-row: refusal:budget rung:2 head-oid:$C1" "S36d: one refusal:budget row"
@@ -1288,7 +1304,7 @@ hasnt "gh issue comment 999" "S36d: no comment is posted"
 banner "S36e · #64 D13 · a cost bound already reached refuses the same way"
 reset_fixtures
 issue_fixture 999 OPEN status:planning
-comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 905 999 \
+comments_fixture 999 "$(ledger_comment "$MERGER" 905 999 \
   "dispatch rung:1 head-oid:$C0 pr:none at:2026-01-01T00:00:00Z event:e1 cost:50.00")"
 run "$C0" "$C1" "S36e: exits 0"
 has "max_cost_usd_per_issue reached" "S36e: the cost bound is the one named"
@@ -1298,7 +1314,7 @@ hasnt "--add-label" "S36e: no label is written"
 banner "S36f · #64 D13 · a row that will not parse makes the ledger unreadable: red, nothing written"
 reset_fixtures
 issue_fixture 999 OPEN status:planning
-comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 904 999 "dispatch: 1")"
+comments_fixture 999 "$(ledger_comment "$MERGER" 904 999 "dispatch: 1")"
 run_fail "$C0" "$C1" "S36f: an unparseable row ends red"
 has "cannot parse" "S36f: the failure names the parse"
 hasnt "--add-label" "S36f: no label is written"
@@ -1363,6 +1379,27 @@ printf 'not json' > "$FIXTURES/comments-999.json"
 run_fail "$C0" "$C1" "S36l: exits red"
 has "unreadable is not absent" "S36l: the failure says why"
 hasnt "--add-label" "S36l: no label is written"
+
+banner "S36m · #64 D25 · MERGE_ACTOR_TOKEN reaches only the two ledger writes, no other gh call"
+# The whole harness runs under DRY_RUN=1 (see "nothing was written" below),
+# so ledger_append's two real `gh api -X PATCH/POST` calls are structurally
+# unreachable here — there is no live write to capture a token from. This
+# checks the same invariant statically, the way S3 checks kw_count is gone:
+# by name, not by behavior.
+writer_calls="$(grep -n 'GH_TOKEN="\$MERGE_ACTOR_TOKEN"' "$ADVANCER" || true)"
+[ "$(wc -l <<<"$writer_calls" | tr -d ' ')" = 2 ] \
+  || { printf '%s\n' "$writer_calls" >&2; fail "S36m: expected exactly 2 gh calls carrying MERGE_ACTOR_TOKEN (the PATCH and the POST), found $(wc -l <<<"$writer_calls" | tr -d ' ')"; }
+grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api -X PATCH' "$ADVANCER" \
+  || fail "S36m: the ledger-row PATCH does not carry MERGE_ACTOR_TOKEN"
+grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api -X POST' "$ADVANCER" \
+  || fail "S36m: the new-ledger POST does not carry MERGE_ACTOR_TOKEN"
+pass "S36m: exactly the PATCH and the POST inside ledger_append carry MERGE_ACTOR_TOKEN"
+other_gh_calls="$(grep -n '^\s*gh \|[^"]gh api\|[^"]gh issue' "$ADVANCER" | grep -v 'GH_TOKEN="\$MERGE_ACTOR_TOKEN"' || true)"
+if grep -q 'GH_TOKEN=' <<<"$other_gh_calls"; then
+  printf '%s\n' "$other_gh_calls" >&2
+  fail "S36m: a gh call outside ledger_append overrides GH_TOKEN locally — only github.token should reach it (D25)"
+fi
+pass "S36m: every gh call outside ledger_append keeps the ambient GH_TOKEN (github.token), never MERGE_ACTOR_TOKEN"
 
 reset_fixtures
 

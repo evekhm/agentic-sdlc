@@ -974,6 +974,17 @@ different identity from the author, the target rung outranks every rung
 the loop ledger records, and the ledger's head marker is present. With
 the flag off the same evaluation runs and nothing is written.
 
+CI (conjunct 2) is read from the pull request's own `mergeStateStatus`
+rather than reconstructed from a required-checks list: `CLEAN` or
+`UNSTABLE` with every check run and commit status on the head other
+than the gate's own — excluded by run identity
+(`checkSuite.workflowRun.databaseId`), never by name — passing, and at
+least one such check existing. `UNKNOWN` is retried up to three times
+before it is treated as unevaluable; `BEHIND` is the one false conjunct
+that escalates, with reason-code `behind`, gated by `autonomous_merge`
+(D18 governs it like any other escalation) and self-clearing when a
+later read finds the head no longer behind (D24, D27, D28).
+
 `scripts/ci/escalate.sh <issue> --reason <code> --head <oid>` is the
 one escalation writer (D9): it swaps `status:*` for
 `status:review-stuck` and posts one comment carrying
@@ -987,16 +998,29 @@ The loop ledger is one container comment per issue,
 `<!-- loop-ledger:<n> -->` … `<!-- loop-ledger-end -->`, with three row
 kinds: `dispatch` (rung entered, merged head-oid, event, pr, at, cost),
 `terminal` (the review rung, D17) and `refusal:<reason>`. Only rows a
-trusted writer posted count — the merge actor App and
-`github-actions[bot]` (D22); anything else on the thread is prose. An
-unreadable or unparseable ledger fails closed and is never read as
-absent.
+trusted writer posted count — the merge actor App alone, resolved
+dynamically via `gh api user` rather than trusted by name (D23);
+`github-actions[bot]`, trusted under the superseded D22, is not — a
+comment it posted carrying a ledger or escalation marker is logged and
+ignored, never state and never a decline. Every write of such a comment
+therefore carries the merge actor's own token: `merge_gate.sh` and
+`escalate.sh` already held it, and `lifecycle_advance.sh`'s ledger rows
+(dispatch, terminal and D13/D14 refusal rows) now do too, minted the
+same way `merge-gate.yml` mints it and reaching each script by name as
+`MERGE_ACTOR_TOKEN`; the `status:*` label writes and handoff comments
+stay on `GITHUB_TOKEN` so they start no workflow (D16). An unreadable or
+unparseable ledger fails closed and is never read as absent.
 
 `.github/workflows/merge-gate.yml` holds `contents: write`,
 `pull-requests: write`, `issues: write`, `checks: read`,
 `statuses: read` and nothing else (acceptance 19); the merge actor
 App's manifest in `scripts/auth/app_manifests.yaml` requests the same
-five plus the `metadata: read` every App carries.
+five plus the `metadata: read` every App carries. Both
+`merge-gate.yml`'s mutating job and `lifecycle.yml` mint that App's
+token under one job-level `environment: merge-actor`, whose
+deployment-branch policy admits `main` only (D23); that policy is
+unverifiable from inside the loop and is precondition P1, not a
+runtime check (Amendment r2).
 
 ## Agreed, not yet built
 

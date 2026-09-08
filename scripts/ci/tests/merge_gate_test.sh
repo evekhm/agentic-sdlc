@@ -10,7 +10,11 @@
 #
 # Each scenario names the Decision row it pins. The green fixture is
 # built once (mk_green) and every flip scenario changes exactly one
-# thing from it, so a failure names the conjunct that moved.
+# thing from it, so a failure names the conjunct that moved. MG-21
+# onward cover Amendment r2 (D23-D28) and S3: the trusted-writer set
+# narrowed to the merge actor's own login, resolved via `gh api user`
+# rather than guessed, and conjunct (2) read from `mergeStateStatus`
+# rather than branch-protection required checks.
 
 set -euo pipefail
 
@@ -32,12 +36,20 @@ export PATH="$WORK/bin:$PATH"
 export FX WRITES INVOKES
 export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
 export DRY_RUN=0
+# #64 D24: the gate's own check run is excluded from conjunct (2) by its
+# owning workflow-run id, not by name — fix it here so fixtures can
+# stamp the gate's own check with the same id.
+export GITHUB_RUN_ID=999
+# Zero the retry sleep so the bounded UNKNOWN re-read (D24) does not
+# slow the suite down.
+export MERGE_STATE_RETRY_SLEEP=0
 
 MERGER='evekhm-merge-actor-app[bot]'
 ACTIONS='github-actions[bot]'
 ATLAS='evekhm-atlas-app[bot]'
 H="$(printf 'a%.0s' {1..40})"
 H0="$(printf 'b%.0s' {1..40})"
+export MERGER ACTIONS
 
 for tool in claude gemini agy curl; do
   printf '#!/usr/bin/env bash\necho "%s stub called" >&2\nexit 1\n' "$tool" > "$WORK/bin/$tool"
@@ -66,6 +78,59 @@ case "${1:-} ${2:-}" in
     echo '{"labels":[]}'; exit 0;;
   "pr merge"|"issue edit"|"issue comment")
     record_write "$@"; exit 0;;
+  "api user")
+    # S3, D23: the merge actor's own login, resolved from the token in
+    # scope. $FX/user-unreadable simulates an unresolvable identity.
+    [ -f "$FX/user-unreadable" ] && { echo "unauthorized" >&2; exit 1; }
+    printf '{"login":"%s"}\n' "$MERGER"; exit 0;;
+  "api graphql")
+    # D24: mergeStateStatus + check roll-up (with each CheckRun's owning
+    # workflow-run id). $FX/mergestate-<pr>.state holds one state per
+    # line, consumed in order across repeated calls (simulating GitHub's
+    # lazy UNKNOWN -> verdict computation); the last line repeats once
+    # exhausted. $FX/mergestate-<pr>.checks holds `|`-separated rows
+    # (bash `read` collapses consecutive TAB delimiters as IFS
+    # whitespace, which would swallow an empty middle field):
+    # type(check|status)|name|conclusion-or-state|run-id
+    # (run-id empty for a StatusContext or an unowned CheckRun).
+    pr=""
+    args=("$@")
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      if [ "${args[$i]}" = "-F" ] && [[ "${args[$((i + 1))]:-}" == pr=* ]]; then
+        pr="${args[$((i + 1))]#pr=}"
+      fi
+    done
+    [ -n "$pr" ] || { echo "gh stub: graphql call missing -F pr=" >&2; exit 1; }
+    if [ -f "$FX/mergestate-$pr.unreadable" ]; then exit 1; fi
+    if [ ! -f "$FX/mergestate-$pr.state" ]; then
+      echo '{"data":{"repository":{"pullRequest":null}}}'; exit 0
+    fi
+    cnt_file="$FX/mergestate-$pr.count"
+    n=0; [ -f "$cnt_file" ] && n="$(cat "$cnt_file")"
+    echo $((n + 1)) > "$cnt_file"
+    mapfile -t states < "$FX/mergestate-$pr.state"
+    idx="$n"; [ "$idx" -lt "${#states[@]}" ] || idx=$((${#states[@]} - 1))
+    state="${states[$idx]}"
+    checks_json="[]"
+    if [ -f "$FX/mergestate-$pr.checks" ]; then
+      checks_json="$(while IFS='|' read -r ty name val runid; do
+        [ -n "$ty" ] || continue
+        if [ "$ty" = check ]; then
+          if [ -n "$runid" ]; then
+            jq -nc --arg n "$name" --arg c "$val" --argjson r "$runid" \
+              '{__typename:"CheckRun", name:$n, conclusion:$c, checkSuite:{workflowRun:{databaseId:$r}}}'
+          else
+            jq -nc --arg n "$name" --arg c "$val" \
+              '{__typename:"CheckRun", name:$n, conclusion:$c, checkSuite:{workflowRun:null}}'
+          fi
+        else
+          jq -nc --arg n "$name" --arg s "$val" '{__typename:"StatusContext", context:$n, state:$s}'
+        fi
+      done < "$FX/mergestate-$pr.checks" | jq -s .)"
+    fi
+    jq -nc --arg ms "$state" --argjson checks "$checks_json" \
+      '{data: {repository: {pullRequest: {mergeStateStatus: $ms, commits: {nodes: [{commit: {statusCheckRollup: {contexts: {nodes: $checks}}}}]}}}}}'
+    exit 0;;
 esac
 if [ "${1:-}" = api ]; then
   method=GET path="" skip=0
@@ -85,9 +150,6 @@ if [ "${1:-}" = api ]; then
       [ -f "$FX/comments-$n.unreadable" ] && exit 1
       if [ -f "$FX/comments-$n.json" ]; then cat "$FX/comments-$n.json"; else echo '[]'; fi
       exit 0;;
-    repos/*/branches/*/protection/required_status_checks)
-      [ -f "$FX/protection.json" ] && { cat "$FX/protection.json"; exit 0; }
-      echo '{"message":"Not Found","status":"404"}' >&2; exit 1;;
     repos/*/contents/*)
       rel="${p#*/contents/}"; t="$FX/tree/$rel"
       if [ -d "$t" ]; then
@@ -129,20 +191,18 @@ loop_limits() { # <autonomous> <max-dispatch> <max-cost>
   printf '%s\n' "$3" > "$FX/loop-max_cost_usd_per_issue"
 }
 # pr_fixture: every field has a green default; override through the
-# named variables before calling.
+# named variables before calling. mergeStateStatus and the check
+# roll-up are a separate fixture (mergestate_fixture/mergestate_checks,
+# D24) since the gate reads them over GraphQL, never from `gh pr view`.
 PR_BODY='Refs #456'; PR_AUTHOR='evekhm-odyssey-app[bot]'; PR_HEADREPO="$GITHUB_REPOSITORY"
 PR_BASE='main'; PR_LABELS='[]'; PR_CLOSING='[]'; PR_HEAD="$H"; PR_STATE='OPEN'; PR_HEADREF='odyssey/456-thing'
-PR_ROLLUP='[{"__typename":"CheckRun","name":"merge-gate","status":"IN_PROGRESS","conclusion":null},
-            {"__typename":"CheckRun","name":"execution — bindings","status":"COMPLETED","conclusion":"SUCCESS"},
-            {"__typename":"StatusContext","context":"argus via gh-actions","state":"SUCCESS"}]'
 pr_fixture() { # <number>
   jq -nc --argjson n "$1" --arg body "$PR_BODY" --arg author "$PR_AUTHOR" --arg hr "$PR_HEADREPO" \
     --arg base "$PR_BASE" --argjson labels "$PR_LABELS" --argjson closing "$PR_CLOSING" \
-    --arg head "$PR_HEAD" --arg headref "$PR_HEADREF" --arg state "$PR_STATE" --argjson rollup "$PR_ROLLUP" \
+    --arg head "$PR_HEAD" --arg headref "$PR_HEADREF" --arg state "$PR_STATE" \
     '{number: $n, state: $state, body: $body, author: {login: $author}, headRefName: $headref,
       headRefOid: $head, headRepository: {nameWithOwner: $hr}, baseRefName: $base,
-      labels: ($labels | map({name: .})), closingIssuesReferences: ($closing | map({number: .})),
-      statusCheckRollup: $rollup}' > "$FX/pr-$1.json"
+      labels: ($labels | map({name: .})), closingIssuesReferences: ($closing | map({number: .}))}' > "$FX/pr-$1.json"
 }
 issue_fixture() { # <number> [label ...]
   local n="$1"; shift
@@ -170,6 +230,29 @@ loop_ledger() { # <issue> [row-text ...]   row-text = what follows "loop-ledger-
   local r; for r in "$@"; do out="$out"$'\n'"- row <!-- loop-ledger-row: $r -->"; done
   printf '%s\n%s\n' "$out" "<!-- loop-ledger-end -->"
 }
+# D24: mergeStateStatus per pull request, one value per re-read attempt
+# (repeats the last value once exhausted — GitHub's lazy computation
+# means the first read after a push is often UNKNOWN and a later one
+# settles).
+mergestate_fixture() { # <pr> <state> [state ...]
+  local pr="$1"; shift
+  printf '%s\n' "$@" > "$FX/mergestate-$pr.state"
+}
+# D24: the check roll-up backing mergeStateStatus. Each row:
+#   check|<name>|<conclusion|empty-for-pending>|<run-id|empty>
+#   status|<name>|<state>|(ignored)
+mergestate_checks() { # <pr> <row>...
+  local pr="$1"; shift
+  printf '%s\n' "$@" > "$FX/mergestate-$pr.checks"
+}
+row() { printf '%s|%s|%s|%s' "$1" "$2" "$3" "$4"; } # <type> <name> <val> <runid>
+# The green roll-up: the gate's own check run (excluded by run id, D24)
+# plus one other check and one status context, both green.
+GREEN_CHECKS=(
+  "$(row check merge-gate '' 999)"
+  "$(row check 'execution — bindings' SUCCESS 1001)"
+  "$(row status 'argus via gh-actions' SUCCESS '')"
+)
 # D13: a dispatch row at rung n carries the merged head that opened rung
 # n, so it records that rung n-1 merged; three dispatches (2, 3, 4) mean
 # rungs 1-3 merged and the issue sits at rung 4, status:implementing.
@@ -183,12 +266,14 @@ mk_green() {
   loop_limits true 12 50.00
   PR_BODY='Refs #456'; PR_AUTHOR='evekhm-odyssey-app[bot]'; PR_HEADREPO="$GITHUB_REPOSITORY"
   PR_BASE='main'; PR_LABELS='[]'; PR_CLOSING='[]'; PR_HEAD="$H"; PR_STATE='OPEN'; PR_HEADREF='odyssey/456-thing'
-  PR_ROLLUP='[{"__typename":"CheckRun","name":"merge-gate","status":"IN_PROGRESS","conclusion":null},
-              {"__typename":"CheckRun","name":"execution — bindings","status":"COMPLETED","conclusion":"SUCCESS"},
-              {"__typename":"StatusContext","context":"argus via gh-actions","state":"SUCCESS"}]'
   pr_fixture 123
+  mergestate_fixture 123 CLEAN
+  mergestate_checks 123 "${GREEN_CHECKS[@]}"
   issue_fixture 456 status:implementing
-  comments_fixture 456 "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 700)"
+  # D23: the trusted writer is the merge actor's own login alone —
+  # github-actions[bot] no longer counts, so the green baseline's
+  # state-carrying comments are authored by $MERGER.
+  comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 700)"
   comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" R1-1:high:fixed:none R1-2:normal:open:none)" 2026-01-04T00:00:00Z 800)"
 }
 
@@ -241,7 +326,7 @@ banner "MG-1 · D5 all eleven · D18 true · the green fixture merges, once, pin
 mk_green
 run "MG-1: green fixture exits 0" 123
 merged "MG-1: exactly the one merge write, --match-head-commit pins the evaluated head"
-has "conjunct (2): true" "MG-1: the gate's own in-progress check run is excluded from conjunct (2)"
+has "conjunct (2): true" "MG-1: the gate's own run is excluded from conjunct (2) by run id (D24)"
 has "conjunct (10): true" "MG-1: rung 4 > highest merged rung 3"
 [ "$(grep -c '^gh pr merge' "$WRITES")" -eq 1 ] || fail "MG-1: more than one merge write"
 not_wrote "loop-ledger-row" "MG-1: the gate writes no ledger row on a merge — the advancer records the merge it observes (D13)"
@@ -253,7 +338,7 @@ has "all eleven conjuncts hold" "MG-2: the verdict is logged"
 has "autonomous_merge is false" "MG-2: and names the flag that stopped the write"
 no_writes "MG-2"
 
-banner "MG-3 · D22 · a consensus ledger by an untrusted login is prose"
+banner "MG-3 · D23 · a consensus ledger by an untrusted login is prose"
 mk_green
 comments_fixture 123 "$(comment mallory "$(consensus_ledger 123 "$H" "$H")" 2026-01-04T00:00:00Z 801)"
 run "MG-3: exits 0" 123
@@ -261,7 +346,7 @@ has "conjunct (3): false" "MG-3: conjunct (3) is false"
 has "no consensus ledger for #123 from a trusted writer" "MG-3: and says the ledger it saw does not count"
 not_merged "MG-3"
 
-banner "MG-4 · D22 D13 · a loop ledger by an untrusted login is not counted; a trusted one is"
+banner "MG-4 · D23 D13 · a loop ledger by an untrusted login is not counted; a trusted one is"
 mk_green
 rows=(); for i in $(seq 1 12); do rows+=("dispatch rung:1 head-oid:$H0 event:e$i at:2026-01-01T00:00:00Z cost:1.00"); done
 comments_fixture 456 "$(comment mallory "$(loop_ledger 456 "${rows[@]}")" 2026-01-03T00:00:00Z 701)"
@@ -288,14 +373,14 @@ not_merged "MG-4c"
 
 banner "MG-5 · D13 · cost bound, summed from trusted dispatch rows only"
 mk_green
-comments_fixture 456 "$(comment "$ACTIONS" "$(loop_ledger 456 "dispatch rung:1 head-oid:$H0 event:e1 at:2026-01-01T00:00:00Z cost:30.00" "dispatch rung:2 head-oid:$H0 event:e2 at:2026-01-01T00:00:00Z cost:20.00")" 2026-01-03T00:00:00Z 703)"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:1 head-oid:$H0 event:e1 at:2026-01-01T00:00:00Z cost:30.00" "dispatch rung:2 head-oid:$H0 event:e2 at:2026-01-01T00:00:00Z cost:20.00")" 2026-01-03T00:00:00Z 703)"
 run "MG-5: exits 0" 123
 has "max_cost_usd_per_issue exceeded (50.00/50.00)" "MG-5: the summed cost reaching the cap is a breach"
 not_merged "MG-5"
 
 banner "MG-6 · D13 · an unparseable ledger row is unreadable, and unreadable is not absent"
 mk_green
-comments_fixture 456 "$(comment "$ACTIONS" "$(loop_ledger 456 "dispatch: 1 ...")" 2026-01-03T00:00:00Z 704)"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch: 1 ...")" 2026-01-03T00:00:00Z 704)"
 run "MG-6: exits 0" 123
 has "cannot parse" "MG-6: the decline names the parse failure"
 not_merged "MG-6"
@@ -347,23 +432,24 @@ run "MG-10: exits 0" 123
 has "conjunct (7): false" "MG-10: author == merge actor fails (7)"
 not_merged "MG-10"
 
-banner "MG-11 · conjunct (2) · every check succeeds; a failure or an empty set is false"
+banner "MG-11 · conjunct (2) · D24 · mergeStateStatus and its check roll-up"
 mk_green
-PR_ROLLUP='[{"__typename":"CheckRun","name":"merge-gate","status":"COMPLETED","conclusion":"FAILURE"},
-            {"__typename":"CheckRun","name":"execution — bindings","status":"COMPLETED","conclusion":"FAILURE"}]'; pr_fixture 123
-run "MG-11a: a failed check exits 0" 123
-has "conjunct (2): false" "MG-11a: a failing check fails (2)"
+mergestate_fixture 123 BLOCKED
+run "MG-11a: mergeStateStatus BLOCKED exits 0" 123
+has "conjunct (2): false" "MG-11a: BLOCKED fails (2)"
+has "mergeStateStatus is BLOCKED" "MG-11a: names the state"
 not_merged "MG-11a"
 mk_green
-PR_ROLLUP='[{"__typename":"CheckRun","name":"merge-gate","status":"IN_PROGRESS","conclusion":null}]'; pr_fixture 123
-run "MG-11b: only the gate's own check exits 0" 123
+mergestate_checks 123 "$(row check merge-gate '' 999)"
+run "MG-11b: only the gate's own run in the roll-up exits 0" 123
 has "conjunct (2): false" "MG-11b: no check besides the gate itself fails (2)"
+has "no check besides the gate's own run" "MG-11b: names the reason"
 not_merged "MG-11b"
 mk_green
-printf '{"contexts":["execution — bindings","spec-check"]}\n' > "$FX/protection.json"
-run "MG-11c: a required context missing from the rollup exits 0" 123
-has "conjunct (2): false" "MG-11c: a required check absent from the head fails (2)"
-has "spec-check" "MG-11c: and is named"
+mergestate_checks 123 "$(row check merge-gate '' 999)" "$(row check 'execution — bindings' FAILURE 1001)"
+run "MG-11c: a failing check exits 0" 123
+has "conjunct (2): false" "MG-11c: a failing check fails (2)"
+has "execution — bindings=FAILURE" "MG-11c: and is named"
 not_merged "MG-11c"
 
 banner "MG-12 · conjunct (3) · D7 · verdict heads"
@@ -434,7 +520,7 @@ not_merged "MG-14"
 
 banner "MG-15 · conjunct (10) · D14 · the rung must exceed the highest merged rung"
 mk_green
-comments_fixture 456 "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}" "terminal rung:5 head-oid:$H0 pr:14 at:2026-01-04T00:00:00Z")" 2026-01-03T00:00:00Z 705)"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}" "terminal rung:5 head-oid:$H0 pr:14 at:2026-01-04T00:00:00Z")" 2026-01-03T00:00:00Z 705)"
 run "MG-15: exits 0" 123
 has "conjunct (10): false" "MG-15: a terminal row at rung 5 records rung 4 merged; rung 4 is not greater than 4"
 not_merged "MG-15"
@@ -463,7 +549,7 @@ not_merged "MG-16d"
 banner "MG-17 · D10 · self-clearing"
 mk_green; issue_fixture 456 status:review-stuck
 comments_fixture 456 \
-  "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 706)" \
+  "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 706)" \
   "$(comment "$MERGER" "Escalation: budget at head $H0."$'\n\n'"<!-- escalation:status:implementing:budget:$H0 -->" 2026-01-05T00:00:00Z 707)"
 run "MG-17a: budget escalation exits 0" 123
 has "budget" "MG-17a: names the live escalation"
@@ -471,24 +557,24 @@ has "still live" "MG-17a: a budget escalation never clears itself"
 no_writes "MG-17a"
 mk_green; issue_fixture 456 status:review-stuck
 comments_fixture 456 \
-  "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 708)" \
+  "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 708)" \
   "$(comment "$MERGER" "Escalation: dispute-at-cap at head $H0."$'\n\n'"<!-- escalation:status:implementing:dispute-at-cap:$H0 -->" 2026-01-05T00:00:00Z 709)"
 run "MG-17b: dispute-at-cap escalation with consensus at a new head exits 0" 123
 wrote "^gh issue edit 456 --add-label status:implementing --remove-label status:review-stuck" "MG-17b: the displaced label is restored"
 merged "MG-17b: and D5 is evaluated for the new head"
 mk_green; issue_fixture 456 status:review-stuck
 comments_fixture 456 \
-  "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 710)" \
+  "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 710)" \
   "$(comment "$MERGER" "<!-- escalation:status:implementing:dispute-at-cap:$H -->" 2026-01-05T00:00:00Z 711)"
 run "MG-17c: escalation at the current head exits 0" 123
 has "still live" "MG-17c: consensus at the SAME head does not clear the marker"
 no_writes "MG-17c"
 mk_green; issue_fixture 456 status:review-stuck
 comments_fixture 456 \
-  "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 712)" \
+  "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 712)" \
   "$(comment mallory "<!-- escalation:status:implementing:dispute-at-cap:$H0 -->" 2026-01-05T00:00:00Z 713)"
 run "MG-17d: marker by an untrusted login exits 0" 123
-has "no escalation marker from a trusted writer" "MG-17d: a forged marker does not drive the restore (D22)"
+has "no escalation marker from a trusted writer" "MG-17d: a forged marker does not drive the restore (D23)"
 no_writes "MG-17d"
 
 banner "MG-18 · D9 · at the round cap an open security row escalates as security-open"
@@ -499,7 +585,7 @@ wrote "loop-ledger-row: refusal:security-open rung:4 head-oid:$H pr:123" "MG-18:
 wrote "<!-- escalation:status:implementing:security-open:$H -->" "MG-18: the escalation marker"
 not_merged "MG-18"
 
-banner "MG-19 · escalate.sh · D9 D22 · idempotent on a trusted marker only; body is real lines"
+banner "MG-19 · escalate.sh · D9 D23 · idempotent on a trusted marker only; body is real lines"
 mk_green
 comments_fixture 456 "$(comment "$MERGER" "<!-- escalation:status:implementing:budget:$H -->" 2026-01-05T00:00:00Z 716)"
 run_fail "$ESCALATE" "MG-19a: --head that is not an OID is refused" 456 --reason budget --head 123
@@ -524,6 +610,124 @@ run "MG-20: exits 0" 123
 has "Failing closed" "MG-20: the decline names the fail-closed rule"
 not_merged "MG-20"
 no_writes "MG-20"
+
+banner "MG-21 · merge_gate.sh · S3 · an unresolvable merge-actor login fails closed"
+mk_green
+: > "$FX/user-unreadable"
+run "MG-21: exits 0 (a decline, not a script failure)" 123
+has "cannot resolve the merge actor's login via 'gh api user'" "MG-21: names the S3 reason"
+has "S3" "MG-21: cites the fixing decision"
+not_merged "MG-21"
+no_writes "MG-21"
+rm -f "$FX/user-unreadable"
+
+banner "MG-22 · D23 · github-actions[bot] is narrowed out of the trusted-writer set"
+mk_green
+comments_fixture 123 "$(comment "$ACTIONS" "$(consensus_ledger 123 "$H" "$H")" 2026-01-04T00:00:00Z 820)"
+run "MG-22a: exits 0" 123
+has "conjunct (3): false" "MG-22a: a github-actions[bot] consensus ledger no longer counts (D23)"
+has "no consensus ledger for #123 from a trusted writer" "MG-22a: named as absent, not forged"
+not_merged "MG-22a"
+mk_green
+rows2=(); for i in $(seq 1 12); do rows2+=("dispatch rung:1 head-oid:$H0 event:e$i at:2026-01-01T00:00:00Z cost:1.00"); done
+comments_fixture 456 "$(comment "$ACTIONS" "$(loop_ledger 456 "${rows2[@]}")" 2026-01-03T00:00:00Z 821)"
+run "MG-22b: exits 0" 123
+hasnt "max_rung_dispatches_per_issue" "MG-22b: a github-actions[bot] loop ledger no longer counts toward the bound (D23)"
+merged "MG-22b: and the merge proceeds on the trusted (absent) ledger"
+
+banner "MG-23 · D24 · mergeStateStatus UNKNOWN on every read is unevaluable after bounded retry"
+mk_green
+mergestate_fixture 123 UNKNOWN
+run "MG-23: exits 0" 123
+has "conjunct (2): false" "MG-23: persistent UNKNOWN fails (2)"
+has "still UNKNOWN after" "MG-23: names the bounded retry"
+[ "$(grep -c 'gh api graphql' "$INVOKES")" -eq 4 ] || { cat "$INVOKES" >&2; fail "MG-23: expected exactly 4 graphql reads (1 initial + 3 retries)"; }
+pass "MG-23: exactly 4 graphql reads"
+not_merged "MG-23"
+
+banner "MG-24 · D24 · mergeStateStatus UNKNOWN then CLEAN on retry succeeds"
+mk_green
+mergestate_fixture 123 UNKNOWN CLEAN
+run "MG-24: exits 0" 123
+has "conjunct (2): true" "MG-24: the retry recovers a real verdict"
+merged "MG-24: and the merge proceeds"
+
+banner "MG-25 · D24 · an unreadable merge-state/check roll-up is unevaluable"
+mk_green
+: > "$FX/mergestate-123.unreadable"
+run "MG-25: exits 0" 123
+has "conjunct (2): false" "MG-25: an unreadable roll-up fails (2)"
+has "unreadable" "MG-25: names the reason"
+not_merged "MG-25"
+
+banner "MG-26 · D24 · a foreign check literally named merge-gate is NOT excluded — identity, not name"
+mk_green
+mergestate_checks 123 "$(row check merge-gate '' 999)" "$(row check merge-gate FAILURE 12345)"
+run "MG-26: exits 0" 123
+has "conjunct (2): false" "MG-26: the foreign merge-gate-named check still counts"
+has "merge-gate=FAILURE" "MG-26: and is named as failing"
+not_merged "MG-26"
+
+banner "MG-27 · D24 · a pending check (no conclusion yet) fails conjunct (2)"
+mk_green
+mergestate_fixture 123 UNSTABLE
+mergestate_checks 123 "$(row check merge-gate '' 999)" "$(row check 'execution — bindings' '' 1001)"
+run "MG-27: exits 0" 123
+has "conjunct (2): false" "MG-27: a pending check fails (2)"
+has "execution — bindings=PENDING" "MG-27: and is named pending"
+not_merged "MG-27"
+
+banner "MG-28 · D27 · mergeStateStatus BEHIND escalates only when autonomous_merge is true"
+mk_green
+mergestate_fixture 123 BEHIND
+run "MG-28a: exits 0" 123
+has "conjunct (2): false" "MG-28a: BEHIND fails (2)"
+wrote "loop-ledger-row: refusal:behind rung:4 head-oid:$H pr:123" "MG-28a: a refusal:behind row is written"
+wrote "^gh issue edit 456 --add-label status:review-stuck --remove-label status:implementing" "MG-28a: and autonomous_merge=true escalates"
+wrote "<!-- escalation:status:implementing:behind:$H -->" "MG-28a: with the behind marker"
+not_merged "MG-28a"
+mk_green; loop_limits false 12 50.00
+mergestate_fixture 123 BEHIND
+run "MG-28b: exits 0 with autonomous_merge false" 123
+wrote "loop-ledger-row: refusal:behind rung:4 head-oid:$H pr:123" "MG-28b: the refusal row is still written"
+not_wrote "^gh issue edit" "MG-28b: no label move while the flag is false (D27)"
+not_wrote "<!-- escalation:" "MG-28b: and no escalation marker is posted"
+not_merged "MG-28b"
+
+banner "MG-29 · D28 · a behind escalation marker clears on the head's OWN mergeStateStatus, never on head-oid equality"
+mk_green; issue_fixture 456 status:review-stuck
+comments_fixture 456 \
+  "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 822)" \
+  "$(comment "$MERGER" "Escalation: behind at head $H."$'\n\n'"<!-- escalation:status:implementing:behind:$H -->" 2026-01-05T00:00:00Z 823)"
+mergestate_fixture 123 CLEAN
+run "MG-29a: the SAME head, mergeStateStatus now CLEAN, exits 0" 123
+wrote "^gh issue edit 456 --add-label status:implementing --remove-label status:review-stuck" "MG-29a: the marker clears on the head's own state, with no head-oid change at all"
+merged "MG-29a: and the merge proceeds"
+mk_green; issue_fixture 456 status:review-stuck
+comments_fixture 456 \
+  "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 824)" \
+  "$(comment "$MERGER" "Escalation: behind at head $H."$'\n\n'"<!-- escalation:status:implementing:behind:$H -->" 2026-01-05T00:00:00Z 825)"
+mergestate_fixture 123 BEHIND
+run "MG-29b: mergeStateStatus still BEHIND exits 0" 123
+has "still live" "MG-29b: the marker stays live while mergeStateStatus is still BEHIND"
+no_writes "MG-29b"
+mk_green; issue_fixture 456 status:review-stuck
+comments_fixture 456 \
+  "$(comment "$MERGER" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}")" 2026-01-03T00:00:00Z 826)" \
+  "$(comment "$MERGER" "Escalation: behind at head $H."$'\n\n'"<!-- escalation:status:implementing:behind:$H -->" 2026-01-05T00:00:00Z 827)"
+mergestate_fixture 123 UNKNOWN
+run "MG-29c: mergeStateStatus UNKNOWN exits 0" 123
+has "still live" "MG-29c: the marker stays live while mergeStateStatus is UNKNOWN"
+no_writes "MG-29c"
+
+banner "MG-30 · escalate.sh · S3 · an unresolvable merge-actor login refuses, nothing written"
+mk_green
+comments_fixture 456 "$(comment "$MERGER" "<!-- escalation:status:implementing:budget:$H -->" 2026-01-05T00:00:00Z 828)"
+: > "$FX/user-unreadable"
+run_fail "$ESCALATE" "MG-30: escalate refuses when the merge actor's login is unresolvable" 456 --reason budget --head "$H"
+has "cannot resolve the merge actor's login via 'gh api user'" "MG-30: names the S3 reason"
+no_writes "MG-30"
+rm -f "$FX/user-unreadable"
 
 echo
 echo "merge_gate_test.sh: all scenarios passed"
