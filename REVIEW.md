@@ -156,7 +156,7 @@ ROUND 3 - same scope rules as round 2
     comments only past this point, no new findings
        |
        v
-AUTONOMOUS LOOP MERGES WHEN CONSENSUS IS REACHED  (a human merge is the escape hatch available at any time)
+AUTONOMOUS LOOP MERGES WHEN CONSENSUS IS REACHED (a human merge is the escape hatch available at any time)
        |
        v
 the recorder files ONE follow-up issue listing every still-open

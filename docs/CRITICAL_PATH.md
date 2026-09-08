@@ -33,26 +33,65 @@ order:
    one small PR, merge on smoke, so a ladder PR can have two reviewer
    voices.
 3. #64 implementation rung on agy (odyssey; prompt
-   `~/waves/w4-64-odyssey.txt`, launch line `~/waves/launch.sh 64i`),
-   merge on smoke.
-4. #147 minimal, after #64's PR merges (both touch unattended.yml):
-   the working personas become label-triggered on the runner. Today
-   `config/execution.yaml` has athena, daedalus and odyssey as
-   `trigger: manual, placement: vm-local` and `unattended.yml` fires
-   only on `pull_request`; the change adds `issues: [labeled]`, maps
-   `status:spec` / `status:build` / `status:implementing` to the
-   persona that owns the stage, and runs it on gh-actions. Prompt
-   `~/waves/w4-147-odyssey.txt` (being drafted), merge on smoke.
+   `ops/waves/w4-64-odyssey.txt`, launch line `ops/waves/launch.sh 64i`),
+   merge on smoke. Launched by the operator 2026-09-08 06:50:36 UTC as
+   agy-64i (worktree odyssey-64-autonomous-loop, branch
+   odyssey/64-autonomous-loop); #246 (lifecycle_advance_test.sh run by
+   no workflow, must be baselined and kept green through T6, added to
+   ci-gates.yml) and #245 (no closing keyword in any commit body;
+   "Does not close #108" closed #108) reached the session through the
+   #64 thread (verifier comment 5580549928, advisor comment
+   5580631791) because the launch preceded the prompt amendment.
+   Merge on smoke by the verifier.
+4. #251 + #252, the end-to-end chain after #64. Retired: the #147
+   label-trigger slice — the merged #64 spec D16 reads "No second
+   workflow, no `issues: labeled` trigger, no new event" and flips
+   athena/daedalus/odyssey to `trigger: ladder`, so the chain exists
+   once #64 lands. What is missing (none of it in the #64 plan): (a)
+   #252 — the advancer never releases the finished rung's
+   `in-progress`, and work.sh refusal (g) keys on the persona
+   changing, so a run from intent:new advances one rung
+   (intent→spec, athena resumes herself), writes status:build and
+   stalls with the board looking advanced; fix = the transition
+   releases the claim only when its holder owns the rung just merged,
+   any other holder keeps the loop stopped with a named notice; (b)
+   #251 gap 2 — the D16 dispatch runs the placement adapter in place
+   inside lifecycle.yml (gh-actions/run.sh:128 execs work.sh), which
+   has no harness and no persona key, so it prints a green skip; fix =
+   start unattended.yml through workflow_dispatch (GITHUB_TOKEN may,
+   with actions: write), lifecycle.yml stays secret-free; (c) #251 gap
+   3, the operator's one-time checklist: loop.autonomous_merge true,
+   placement gh-actions for the three personas, merge-actor App
+   installed with its key as a repository secret,
+   ATHENA/DAEDALUS/ODYSSEY_APP_PRIVATE_KEY secrets loaded (names
+   only), first hop stays a human dispatch of athena. Delivery: one PR
+   after the #64 implementation merges, `ops/waves/launch.sh 251`
+   (prompt `ops/waves/w4-251-odyssey.txt`), merged on smoke.
 5. Demo run: the operator launches one rung by hand with the one-line
    prompt ("work issue #98"), and from there the loop carries it: PR,
    runner reviews, #64 merge, advancer flips the label, the runner
    dispatches the next persona, until the issue is done. The job logs
    and the issue thread are the evidence, and the verifier's job on
-   that run is to watch and write down what broke, not to gate it.
+   that run is to watch and write down what broke, not to gate it. The
+   operator launched 98p (daedalus plan rung) at ~06:44 UTC alongside
+   68p, so the demo on #98 may start at the implement rung; either way
+   it needs step 4 complete, including the operator checklist.
 
 Deferred until after the demo: #239, #236, #238, #148, #191, the
 other wave-3 rows, and the old verifier queue (#185, #135, #202,
-#69).
+#69). Also deferred: #244 (WORK_MAX_USD guard in placement_test.sh
+not hermetic); #249 (eight of eleven hermetic suites, 4,689 lines,
+run by no workflow; verifier authors one PR after #64 merges adding
+all eight to ci-gates.yml plus a glob row; advisor clears it since
+the author cannot verify their own change; the operator should know
+the verifier seat is authoring); #250 (#233 residue: SPEC.md:516 vs
+:477, :499 half wrong, two unfailable work_test rows, work.sh:248
+reads issue state not PR state).
+
+PR #237 was merged by squash with branch auto-delete at 06:44:04 UTC —
+the web-UI shape, neither advisor nor verifier; two seats plus at
+least one other hand share the operator-bot login, so merge
+attribution survives only in the run record.
 
 ## Gate 1: unattended review runs on every rung — MET 2026-09-08
 
@@ -139,7 +178,7 @@ which is exactly the state where a review is most needed. Observed
 live: both reviewers refused PR #223 (docs, resolves to #202) with
 "carries status:review-stuck", and PR #202 (#117 plan, review:3) is
 stuck in it today. Ahead in priority, not in sequence: the wave-3 plan
-rungs for #98 and #68 (`~/waves/launch.sh 98p 68p`, prompts
+rungs for #98 and #68 (`ops/waves/launch.sh 98p 68p`, prompts
 w3-98-daedalus.txt and w3-68-daedalus.txt) touch intent/** only and can
 launch now; #239 is deferred under the fast path; it bites only once
 an issue escalates to review-stuck. #236 (below) edits the same file;
@@ -212,7 +251,7 @@ tracker"; the advisor's recommendation is stated where it has one.
   bypass on the ephemeral gh-actions runner with the App token's
   scope as the boundary, allowlist on the vm-local placement; #164
   deferred one security row here.
-- **~/waves/launch.sh into the repo.** Advisor position: yes in
+- **ops/waves/launch.sh into the repo** (filed as #259). Advisor position: yes in
   substance, through the ladder: an intent:new issue first, scoped as
   an extension of scripts/ops/work.sh or a sibling under
   scripts/ops/ with the issue table and the prompts as data files,
@@ -222,10 +261,10 @@ tracker"; the advisor's recommendation is stated where it has one.
 - **nestor's harness pin on #199** (plan T3): post it on the issue
   before the implementation dispatch. The seat runs on claude /
   claude-fable-5-1 today; the pin is the operator's config call.
-- **Fast-forward cadence for the primary checkout.** Advisor
-  recommendation: deferred, no tracker. The read-only primary plus
-  the rule to cite files at the PR base SHA with `git show` removed
-  the pain.
+- **Fast-forward cadence for the primary checkout.** DECIDED by the
+  operator 2026-09-08: the operator never pulls; whoever merges a
+  pull request fast-forwards the primary with `git pull --ff-only`
+  (AGENTS.md "Whoever merges fast-forwards the primary checkout").
 - **Operator-bot login stem.** The operator's alone; it decides which
   login the ops PRs (#232, #234, this one) are attributed to.
 - **Who runs `scripts/ops/worktrees.sh --prune`.** Twice on
@@ -235,7 +274,7 @@ tracker"; the advisor's recommendation is stated where it has one.
 - **Closes by hand:** #207 (PR #233 merged, issue at status:in-review)
   once the verifier confirms; #25, #150, #9 if still open (verify
   live before acting).
-- **Wave 3:** `~/waves/launch.sh 98p 68p`. #85 sits at status:build
+- **Wave 3:** `ops/waves/launch.sh 98p 68p`. #85 sits at status:build
   with no plan-rung row in the launcher; advisor recommendation: add
   an 85p row by the same recipe.
 - Confirm #82 and #198 stay out of the gate-2 blocking set; when to

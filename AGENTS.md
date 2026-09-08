@@ -51,9 +51,13 @@ edit. The never-list at the end is absolute.
    work as a persona, author the commit explicitly as your persona App identity
    (e.g. `git -c user.name="<identity>" -c user.email="<bot_user_id>+<identity>@users.noreply.github.com" commit ...`), deriving the ID via `gh api users/<identity> -q .id` — do not rely on push credentials.
 4. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
-   pausing, drop `in-progress`; after the merge, remove your worktree.
+   pausing, drop `in-progress`; after the merge, remove your worktree
+   and fast-forward the primary checkout ("Whoever merges
+   fast-forwards" below) — a merge the primary has not seen is not
+   finished.
 
-Never: commit, stage, stash or checkout in the primary checkout; work
+Never: commit, stage, stash or checkout in the primary checkout (the
+one sanctioned write there is the `--ff-only` pull below); work
 an issue that is closed or that you have not claimed; push a branch
 without opening a PR; document a runtime mechanism (a flag, a tool, a
 workspace mode) you have not verified against that runtime.
@@ -217,6 +221,25 @@ file names it.
   whose working tree is the primary checkout. It is a last-line check
   on the one moment that's interceptable — the commit itself — not a
   substitute for entering a worktree before the first edit.
+- **Whoever merges fast-forwards the primary checkout.** Read-only
+  does not mean stale: the human reads the primary in their IDE, every
+  session resolves `runs/` and `ops/` through it, and its `.gitignore`
+  and hooks are the ones that bind. The operator is never the one who
+  pulls. The session that merged a pull request — or that finds the
+  primary behind at session start — runs, from any worktree:
+
+  ```bash
+  PRIMARY="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+  git -C "$PRIMARY" pull --ff-only origin main
+  ```
+
+  `--ff-only` is the whole safety: it moves a clean `main` forward and
+  refuses everything else. If it refuses (the primary is dirty, not on
+  `main`, or has diverged), do not stash, reset, rebase or `checkout`
+  your way past it — report the refusal on the pull-request thread and
+  leave it for the operator. Never `git clean -x` there either:
+  `runs/` and `ops/` are ignored and hold the only copies of run
+  records, charters and handoffs.
 - **Enter your own worktree before the first edit**. `scripts/ops/claim.sh`
   creates the worktree for you. If doing it by hand, create it from
   `origin/main`: `git fetch origin && git worktree add -b <actor>/<n>-<slug>
@@ -256,9 +279,12 @@ previews. The cadence:
   the diff.
 
 **The labels are the state machine** (#4, `intent/4-labels/`). Five
-are human-facing and filed by people: `intent:new` (intake),
-`in-progress` (the claim mutex above), `hold`, `blocked`, and
-`bootstrap`. The lifecycle stage is a single `status:*` label — the
+are human-facing: `intent:new` (intake — filed by people, by the
+maintainer's watchers at 3σ (#11), or by any seat recording a gap the
+loop exposed; the system files its own improvements. One exception: a
+reviewer keeps its findings on the PR under review in that PR's
+thread), `in-progress` (the claim mutex above), `hold`, `blocked`,
+and `bootstrap`. The lifecycle stage is a single `status:*` label — the
 ladder `status:planning` → `status:spec` → `status:build` →
 `status:implementing` → `status:in-review` — and **at most one is set
 at a time**: a pair is not a stage, it is two state machines
@@ -356,6 +382,25 @@ handoff comment.
   the same directory. A `runs/` that appears inside a worktree is a
   bug: move its contents to the shared root before the worktree is
   removed.
+- **Operator state lives in `ops/`, beside `runs/`, under the same
+  rules.** Seat charters not yet tracked, dated handoff files, wave
+  dispatch prompts and the launch scripts that drive local agy sessions
+  are machine-local state: they carry live pull-request numbers and
+  operator paths and would rot in git, yet the repo has to name them.
+  They live in the primary checkout's gitignored `ops/`:
+  `ops/charters/`, `ops/handoffs/`, `ops/waves/` (prompts, `launch.sh`,
+  `watch-then-launch.sh`), `ops/worktrees/` (worktrees a seat keeps
+  outside `.claude/worktrees`). One per machine, resolved like
+  `RUNS_ROOT` with `ops` in place of `runs`, never inside a worktree,
+  never flat in the home directory. Because `ops/` is ignored and
+  inside the working tree, `git clean -xfd` at the checkout root
+  deletes it, charters and handoffs included, with no copy anywhere;
+  the same is true of `runs/`. Never run `git clean -x` in the
+  primary checkout. Repo documents cite it by its repo-relative path
+  (`ops/handoffs/handoff-plan-<date>.txt`), never by a `~/` path.
+  Anything that stops being dated graduates into a tracked
+  location through the ladder: a charter into `personas/`, a launcher
+  into `scripts/ops/`.
 - **Bookkeeping: every run artifact records its disposition.** By the
   time a session ends, every artifact the session produced carries a
   disposition naming what became of it: the issue or PR it turned

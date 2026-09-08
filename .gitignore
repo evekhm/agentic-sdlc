@@ -31,6 +31,8 @@ bin/
 ### This repo ###
 # Local scratch — run artifacts never get committed (AGENTS.md)
 runs/
+# Local operator state — charters, handoffs, wave prompts, launchers (AGENTS.md)
+ops/
 # Local harness/IDE state
 .claude/
 .idea/
