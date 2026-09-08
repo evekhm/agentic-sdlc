@@ -427,9 +427,8 @@ Field lessons, each with the incident that taught it:
   `unattended.yml` checks out the PR head, so the work.sh fix in PR
   #233 decided its own review dispatch and gate 1b was met on the PR
   itself; the brief had said "after it merges". Before predicting when
-  a fix takes effect, read the workflow's checkout ref. (Cross-
-  reference the existing Known-mechanics bullet on self-review
-  dispatch above.)
+  a fix takes effect, read the workflow's checkout ref. (See the
+  Known-mechanics bullet on self-review dispatch above.)
 - **A close list is a read task first.** Closing #8 as superseded on
   2026-09-08 dropped two gates (G1, G2) that had been filed on that
   thread the day before; the verifier rehomed them as #238 and left a
@@ -445,12 +444,12 @@ Field lessons, each with the incident that taught it:
   status:review-stuck, closed and blocked BEFORE the review-dispatch
   retarget from #207, so a review-stuck issue can never get the review
   that would clear it (#202 is stuck there today).
-- **Printed is not enforced.** (Cross-reference the existing
-  Known-mechanics bullet on unenforced `max_cost_usd` above.) Six
-  unattended argus runs were measured with `max_cost_usd` printed at
-  2.0 and none capped: $1.16, $3.16, $3.03, $2.70, $2.28, $2.75; PR
-  #232 is the carry. A guard exists when there is a datum of it
-  firing; until then the record says "declared".
+- **Printed is not enforced.** (See the Known-mechanics bullet on
+  unenforced `max_cost_usd` above.) Six unattended argus runs were
+  measured with `max_cost_usd` printed at 2.0 and none capped: $1.16,
+  $3.16, $3.03, $2.70, $2.28, $2.75; PR #232 is the carry. A guard
+  exists when there is a datum of it firing; until then the record
+  says "declared".
 - **The repair-path ruling**, given twice (PR #221 for #167, PR #232
   for #108), recorded so it is not re-derived: a PR authored under the
   operator bot that repairs a gap the living spec already documents
