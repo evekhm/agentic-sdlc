@@ -21,35 +21,22 @@ harnesses:
                                 # 2x its rate and review runs every PR round (#105)
 
   antigravity:
-    FAST: gemini-3.8-flash-medium   # or -low; `agy models` lists runtime
-    MECHANICAL: gemini-3.8-flash-high
-    IMPLEMENTATION: gemini-3.8-flash-high
-    # Pro (Low) with thinking, and the id is not a typo: `agy` serves a
-    # narrower catalog under ADC (`AGY_ADC_AUTH=true`, what a runner
-    # uses) than under an account login, and where it answers at all it
-    # offers exactly one Pro-tier id — this one. `gemini-3.1-pro-high`
-    # resolves on a laptop and on no runner.
-    #
-    # This pin is necessary and NOT sufficient, and the earlier note here
-    # named the wrong cause. Atlas's 17-second deaths (#167) are the
-    # catalog FETCH returning nothing, and that is a property of the
-    # IDENTITY, not of the project: cloudcode-pa.googleapis.com serves a
-    # catalog per Antigravity entitlement, a federated service account
-    # holds none, and with no catalog `agy` rejects every id. Measured
-    # 2026-09-07 on a runner — WIF service account: 0 models; the same
-    # runner shape with an `authorized_user` ADC credential: 15 models
-    # and a successful call. Both projects behaved identically, and
-    # granting `roles/serviceusage.serviceUsageConsumer` changed nothing.
-    # The sufficient half is therefore the credential, provisioned as
-    # the ANTIGRAVITY_ADC_JSON secret and swapped in by work.sh on the
-    # antigravity branch only.
-    #
-    # Every id above and below is present in that ADC catalog, verified
-    # the same day. Verify an antigravity re-pin by a live dispatch; no
-    # gate here can see either failure. FRONTIER moves with REVIEW
-    # because daedalus is
-    # `tier: FRONTIER` on this same harness (personas/daedalus.yaml),
-    # NOT because of deployments.yaml's distinct_model_families rule,
-    # which reaches REVIEW and only REVIEW.
-    REVIEW: gemini-3.1-pro-low-thinking
-    FRONTIER: gemini-3.1-pro-low-thinking
+    # All five tiers on Gemini 3.8 Flash, graded by thinking level, not
+    # by model line (#271). Gemini 3.1 Pro was pinned here before and
+    # hit an entitlement wall: `agy` serves a catalog per Antigravity
+    # entitlement, a federated/ADC identity gets a narrower one than an
+    # account login, and Pro's high-thinking id was absent from it —
+    # the #167/#221 saga. Every id below (`-low`, `-medium`, `-high`) is
+    # present in BOTH the account-login catalog and the
+    # `AGY_ADC_AUTH=true` catalog the runner actually uses, verified
+    # 2026-09-08 — no tier here can hit that wall. Verify a re-pin by a
+    # live dispatch regardless; no gate here can see a catalog failure.
+    FAST: gemini-3.8-flash-low
+    MECHANICAL: gemini-3.8-flash-medium
+    IMPLEMENTATION: gemini-3.8-flash-medium
+    # FRONTIER moves with REVIEW because daedalus is `tier: FRONTIER` on
+    # this same harness (personas/daedalus.yaml), NOT because of
+    # deployments.yaml's distinct_model_families rule, which reaches
+    # REVIEW and only REVIEW.
+    REVIEW: gemini-3.8-flash-high
+    FRONTIER: gemini-3.8-flash-high
