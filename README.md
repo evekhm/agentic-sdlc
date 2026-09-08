@@ -288,10 +288,10 @@ prompts at or under 200k tokens — this system's own context ceiling
 rates are the published Gemini API price
 ([ai.google.dev/gemini-api/docs/pricing](https://ai.google.dev/gemini-api/docs/pricing)) —
 `session_spend.sh`'s Gemini table predates this pricing and needs the
-same correction, tracked separately. `haiku` and `opus` are aliases
-the config leaves unpinned; the price shown is their current
-resolution. Re-check all of it before citing a number, since a rate
-or a pin can move — Gemini 3.8 Flash's rate below rises to
+same correction ([#269](https://github.com/evekhm/agentic-sdlc/issues/269)).
+`haiku` and `opus` are aliases the config leaves unpinned; the price
+shown is their current resolution. Re-check all of it before citing a
+number, since a rate or a pin can move — Gemini 3.8 Flash's rate below rises to
 $1.50 / $7.50 on 2027-01-01, and both Gemini rates roughly double for
 prompts over 200k tokens:
 
