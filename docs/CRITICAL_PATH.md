@@ -33,7 +33,7 @@ order:
    one small PR, merge on smoke, so a ladder PR can have two reviewer
    voices.
 3. #64 implementation rung on agy (odyssey; prompt
-   `~/waves/w4-64-odyssey.txt`, launch line `~/waves/launch.sh 64i`),
+   `ops/waves/w4-64-odyssey.txt`, launch line `ops/waves/launch.sh 64i`),
    merge on smoke. Launched by the operator 2026-09-08 06:50:36 UTC as
    agy-64i (worktree odyssey-64-autonomous-loop, branch
    odyssey/64-autonomous-loop); #246 (lifecycle_advance_test.sh run by
@@ -65,8 +65,8 @@ order:
    installed with its key as a repository secret,
    ATHENA/DAEDALUS/ODYSSEY_APP_PRIVATE_KEY secrets loaded (names
    only), first hop stays a human dispatch of athena. Delivery: one PR
-   after the #64 implementation merges, `~/waves/launch.sh 251`
-   (prompt `~/waves/w4-251-odyssey.txt`), merged on smoke.
+   after the #64 implementation merges, `ops/waves/launch.sh 251`
+   (prompt `ops/waves/w4-251-odyssey.txt`), merged on smoke.
 5. Demo run: the operator launches one rung by hand with the one-line
    prompt ("work issue #98"), and from there the loop carries it: PR,
    runner reviews, #64 merge, advancer flips the label, the runner
@@ -178,7 +178,7 @@ which is exactly the state where a review is most needed. Observed
 live: both reviewers refused PR #223 (docs, resolves to #202) with
 "carries status:review-stuck", and PR #202 (#117 plan, review:3) is
 stuck in it today. Ahead in priority, not in sequence: the wave-3 plan
-rungs for #98 and #68 (`~/waves/launch.sh 98p 68p`, prompts
+rungs for #98 and #68 (`ops/waves/launch.sh 98p 68p`, prompts
 w3-98-daedalus.txt and w3-68-daedalus.txt) touch intent/** only and can
 launch now; #239 is deferred under the fast path; it bites only once
 an issue escalates to review-stuck. #236 (below) edits the same file;
@@ -251,7 +251,7 @@ tracker"; the advisor's recommendation is stated where it has one.
   bypass on the ephemeral gh-actions runner with the App token's
   scope as the boundary, allowlist on the vm-local placement; #164
   deferred one security row here.
-- **~/waves/launch.sh into the repo.** Advisor position: yes in
+- **ops/waves/launch.sh into the repo** (filed as #259). Advisor position: yes in
   substance, through the ladder: an intent:new issue first, scoped as
   an extension of scripts/ops/work.sh or a sibling under
   scripts/ops/ with the issue table and the prompts as data files,
@@ -274,7 +274,7 @@ tracker"; the advisor's recommendation is stated where it has one.
 - **Closes by hand:** #207 (PR #233 merged, issue at status:in-review)
   once the verifier confirms; #25, #150, #9 if still open (verify
   live before acting).
-- **Wave 3:** `~/waves/launch.sh 98p 68p`. #85 sits at status:build
+- **Wave 3:** `ops/waves/launch.sh 98p 68p`. #85 sits at status:build
   with no plan-rung row in the launcher; advisor recommendation: add
   an 85p row by the same recipe.
 - Confirm #82 and #198 stay out of the gate-2 blocking set; when to
