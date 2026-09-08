@@ -285,15 +285,16 @@ pins in [`config/model_tiers.yaml`](config/model_tiers.yaml), for
 prompts at or under 200k tokens — this system's own context ceiling
 (AGENTS.md). Claude rates match
 [`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh); Gemini
-rates are the published Gemini API price
-([ai.google.dev/gemini-api/docs/pricing](https://ai.google.dev/gemini-api/docs/pricing)) —
-`session_spend.sh`'s Gemini table predates this pricing and needs the
-same correction ([#269](https://github.com/evekhm/agentic-sdlc/issues/269)).
-`haiku` and `opus` are aliases the config leaves unpinned; the price
-shown is their current resolution. Re-check all of it before citing a
-number, since a rate or a pin can move — Gemini 3.8 Flash's rate below rises to
-$1.50 / $7.50 on 2027-01-01, and both Gemini rates roughly double for
-prompts over 200k tokens:
+rates are the global rate from Google Cloud's own Gemini Enterprise /
+Agent Platform pricing page — `session_spend.sh`'s Gemini table
+predates this pricing and needs the same correction
+([#269](https://github.com/evekhm/agentic-sdlc/issues/269)). `haiku`
+and `opus` are aliases the config leaves unpinned; the price shown is
+their current resolution. Re-check all of it before citing a number,
+since a rate or a pin can move — Gemini 3.8 Flash's rate is flat
+regardless of prompt size through 2026, then rises to $1.50 / $7.50 on
+2027-01-01; Gemini 3.1 Pro's rate is the one that changes with size,
+rising to $4.00 / $18.00 above 200k tokens:
 
 | Tier | Claude Code model id | $/1M tok in | $/1M tok out | Antigravity model id | $/1M tok in | $/1M tok out |
 |---|---|---|---|---|---|---|
