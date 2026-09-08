@@ -40,8 +40,10 @@ The loop has five steps. Every issue climbs them in order. Each step is
 a **rung**. Each rung ends in a pull request that carries one
 artifact. Atlas, the cheap reviewer, reads every pull request. Argus,
 the deep reviewer, joins at the code gate or can be requested on demand. A pull request merges when
-its assigned reviewers have no open blocking finding — a security or
-high defect, per [REVIEW.md](REVIEW.md)'s severity tiers. A suggestion
+CI is green and its assigned reviewers have no open blocking finding —
+a security or high defect, per [REVIEW.md](REVIEW.md)'s severity
+tiers; who applies that merge, the owner by hand or the merge identity,
+depends on the mode set per issue. A suggestion
 or a normal-tier defect is recorded and never gates the merge. The merge means accepted,
 and it moves the issue to the next rung. The chain of merges is the audit trail: who asked for
 what, what the persona produced, who accepted it.
@@ -241,18 +243,16 @@ rule are in [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md).
 ## Two harnesses, two model families
 
 The goal is a system mature enough to run every seat on Gemini 3.8
-Flash through Antigravity — cheap, fast, and already true for all five
-tiers there today
+Flash through Antigravity — cheap, fast, and each of the five tiers
+already has a seat pinned there, per
+[`config/deployments.yaml`](config/deployments.yaml)
 ([#271](https://github.com/evekhm/agentic-sdlc/issues/271)). Nothing
 about the design requires Claude Code. Where mixing in Claude pays off
 is the frontier tier: a team already invested in Claude can keep its
 hardest judgment calls — the spec gate, architecture, the advisor seat
 — on Claude's frontier model, and let that model's edge in reasoning
 lead the process forward while every stage mature enough to run
-deterministically settles onto the cheap Antigravity pin. Claude Code
-carries more of that judgment today because the process is still
-being specified; each check that lands moves one more stage onto the
-cheap pin.
+deterministically settles onto the cheap Antigravity pin.
 
 A harness is the program a persona runs inside: Claude Code
 (Anthropic) or Antigravity (Google, via `agy`). A persona names only a
@@ -312,7 +312,7 @@ Maintain. Each stage ends in a committed artifact. Plan writes
 code, Test proves it, Deploy ships it past a gate, Maintain watches
 control bands and writes the next `intent.md`. A **play** is one named
 practice inside a stage, with an enforcer, evidence, a log and an
-approver. There are fifteen plays. The stages are non-linear: work
+approver. There are sixteen plays. The stages are non-linear: work
 enters wherever its evidence puts it, and plays are adopted one at a
 time.
 
