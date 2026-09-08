@@ -161,8 +161,17 @@ Checked in this order, before any write:
    mutex, and one naming nobody is still held — removing
    `in-progress` (step 7) is how a session hands the issue back. A
    claim by this actor is a resume of its own work and proceeds.
+   Exception, review dispatch (#207 D3): when this actor is
+   dispatched to review a pull request — the launcher prints
+   `stage: review (pull request #n; #m is on <stage>)` and the
+   prompt names the pull request — the rung's `in-progress` belongs
+   to the author under review and is not this actor's mutex; do not
+   refuse on it, and do not claim it.
 6. **The derived stage is not one this actor owns.** Name the
    owner(s) of that stage and stop.
+   Exception, review dispatch (#207 D3): on a review dispatch the
+   stage being worked is `review`, not the rung's `status:*` label;
+   an actor that owns `review` proceeds.
 
 ## Authority and bounds
 
