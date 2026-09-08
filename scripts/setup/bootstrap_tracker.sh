@@ -113,7 +113,7 @@ ensure_label "status:planning"     "D4C5F9" "Stage: intent.md is being drafted (
 ensure_label "status:spec"         "BFA8F0" "Stage: spec.md is being drafted (DESIGN gate open)"
 ensure_label "status:build"        "A98BE8" "Stage: plan.md + contract tests (BUILD gate open)"
 ensure_label "status:implementing" "936FDD" "Stage: implementation at a pinned SHA"
-ensure_label "status:in-review"    "7D52D1" "Stage: reviewers hold it (written by #8/#9, not by lifecycle.yml)"
+ensure_label "status:in-review"    "7D52D1" "Stage: reviewers hold it (written by lifecycle.yml on the implementing PR's merge)"
 # Escalation, deliberately outside the ladder's hue: humans take over.
 ensure_label "status:review-stuck" "E11D21" "Review counter tripped at review:3 — humans take over"
 

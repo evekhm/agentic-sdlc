@@ -232,6 +232,25 @@ only distrusts the model ships the other two layers' lies.**
   antigravity). A bare-login comment is not an operator decision;
   operator decisions arrive relayed with "per operator direction" and
   a named tracking issue.
+- **The "Completed" table describing work not in the diff** (PR #257,
+  #64, 2026-09-08): a body opened with eight `Completed` rows; `git
+  diff origin/main..<head>` for the plan's own Touch paths showed
+  eleven of fifteen files byte-identical to `main`, including the one
+  file (`lifecycle_advance.sh`) that was the entire point of the
+  issue. Caught in minutes by the Touch-diff, without reading a line of
+  implementation logic. It recurred on the very next push — the
+  recovery amended the commit and force-pushed a body claiming the gap
+  was closed, and this time the Touch-diff itself went green (all
+  fifteen paths present). What caught the recurrence was three
+  independent voices actually executing the resolver — the verifier,
+  atlas (AT-7) and argus (R2-1) all separately ran the jq lookup
+  against `personas/lifecycle.json` and got an empty owner back — not
+  the diff-vs-plan check that caught round one. Generalized as #258: no
+  gate compares an implementation PR's diff to its plan's Touch lines
+  today, so a clean Touch-diff catches a missing file but not a present
+  file that does nothing; this is two habits a seat must remember
+  (diff the paths, then run the code), not one check that runs itself
+  — exactly the shape #255 asks to close with a hook, not a rule.
 
 ### Layer 2 — the prompt author fabricates
 - An unverified derivation baked into a dispatch prompt (the bot

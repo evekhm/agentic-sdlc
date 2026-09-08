@@ -31,10 +31,11 @@ workflow). CLAUDE.md and GEMINI.md are thin harness adapters that add
 only harness-specific mechanics. INTENT.md is the founding
 system-level intent (change #0). `README.md` is the entry point for
 a person arriving at the repository (#35, `intent/35-readme/`): it
-introduces the system as conceived — what it is, what it demonstrates,
-how it is being built, what it adds to the playbook — marking
-agreed-but-unbuilt seats and rungs with their issue, and it never
-addresses an agent — no compiled prompt points an agent at it. It explains and never duplicates, so every
+introduces the system as designed — the actors, the five rungs, the
+orchestrator, the two harnesses, what it adds to the playbook — with
+each seat or rung that lives on the tracker citing its issue and no
+narration of build status (that lives in `docs/CRITICAL_PATH.md` and
+the pinned tracker), and it never addresses an agent — no compiled prompt points an agent at it. It explains and never duplicates, so every
 rule it mentions that is normative elsewhere is at most one sentence
 plus a link to its owner, it is normative for nothing itself, and
 wherever it and a document it links disagree the other one wins. It
@@ -231,7 +232,8 @@ from the `stage` list of every `kind: persona` source, so adding an
 owner is an edit to that persona and to nothing else. It has three
 readers and no fourth copy — `scripts/ci/lifecycle_advance.sh`
 matches on `advances_on`, then on `artifact` or on the issue's
-current `label`, to pick a transition (`lifecycle.labels`),
+current `label`, to pick a transition, read directly and never
+inferred (PR #67) (`lifecycle.labels`),
 `scripts/ops/work.sh` matches on `label` to pick a stage
 (`ops.dispatch`), and the compiler renders the whole ladder, with
 each rung's derived owners, into a generated `## Lifecycle stages`

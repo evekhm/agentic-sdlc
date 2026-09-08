@@ -95,6 +95,11 @@ if [ "${1:-}" = "issue" ] && [ "${2:-}" = "view" ]; then
   exit 0
 fi
 if [ "${1:-}" = "api" ]; then
+  for a in "$@"; do
+    case "$a" in
+      -X|-f|-F|--method|--input) printf '%s\n' "gh $*" >> "$WRITES"; exit 1 ;;
+    esac
+  done
   # `gh api --paginate <path>` puts the flag first, so scan the argv for
   # the path rather than assuming $2.
   path=""
@@ -106,7 +111,8 @@ if [ "${1:-}" = "api" ]; then
     esac
   done
   case "$path" in
-    */commits/*/pulls)
+    repos/*/commits/*/pulls)
+      [ "$#" -eq 3 ] || exit 2
       sha="${path#*/commits/}"
       sha="${sha%/pulls}"
       if [ -f "$FIXTURES/pulls-$sha.json" ]; then
@@ -117,7 +123,8 @@ if [ "${1:-}" = "api" ]; then
         echo '[]'
       fi
       exit 0;;
-    */pulls/*/files)
+    repos/*/pulls/*/files)
+      [ "$#" -eq 3 ] || exit 2
       # D15 conjunct (2): the pull request's OWN file list. A fixture
       # is required — a pull request nobody described has no file list
       # to judge, and answering [] silently would hide the omission.
@@ -141,6 +148,11 @@ if [ "${1:-}" = "api" ]; then
       fi
       exit 0;;
     repos/*)
+      # The bare default-branch read: `gh api repos/<owner>/<repo>`, two
+      # args and no `--paginate` (AT-3). This arm is last and least
+      # specific on purpose — the two reads above name enough of their
+      # own path to never fall through to it.
+      [ "$#" -eq 2 ] || exit 2
       echo '{"default_branch":"main"}'
       exit 0;;
   esac
@@ -392,13 +404,18 @@ issue_unreadable() { : > "$FIXTURES/issue-$1.unreadable"; }
 # overrides it.
 pulls_fixture() {
   local repo_json
-  case "${6:-$TESTREPO}" in
+  case "${7:-$TESTREPO}" in
     null) repo_json='null';;
-    *) repo_json="$(jq -nc --arg r "${6:-$TESTREPO}" '{full_name: $r}')";;
+    *) repo_json="$(jq -nc --arg r "${7:-$TESTREPO}" '{full_name: $r}')";;
   esac
-  jq -nc --argjson n "$2" --arg h "$3" --arg b "$4" --arg base "${7:-main}" \
-    --arg m "${5:-$1}" --argjson repo "$repo_json" \
-    '[{number: $n, merged_at: "2026-01-01T00:00:00Z", state: "closed",
+  local merged_json
+  case "${6:-2026-01-01T00:00:00Z}" in
+    null) merged_json='null';;
+    *) merged_json="$(jq -nc --arg d "${6:-2026-01-01T00:00:00Z}" '$d')";;
+  esac
+  jq -nc --argjson n "$2" --arg h "$3" --arg b "$4" --arg base "${8:-main}" \
+    --arg m "${5:-$1}" --argjson repo "$repo_json" --argjson merged "$merged_json" \
+    '[{number: $n, merged_at: $merged, state: "closed",
        merge_commit_sha: $m, base: {ref: $base},
        head: {ref: $h, repo: $repo}, body: $b}]' > "$FIXTURES/pulls-$1.json"
   [ -f "$FIXTURES/files-$2.json" ] || files_fixture "$2" scripts/ci/lifecycle_advance.sh
@@ -727,7 +744,7 @@ hasnt "#12" "S18: the run never mentions #12"
 
 banner "S19 · item 17 · D1 · F2: a pull request that reached main on a second parent"
 reset_fixtures
-pulls_fixture "$MF" 4264 odyssey/999-test "Merged into the landing branch." "$MF" "$TESTREPO" land
+pulls_fixture "$MF" 4264 odyssey/999-test "Merged into the landing branch." "$MF" "2026-01-01T00:00:00Z" "$TESTREPO" land
 issue_fixture 999 OPEN status:implementing
 run "$C5" "$ML" "S19: the landing-branch range exits 0"
 has "--add-label $(lrow status:implementing advances_to)" \
@@ -783,7 +800,7 @@ hasnt "::warning::lifecycle_advance:" "S21: an issue with no near miss never war
 
 banner "S22 · item 19 · D16 · F9: a fork's branch name is not an identity claim"
 reset_fixtures
-pulls_fixture "$CM" 4270 odyssey/999-test "A drive-by contribution." "$CM" someone-else/agentic-sdlc
+pulls_fixture "$CM" 4270 odyssey/999-test "A drive-by contribution." "$CM" "2026-01-01T00:00:00Z" someone-else/agentic-sdlc
 issue_fixture 999 OPEN status:implementing
 run "$C4" "$CM" "S22: the fork range exits 0"
 has "pull request #4270 is from a fork" "S22: the skip is logged by number"
@@ -792,7 +809,7 @@ hasnt "gh issue comment" "S22: no comment is posted"
 hasnt "::warning::lifecycle_advance:" "S22: and no near miss is recorded for a fork"
 
 reset_fixtures
-pulls_fixture "$CM" 4271 odyssey/999-test "The fork was deleted." "$CM" null
+pulls_fixture "$CM" 4271 odyssey/999-test "The fork was deleted." "$CM" "2026-01-01T00:00:00Z" null
 issue_fixture 999 OPEN status:implementing
 run "$C4" "$CM" "S22: the deleted-fork range exits 0"
 has "pull request #4271 is from a fork" "S22: a null head.repo behaves identically"
@@ -916,7 +933,7 @@ hasnt "--add-label" "S25: nothing is written"
 banner "S26 · item 24 · D15 · two accepted pull requests: the topologically later one wins"
 reset_fixtures
 pulls_fixture "$MA" 4290 odyssey/999-test "The first attempt." "$MA"
-pulls_fixture "$MB" 4291 odyssey/999-test "The one that landed last." "$MB" "$TESTREPO" land2
+pulls_fixture "$MB" 4291 odyssey/999-test "The one that landed last." "$MB" "2026-01-01T00:00:00Z" "$TESTREPO" land2
 issue_fixture 999 OPEN status:implementing
 run "$R2" "$ML2" "S26: the two-candidate range exits 0"
 exactly "--add-label" 1 "S26: exactly one transition"
@@ -1353,5 +1370,64 @@ banner "nothing was written"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "a gh write was attempted under DRY_RUN=1"; }
 pass "no gh write was attempted in any scenario"
 
+banner "S36 · #74 Regressions"
+
+# 1. Direct POST
+"$WORK/bin/gh" api repos/evekhm/agentic-sdlc/issues/999/comments -X POST -f body=foo || true
+grep -q "gh api repos/evekhm/agentic-sdlc/issues/999/comments -X POST -f body=foo" "$WRITES" || fail "S36: direct api POST did not land in WRITES"
+pass "S36: direct gh api POST lands in WRITES"
+
+# 2. pulls_fixture with merged_at: null
+reset_fixtures
+pulls_fixture "$CM" 4310 odyssey/999-test "Merged at null." "$CM" null
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$CM" "S36: merged_at null range exits 0"
+has "nothing to advance" "S36: merged_at null is no candidate"
+pass "S36: merged_at null is no candidate"
+
+# 3. base.ref not the default branch — intentionally not a regression scenario here:
+# lifecycle_advance.sh:339-343 deliberately does not filter on base branch (D1 as
+# amended by PR #67/#102) — containment of the merge commit in the pushed range is
+# the trunk test, not which branch the pull request merged into. There is nothing
+# left for this scenario to regress against.
+
+# 4. Two pull requests reported for one commit: the later one wins
+reset_fixtures
+issue_fixture 999 OPEN status:implementing
+jq -n '[{"number": 4312, "merged_at": "2026-01-01T00:00:00Z", "state": "closed", "merge_commit_sha": "'"$CM"'", "base": {"ref": "main"}, "head": {"ref": "odyssey/999-test", "repo": {"full_name": "'"$TESTREPO"'"}}, "body": "First"}, {"number": 4313, "merged_at": "2026-01-01T00:00:00Z", "state": "closed", "merge_commit_sha": "'"$CM"'", "base": {"ref": "main"}, "head": {"ref": "odyssey/999-test", "repo": {"full_name": "'"$TESTREPO"'"}}, "body": "Second"}]' > "$FIXTURES/pulls-$CM.json"
+files_fixture 4312 docs/SPEC.md
+files_fixture 4313 docs/SPEC.md
+run "$C4" "$CM" "S36: two pull requests for one commit range exits 0"
+has "Trigger: pull request #4312 merged in" "S36: later one wins"
+pass "S36: two pull requests for one commit: later one wins"
+
+# 5. A grep asserting (PR #67) appears inside the personas.resume entry of docs/SPEC.md
+RESUME_ENTRY="$(awk '/^### personas\.resume$/{f=1;next} /^### /{f=0} f' "$REPO/docs/SPEC.md")"
+printf '%s\n' "$RESUME_ENTRY" | grep -qF '(PR #67)' || fail "S36: personas.resume does not cite (PR #67)"
+pass "S36: personas.resume cites (PR #67)"
+
+# 6. A grep asserting scripts/setup/bootstrap_tracker.sh no longer describes status:in-review as written by #8/#9
+grep -q "Stage: reviewers hold it (written by lifecycle.yml on the implementing PR's merge)" "$REPO/scripts/setup/bootstrap_tracker.sh" || fail "S36: bootstrap_tracker.sh still describes in-review as written by #8/#9"
+pass "S36: bootstrap_tracker.sh updated"
+
+# 7. AT-13: the implement-rung idempotency marker is keyed on the pull
+# request's own merge commit (MERGE_SHA[$issue]), not on the pushed
+# range's end ($AFTER). A range that extends past the merge commit —
+# BEFORE=$C4, AFTER=$C5, with #999's merge at $CM strictly between them
+# — pins the discriminating case: under the pre-AT-13 code the marker
+# was `<!-- lifecycle:in-review:$AFTER -->`, i.e. keyed on $C5 here, so
+# a later, wider range containing the same already-handled merge would
+# never match the marker it left the first time and would re-post the
+# comment.
+reset_fixtures
+pulls_fixture "$CM" 4242 odyssey/999-test "Implements the plan. See #999."
+issue_fixture 999 OPEN status:implementing
+run "$C4" "$C5" "S36: AT-13 a range extending past the merge commit exits 0"
+has "<!-- lifecycle:in-review:$CM -->" "S36: AT-13 the marker is keyed on the pull request's own merge commit"
+hasnt "<!-- lifecycle:in-review:$C5 -->" "S36: AT-13 the marker is not keyed on the range end"
+
+reset_fixtures
+
 echo
 echo "lifecycle_advance_test.sh: all scenarios passed"
+
