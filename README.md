@@ -265,7 +265,11 @@ agent asks about scope, users, constraints and success, and only
 then writes the template. That is the agreed shape of intake here.
 When an issue lacks a section, Athena posts her questions on the
 issue and marks it `blocked` until the filer answers, at most two
-rounds, and then writes the intent. Today she reads the issue once
+rounds, and then writes the intent. The playbook says repeat
+processes are encoded as skills, and that is how this one is agreed
+to land: an intake skill beside the spec adversary, declared by
+Athena and by every persona that files issues, so a system-filed
+issue arrives in intent shape too. Today she reads the issue once
 and parks the gaps under Open questions for the person merging to
 fix in the pull request; the conversational form is scoped on
 [#10](https://github.com/evekhm/agentic-sdlc/issues/10), and the
