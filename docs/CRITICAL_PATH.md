@@ -15,6 +15,34 @@ carry the date on the status line.
 Status line: 2026-09-08, revision four (~06:45 UTC). Live `gh issue
 list` state always beats this file.
 
+## Fast path to the demo (operator directive, 2026-09-08 06:40 UTC)
+
+The operator's call: cut corners, skip review rounds, get the loop
+working end to end. Until they say otherwise the verifier merges on a
+smoke check (deterministic checks green at the head, the diff matches
+the body, no leaks), nobody writes fix-round prompts, and the gates
+below are read as priority order, not ceremony. The demo is one issue
+going from its build rung to merged with the runner reviewers
+reviewing and the loop merging, no human write in between. Steps, in
+order:
+
+1. Merge PR #235 (#64 plan), PR #237 (#216 fix) and PR #232 (#108
+   ceiling) on smoke.
+2. #242: give atlas the review-dispatch exemption in
+   `personas/skills/resume-protocol.md` (refusals 5 and 6), recompile,
+   one small PR, merge on smoke, so a ladder PR can have two reviewer
+   voices.
+3. #64 implementation rung on agy (odyssey; prompt
+   `~/waves/w4-64-odyssey.txt`, launch line `~/waves/launch.sh 64i`),
+   merge on smoke.
+4. Demo run per the merged #64 plan: #98 (spec merged, plan rung
+   ready) runs build, implement, review and merge with no human
+   write; that run's job logs are the evidence.
+
+Deferred until after the demo: #239, #236, #238, #147, #148, #191,
+wave-3 rows other than the demo issue, and the old verifier queue
+(#185, #135, #202, #69).
+
 ## Gate 1: unattended review runs on every rung — MET 2026-09-08
 
 Two exit criteria, in order.
@@ -55,7 +83,7 @@ comment 5580331864 at 06:27:45 inside the job window.
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | 1 | #207 | The claim mutex refuses every ladder PR's review for its whole open window, and the derived stage is never `review`. Two walls; 1b is measurable only after this lands. | implementation PR #233 merged ec18f8d 05:41 UTC 2026-09-08; issue at status:in-review, claim released. Nothing closes it unattended yet (that is #148), so the operator closes it by hand |
-| 2 | #167 | atlas could not see its model on the runner; every atlas job died at launch until the credential path was repaired. | done: PR #221 (fix/167-agy-adc-credential) merged 06:09 UTC 2026-09-08, issue closed, PR #215 closed as superseded. Datum: atlas job 101933518377 on PR #221 itself succeeded with a real model call (agy, gemini-3.1-pro-low-thinking, round-3 comment 04:07:40 under evekhm-atlas-app), so both runner reviewers now run unattended. Atlas has since refused the ladder PR #235 at the persona layer (ISSUE_ATLAS), so 'both reviewers run unattended' holds on argus for ladder PRs and on atlas only for PRs whose issue carries no claim |
+| 2 | #167 | atlas could not see its model on the runner; every atlas job died at launch until the credential path was repaired. | done: PR #221 (fix/167-agy-adc-credential) merged 06:09 UTC 2026-09-08, issue closed, PR #215 closed as superseded. Datum: atlas job 101933518377 on PR #221 itself succeeded with a real model call (agy, gemini-3.1-pro-low-thinking, round-3 comment 04:07:40 under evekhm-atlas-app), so both runner reviewers now run unattended. Atlas has since refused the ladder PR #235 at the persona layer (#242), so 'both reviewers run unattended' holds on argus for ladder PRs and on atlas only for PRs whose issue carries no claim |
 | 3 | #169 | jsonschema is missing on the runner, so a persona cannot run the compiler gate. | done: PR #214 merged 07:50, issue closed |
 | 4 | #168 | Permission posture for a persona on a CI runner: bypass or allowlist. An operator decision, not a build. | open, intent:new |
 | 5 | #191 | Claims land under the bare human login. Identity as a hard claim-time parameter; needed before any board reading is trustworthy. | open |
@@ -87,7 +115,7 @@ the persona layer: the compiled resume protocol's refusals 5 (mutex
 held by daedalus) and 6 (stage owned by daedalus) fire even though
 work.sh bypassed the claim, so only one runner reviewer can reach this
 PR and the verifier's own review is the second voice under #204. That
-defect is filed as ISSUE_ATLAS. The verifier is briefed to be strict on this PR: it is the
+defect is filed as #242. The verifier is briefed to be strict on this PR: it is the
 plan under which merge becomes a decision, so its acceptance rows are
 the gate.
 

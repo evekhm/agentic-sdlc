@@ -479,7 +479,7 @@ produced five PRs that all merged on verifier review by 06:09: #233
 (#207), #228 (#151, the #64 spec amendment), #229 (#98 spec), #230
 (#68 spec), #231 (#85 spec). Atlas's compiled resume protocol still
 refuses ladder PRs whose rung is claimed (refusals 5 and 6), seen on
-PR #235; filed as ISSUE_ATLAS. Gate 2 is open: the #64 plan PR #235 is
+PR #235; filed as #242. Gate 2 is open: the #64 plan PR #235 is
 up with an unattended argus round 1, the #216 fix PR #237 and the
 #108 ceiling PR #232 are in the verifier queue, and the wave-3 plan
 rungs for #98 and #68 are ready to launch. Filed today by the
