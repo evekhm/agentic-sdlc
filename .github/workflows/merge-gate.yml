@@ -1,3 +1,22 @@
+# Merge gate (#64, D3): the one place a pull request is merged
+# unattended. All the judgment lives in scripts/ci/merge_gate.sh, which
+# evaluates D5's eleven conjuncts and is runnable locally by the same
+# command this file runs.
+#
+# Two jobs, one script. `evaluate` runs on pull_request events with the
+# default token, read-only, DRY_RUN=1: a same-repo pull_request run
+# executes the workflow file from the pull request's head, so nothing
+# that can write or mint the merge actor's token may run on that
+# trigger. `gate` runs on the other four triggers, which execute the
+# workflow file from the default branch, and it alone holds the five
+# permissions (acceptance 19) and the App credential. The credential is
+# scoped to the `merge-actor` Environment whose deployment-branch policy
+# admits `main` only — an operator step named in PR #257 — so a workflow
+# file on any other branch cannot mint it.
+#
+# Every checkout is the literal default branch. No ref an event supplied
+# is ever checked out, and a pull_request whose base is another branch
+# fails closed before anything runs (D5 conjunct 1).
 name: Merge Gate
 
 on:
@@ -8,10 +27,64 @@ on:
   issue_comment:
     types: [created]
   workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Pull request number to gate
+        required: true
+        type: string
+
+permissions: {}
 
 jobs:
-  merge-gate:
+  evaluate:
+    name: merge-gate (evaluate)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      checks: read
+      statuses: read
+    steps:
+      - name: Fail closed unless the base is the default branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$BASE_REF" != "main" ]; then
+            echo "::error::merge-gate: the pull request's base is '$BASE_REF'; only main is gated (D5 conjunct 1)"
+            exit 1
+          fi
+
+      - name: Checkout the default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Evaluate the eleven conjuncts (dry run, no writes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: "1"
+          GATE_CHECK_NAME: merge-gate
+          TARGET: ${{ github.event.pull_request.number }}
+        run: |
+          if [ ! -f scripts/ci/merge_gate.sh ]; then
+            echo "scripts/ci/merge_gate.sh is not on main — nothing to evaluate"
+            exit 0
+          fi
+          bash scripts/ci/merge_gate.sh "$TARGET"
+
+  gate:
+    name: merge-gate
+    if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: merge-actor
+    concurrency:
+      group: merge-gate
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -19,42 +92,51 @@ jobs:
       checks: read
       statuses: read
     steps:
-      - name: Checkout trusted ref
-        uses: actions/checkout@v4
+      - name: Checkout the default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.base_ref || 'main' }}
-          fetch-depth: 0
+          ref: main
+          fetch-depth: 1
 
-      - name: Generate token
-        id: generate-token
-        uses: actions/create-github-app-token@v1
+      - name: Mint the merge actor's token
+        id: merge-actor
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
           app-id: ${{ secrets.MERGE_ACTOR_APP_ID }}
           private-key: ${{ secrets.MERGE_ACTOR_APP_PRIVATE_KEY }}
 
-      - name: Run merge gate
+      - name: Resolve the pull request and run the gate
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.merge-actor.outputs.token }}
+          GATE_CHECK_NAME: merge-gate
+          # Event data reaches the script through env, never through
+          # `${{ }}` interpolated into the run body (#6, D10).
+          EVENT_NAME: ${{ github.event_name }}
+          CS_PR: ${{ github.event.check_suite.pull_requests[0].number }}
+          CS_SHA: ${{ github.event.check_suite.head_sha }}
+          STATUS_SHA: ${{ github.event.sha }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          DISPATCH_PR: ${{ github.event.inputs.pull_request }}
         run: |
-          TARGET=""
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            TARGET="${{ github.event.pull_request.number }}"
-          elif [ "${{ github.event_name }}" = "issue_comment" ]; then
-            TARGET="${{ github.event.issue.number }}"
-          elif [ "${{ github.event_name }}" = "check_suite" ]; then
-            TARGET=$(gh api repos/${{ github.repository }}/commits/${{ github.event.check_suite.head_sha }}/pulls -q '.[0].number' 2>/dev/null || true)
-          elif [ "${{ github.event_name }}" = "status" ]; then
-            TARGET=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls -q '.[0].number' 2>/dev/null || true)
-          fi
-          
+          case "$EVENT_NAME" in
+            check_suite)
+              TARGET="$CS_PR"
+              [ -n "$TARGET" ] || TARGET="$(gh api "repos/$GITHUB_REPOSITORY/commits/$CS_SHA/pulls" -q '.[0].number' 2>/dev/null || true)";;
+            status)
+              TARGET="$(gh api "repos/$GITHUB_REPOSITORY/commits/$STATUS_SHA/pulls" -q '.[0].number' 2>/dev/null || true)";;
+            issue_comment)
+              TARGET="$ISSUE_NUMBER";;
+            workflow_dispatch)
+              TARGET="$DISPATCH_PR";;
+            *)
+              TARGET="";;
+          esac
           if [ -z "$TARGET" ] || [ "$TARGET" = "null" ]; then
-            echo "No PR target resolved for this event. Exiting."
+            echo "no pull request behind this $EVENT_NAME event — nothing to gate"
             exit 0
           fi
-          
           if [ ! -f scripts/ci/merge_gate.sh ]; then
-            echo "scripts/ci/merge_gate.sh not found on trusted ref, skipping."
+            echo "scripts/ci/merge_gate.sh is not on main — nothing to gate"
             exit 0
           fi
-          
           bash scripts/ci/merge_gate.sh "$TARGET"
