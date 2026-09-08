@@ -34,7 +34,7 @@ working software and a better version of itself.
 The loop has five steps. Every issue climbs them in order. Each step is
 a **rung**. Each rung ends in a pull request that carries one
 artifact. Atlas, the cheap reviewer, reads every pull request. Argus,
-the deep reviewer, joins at the code gate. A pull request merges when
+the deep reviewer, joins at the code gate or can be requested on demand. A pull request merges when
 its assigned reviewers have no open finding. The merge means accepted,
 and it moves the issue to the next rung. The chain of merges is the audit trail: who asked for
 what, what the persona produced, who accepted it.
