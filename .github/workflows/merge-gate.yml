@@ -1,0 +1,30 @@
+name: Merge Gate
+
+on:
+  pull_request:
+  check_suite:
+    types: [completed]
+  status:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  merge-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      checks: read
+      statuses: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run merge gate
+        env:
+          MERGE_ACTOR_APP_PRIVATE_KEY: ${{ secrets.MERGE_ACTOR_APP_PRIVATE_KEY }}
+          MERGE_ACTOR_APP_ID: ${{ secrets.MERGE_ACTOR_APP_ID }}
+        run: bash scripts/ci/merge_gate.sh

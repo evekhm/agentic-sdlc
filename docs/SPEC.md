@@ -957,3 +957,7 @@ spec body when its implementing PR merges.
 - **intake.automation** — headless Athena on `intent:new` (#10).
 - **maintain.watchers** — Cassandra, control bands, seeded incident
   (#11).
+
+### loop.autonomous
+The loop merges itself autonomously when consensus is reached. Loop limits (dispatches and cost) are parsed from the loop: block in config/execution.yaml (D20). D13/D14 enforce monotonic progress on a loop ledger and D15 enforces hold/blocked.
+

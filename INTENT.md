@@ -86,7 +86,7 @@ lives in GitHub issue labels, never in a chat transcript.
             per Decision ID where applicable. review:N counter labels
             escalate to status:review-stuck for humans; a hold label is
             the circuit breaker halting all automation.
-            GATE: human merges; agents have no path to main. Merge gate
+            GATE: autonomous loop merges when consensus is reached; agents have no path to main. Merge gate
             includes checking WHICH files the agent touched.
 7. DEPLOY   CI ships the system's own automation (workflows, compiled
             personas, sidecars) up to the human-authorized gate.
@@ -98,7 +98,7 @@ lives in GitHub issue labels, never in a chat transcript.
 
 **Defect repair.** A bug in merged work whose `docs/SPEC.md` entry is
 unchanged does not owe the intent/spec/plan triple: it goes issue →
-fix PR with a regression check → REVIEW → human merge, with the issue
+fix PR with a regression check → REVIEW → autonomous loop merges when consensus is reached, with the issue
 citing the capability it repairs. A repair that changes a spec entry is
 a change and re-enters at PLAN. Ratified on #32.
 
@@ -321,7 +321,7 @@ runs/YYYY-MM-DD_*/                # experiment/run artifacts (gitignored)
    including one contradiction between two individually-clear
    passages); contract tests cite Decision IDs; Odyssey dispatched at
    a pinned SHA; Argus and Atlas disagree on at least one finding and
-   resolve by evidence; human merges; SPEC.md gains the capability.
+   resolve by evidence; autonomous loop merges when consensus is reached; SPEC.md gains the capability.
 5. **Closing the loop** — a seeded control-band breach; Cassandra
    diagnoses read-only and files the next `intent:new` issue.
 

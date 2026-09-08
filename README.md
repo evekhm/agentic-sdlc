@@ -11,7 +11,7 @@ repeated: typing a number, and merging a pull request.
 This repository builds its own development lifecycle. A cast of
 personas is defined once as source files and compiled into the prompts
 their harnesses run; each works one rung of a five-rung ladder that
-ends, every rung, in a pull request a human merges. Why any of this
+ends, every rung, in a pull request a autonomous loop merges when consensus is reached. Why any of this
 exists is [INTENT.md](INTENT.md).
 
 ```text
@@ -249,7 +249,7 @@ to `status:review-stuck` for a human. Each label's semantics are
 When merged work turns out to be wrong, file the defect as its own
 issue. If its `docs/SPEC.md` entry is unchanged, the repair skips the
 intent/spec/plan triple: issue, fix pull request with a regression
-check, review, human merge. A repair that changes a spec entry is a
+check, review, autonomous loop merges when consensus is reached. A repair that changes a spec entry is a
 change, and re-enters at plan. Ratified on #32; the rule is stated
 normatively in [INTENT.md, "Defect repair"](INTENT.md).
 

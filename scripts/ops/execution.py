@@ -4,6 +4,7 @@
     scripts/ops/execution.py --check
     scripts/ops/execution.py --subscribers <event>
     scripts/ops/execution.py --binding <persona>
+    scripts/ops/execution.py --loop <key>
 
 No adapter, workflow or shell script re-reads the YAML: a second reader
 is a second schema, and the two drift silently. This deliberately does
@@ -11,6 +12,7 @@ NOT live in scripts/sync_agents.py — the compiler is harness-only and
 carries no deployment-target knowledge (#25 comment 2026-09-02; D18),
 and teaching it placement would break the separation D18 prices at one
 line. `pyyaml` only, the compiler's whole dependency budget (#5, D10).
+(D20 supersedes D12: loop limits are parsed here alongside bindings.)
 
 --check is the gate (a fourth job in .github/workflows/ci-gates.yml):
 
@@ -49,7 +51,7 @@ PERSONAS_DIR = REPO_ROOT / "personas"
 PLACEMENT_DIR = REPO_ROOT / "scripts" / "placement"
 UNATTENDED_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "unattended.yml"
 
-TRIGGERS = ("repo-event", "scheduled", "manual")
+TRIGGERS = ("repo-event", "scheduled", "manual", "ladder")
 BINDING_KEYS = {"trigger", "events", "placement", "max_cost_usd"}
 
 
@@ -65,7 +67,7 @@ def fail(message: str) -> NoReturn:
 
 
 def load() -> dict:
-    """The parsed `personas:` mapping, or a named exit."""
+    """The parsed config mapping, or a named exit."""
     if not EXECUTION_YAML.is_file():
         fail(f"{EXECUTION_YAML.relative_to(REPO_ROOT)} does not exist")
     try:
@@ -74,16 +76,16 @@ def load() -> dict:
         fail(f"is not parseable YAML: {error}")
     if not isinstance(data, dict):
         fail("is not a mapping")
-    unknown = sorted(set(data) - {"personas"})
+    unknown = sorted(set(data) - {"personas", "loop"})
     if unknown:
-        fail(f"has unknown top-level key(s) {', '.join(unknown)}; only 'personas' is read")
+        fail(f"has unknown top-level key(s) {', '.join(unknown)}; only 'personas' and 'loop' are read")
     bindings = data.get("personas")
     if not isinstance(bindings, dict) or not bindings:
         fail("has no non-empty 'personas' mapping")
     for name, binding in bindings.items():
         if not isinstance(binding, dict):
             fail(f"persona '{name}' has no binding mapping")
-    return bindings
+    return data
 
 
 def is_persona_source(name: str) -> bool:
@@ -125,7 +127,24 @@ def workflow_events() -> set:
     return set()  # unreachable; keeps the return type honest
 
 
-def check(bindings: dict) -> None:
+def check(config: dict) -> None:
+    bindings = config.get("personas", {})
+    loop = config.get("loop")
+    if loop is not None:
+        if not isinstance(loop, dict):
+            fail("loop block is not a mapping")
+        unknown = sorted(set(loop) - {"autonomous_merge", "max_rung_dispatches_per_issue", "max_cost_usd_per_issue"})
+        if unknown:
+            fail(f"loop block has unknown key(s) {', '.join(unknown)}")
+        if not isinstance(loop.get("autonomous_merge"), bool):
+            fail("loop.autonomous_merge must be a boolean")
+        mrd = loop.get("max_rung_dispatches_per_issue")
+        if isinstance(mrd, bool) or not isinstance(mrd, int) or mrd <= 0:
+            fail("loop.max_rung_dispatches_per_issue must be positive integer")
+        mcu = loop.get("max_cost_usd_per_issue")
+        if isinstance(mcu, bool) or not isinstance(mcu, (int, float)) or mcu <= 0:
+            fail("loop.max_cost_usd_per_issue must be a positive number")
+
     subscribed = set()
     for name in sorted(bindings):
         binding = bindings[name]
@@ -207,12 +226,13 @@ def check(bindings: dict) -> None:
     )
 
 
-def subscribers(bindings: dict, event: str) -> None:
-    """`<persona>\\t<placement>` per repo-event binding carrying `event`.
+def subscribers(config: dict, event: str) -> None:
+    """`<persona>\t<placement>` per repo-event binding carrying `event`.
 
     The dispatcher's whole input. Sorted, so a workflow's step order is
     a property of the config and not of a dict's iteration order.
     """
+    bindings = config.get("personas", {})
     for name in sorted(bindings):
         binding = bindings[name]
         if binding.get("trigger") != "repo-event":
@@ -222,12 +242,26 @@ def subscribers(bindings: dict, event: str) -> None:
             print(f"{name}\t{binding.get('placement')}")
 
 
-def binding_line(bindings: dict, persona: str) -> None:
+def binding_line(config: dict, persona: str) -> None:
     """`trigger placement max_cost_usd`, for an adapter's report line."""
+    bindings = config.get("personas", {})
     binding = bindings.get(persona)
     if binding is None:
         fail(f"persona '{persona}' has no execution binding")
     print(f"{binding.get('trigger')} {binding.get('placement')} {binding.get('max_cost_usd')}")
+
+
+def loop_value(config: dict, key: str) -> None:
+    loop = config.get("loop")
+    if loop is None:
+        fail("config has no loop block")
+    if key not in loop:
+        fail(f"loop block has no key '{key}'")
+    val = loop[key]
+    if isinstance(val, bool):
+        print("true" if val else "false")
+    else:
+        print(val)
 
 
 def main() -> None:
@@ -236,15 +270,18 @@ def main() -> None:
     mode.add_argument("--check", action="store_true", help="validate the file; the CI gate")
     mode.add_argument("--subscribers", metavar="EVENT", help="repo-event bindings for EVENT")
     mode.add_argument("--binding", metavar="PERSONA", help="one persona's binding, one line")
+    mode.add_argument("--loop", metavar="KEY", help="print a value from the loop block")
     args = parser.parse_args()
 
-    bindings = load()
+    config = load()
     if args.check:
-        check(bindings)
+        check(config)
     elif args.subscribers:
-        subscribers(bindings, args.subscribers)
+        subscribers(config, args.subscribers)
+    elif args.loop:
+        loop_value(config, args.loop)
     else:
-        binding_line(bindings, args.binding)
+        binding_line(config, args.binding)
 
 
 if __name__ == "__main__":

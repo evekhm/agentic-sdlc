@@ -989,6 +989,7 @@ SPEC_SECTIONS_BASELINE="$(sort <<'BASELINE'
 ### ops.dispatch
 ### ops.identity
 ### execution.placement
+### loop.autonomous
 BASELINE
 )"
 [ -n "$SPEC_SECTIONS_BASELINE" ] || fail "S29: the section-set baseline in this test is empty"

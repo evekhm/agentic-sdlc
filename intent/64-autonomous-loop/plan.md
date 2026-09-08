@@ -12,7 +12,7 @@ Order: T1 (tests, all red) → T2 (config and parser) → T3 (permissions and wo
 
 ## T1 · The acceptance suite
 
-Touch: `scripts/ci/tests/merge_gate_test.sh`, `scripts/ops/tests/execution_test.sh`
+Touch: `scripts/ci/tests/merge_gate_test.sh`, `scripts/ops/tests/execution_test.sh`, `scripts/ci/tests/lifecycle_advance_test.sh`
 
 1. **`merge_gate_test.sh`**: Create a new hermetic test file with a stub `gh` (to avoid network) and stubs for `claude`, `gemini`, `agy`, `curl` that exit 1 if called. Add scenarios for:
    - Dry-run mode avoiding mutations.
@@ -109,7 +109,7 @@ Touch: `scripts/ci/merge_gate.sh`
 
 ## T6 · Lifecycle Advancer
 
-Touch: `scripts/ci/lifecycle_advance.sh`, `.github/workflows/lifecycle.yml`
+Touch: `scripts/ci/lifecycle_advance.sh`, `.github/workflows/lifecycle.yml`, `scripts/ci/tests/lifecycle_advance_test.sh`
 
 1. **`scripts/ci/lifecycle_advance.sh`**:
    - Read bounds via `execution.py --loop`. Fail closed if invalid.
@@ -117,7 +117,9 @@ Touch: `scripts/ci/lifecycle_advance.sh`, `.github/workflows/lifecycle.yml`
    - Do NOT run dispatch if `execution.py --loop autonomous_merge` is `false` (D18) or if `trigger` is not `ladder` (D16).
    - If allowed, use `scripts/ops/execution.py --binding <persona>` to find adapter and run `scripts/placement/<name>/run.sh <issue>`.
    - Do not dispatch for the review rung (D17).
-2. **`.github/workflows/lifecycle.yml`**:
+2. **`scripts/ci/tests/lifecycle_advance_test.sh`**:
+   - Specify the stub's new answers for the new ledger reads/comments.
+3. **`.github/workflows/lifecycle.yml`**:
    - Update permissions to include `issues: write`.
    - Add a step to invoke `scripts/ci/escalate.sh` when `lifecycle_advance.sh` exits reporting a non-monotonic refusal.
 
@@ -154,5 +156,6 @@ Commands to run from the root of the tree:
 | 4 | `bash scripts/ci/spec_check.sh origin/main <body-file>` | exit 0 | AT-21 |
 | 5 | `python3 scripts/sync_agents.py --check` | exit 0 | AT-21 |
 | 6 | `python3 scripts/ops/execution.py --check` | exit 0 | AT-21, AT-24 |
+| 7 | `bash scripts/ci/tests/lifecycle_advance_test.sh` | exit 0 | AT-24 |
 
-**Done when:** All six checks pass green.
+**Done when:** All seven checks pass green.

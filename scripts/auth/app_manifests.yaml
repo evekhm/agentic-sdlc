@@ -96,3 +96,15 @@ atlas:
     issues: write
     contents: read
     metadata: read
+
+merge-actor:
+  slug_suffix: merge-actor-app
+  description: >-
+    System actor that merges pull requests when consensus is reached.
+  default_permissions:
+    contents: write
+    pull_requests: write
+    issues: write
+    checks: read
+    statuses: read
+    metadata: read

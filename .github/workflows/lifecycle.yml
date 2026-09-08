@@ -64,4 +64,15 @@ jobs:
           # someone adds here from being an injection.
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.sha }}
-        run: bash scripts/ci/lifecycle_advance.sh "$BEFORE_SHA" "$AFTER_SHA"
+        run: |
+          bash scripts/ci/lifecycle_advance.sh "$BEFORE_SHA" "$AFTER_SHA" 2> stderr.log || true
+          if grep -q "reason-code: non-monotonic for #" stderr.log; then
+              ISSUE=$(grep -o "reason-code: non-monotonic for #[0-9]*" stderr.log | head -1 | grep -o "[0-9]*")
+              bash scripts/ci/escalate.sh "$ISSUE" --reason non-monotonic --head "$AFTER_SHA"
+              exit 1
+          fi
+          if grep -q "::error::" stderr.log; then
+              cat stderr.log >&2
+              exit 1
+          fi
+          cat stderr.log >&2

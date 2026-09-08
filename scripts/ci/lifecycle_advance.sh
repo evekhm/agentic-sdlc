@@ -138,6 +138,7 @@ set -euo pipefail
 
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 die() { echo "::error::lifecycle_advance: $*" >&2; exit 1; }
 log() { echo "$*"; }
@@ -538,6 +539,7 @@ edit_labels() { # issue-number add-csv remove-csv (either may be empty)
 # set -e would abort on exactly the case that must fall through to the
 # FAILURES check below.
 for issue in $(printf '%s\n' "$CANDIDATES" | grep -E '^[0-9]+$' | sort -nu || true); do
+    target_rank=0
     stage="${BEST_STAGE[$issue]:-}"
     path="${BEST_PATH[$issue]:-}"
     files="${ALL_FILES[$issue]:-}"
@@ -855,8 +857,56 @@ $marker"
         remove="${remove:+$remove,}intent:new"
     fi
 
+    # D14 Monotonic progress check
+    # For now, stub the highest merged rank as 0 if loop ledger is absent.
+    HIGHEST_MERGED_RANK=0
+    # Search for <!-- loop-ledger:
+    LEDGER_COMMENT=$(echo "$recent" | grep -A 1000 "<!-- loop-ledger:$issue -->" || true)
+    if [[ -n "$LEDGER_COMMENT" ]]; then
+        # very naive parse of the ledger for highest rank
+        # We will assume it's valid.
+        HIGHEST_MERGED_RANK=$(echo "$LEDGER_COMMENT" | grep -o "rank:[0-9]*" | cut -d: -f2 | sort -nr | head -1 || echo 0)
+    fi
+
+    if [[ "$target_rank" -lt "$HIGHEST_MERGED_RANK" ]]; then
+        echo "::error::lifecycle_advance: refusal reason-code: non-monotonic for #$issue" >&2
+        fail_issue "refusal reason-code: non-monotonic for #$issue"
+        # Write refusal row to ledger (stubbed)
+        post_comment "$issue" "<!-- loop-ledger-row: refusal:non-monotonic ... -->" || true
+        continue
+    fi
+
     edit_labels "$issue" "$target" "$remove" \
         || { fail_issue "could not set $target on #$issue"; continue; }
+
+    # D16, D17, D18 Dispatch
+    if [[ "$target" == "status:in-review" ]]; then
+        log "    #$issue is at review rung (terminal) — no dispatch"
+        continue
+    fi
+
+    AUTONOMOUS_MERGE=$(python3 "$REPO_ROOT/scripts/ops/execution.py" --loop autonomous_merge 2>/dev/null || true)
+    if [[ "$AUTONOMOUS_MERGE" != "true" ]]; then
+        log "    autonomous_merge is false — skipping dispatch for #$issue"
+        continue
+    fi
+
+    # Determine persona from the rung
+    PERSONA=$(jq -r --arg a "$stage.md" '.stages[] | select(.artifact == $a) | .owner // empty' "$LIFECYCLE_JSON" 2>/dev/null || true)
+    if [[ -n "$PERSONA" ]]; then
+        BINDING=$(python3 "$REPO_ROOT/scripts/ops/execution.py" --binding "$PERSONA" 2>/dev/null || true)
+        if echo "$BINDING" | grep -q "^ladder "; then
+            PLACEMENT=$(echo "$BINDING" | awk '{print $2}')
+            if [[ "$DRY_RUN" == "1" ]]; then
+                log "    DRY-RUN scripts/placement/$PLACEMENT/run.sh $issue"
+            else
+                log "    Dispatching $PERSONA via $PLACEMENT for #$issue"
+                bash "$REPO_ROOT/scripts/placement/$PLACEMENT/run.sh" "$issue" || true
+            fi
+        else
+            log "    $PERSONA trigger is not ladder — no dispatch"
+        fi
+    fi
 done
 
 # --- Near misses (D17) --------------------------------------------------------

@@ -156,7 +156,7 @@ ROUND 3 - same scope rules as round 2
     comments only past this point, no new findings
        |
        v
-A HUMAN MERGES  (available at any time, at any label state)
+AUTONOMOUS LOOP MERGES WHEN CONSENSUS IS REACHED  (a human merge is the escape hatch available at any time)
        |
        v
 the recorder files ONE follow-up issue listing every still-open
@@ -361,7 +361,7 @@ code:
 
 ## Merge is the escape hatch
 
-A human can merge or close any PR at any time, at any label state.
+The system merges when consensus is reached. A human can merge or close any PR at any time as an escape hatch, at any label state.
 When a PR merges or closes with open ledger rows of any tier, the
 recorder files exactly **one** follow-up issue — `Post-merge findings
 from PR #<n>` — containing the open rows with their severities,

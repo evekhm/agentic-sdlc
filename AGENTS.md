@@ -44,7 +44,7 @@ edit. The never-list at the end is absolute.
 2. **Read the chain.** AGENTS.md → INTENT.md → docs/SPEC.md → the
    issue thread bottom-up.
 3. **Produce the stage's artifact, commit by path, open a PR.** A
-   bare push is not a delivery; a human merges. After a workflow-file
+   bare push is not a delivery; the autonomous loop merges when consensus is reached. After a workflow-file
    change merges, failed PR checks need a rebase onto main, never
    `gh run rerun` (a `pull_request` run executes against the head+base
    merge ref, so the stale ref reruns identically). When committing your
@@ -187,7 +187,7 @@ resumable cold.
    the issue (format above). If pausing rather than finishing, remove
    `in-progress` so another session can claim. Tick the tracker
    issue's checklist line when an issue closes.
-6. **Gate.** A human merges. The merge *is* the state transition that
+6. **Gate.** The autonomous loop merges when consensus is reached. The merge *is* the state transition that
    makes the next stage claimable — state advances only through the
    tracker and `main`, never through anyone's memory.
 
