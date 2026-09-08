@@ -1,14 +1,19 @@
 # agentic-sdlc
 
-A software development lifecycle run by AI agents. A GitHub issue goes
-in. Reviewed, merged code comes out. A cast of AI personas plans,
+**TL;DR:** a harness-agnostic AI SDLC loop that stays high-quality and
+cost-effective by placing every stage on whichever harness and model
+family fits it best — cheap capacity for volume, expensive judgment
+only where it changes the outcome (the [cost
+thesis](#two-harnesses-two-model-families)).
+
+A software development lifecycle run by AI agents. A GitHub issue
+goes in. Reviewed, merged code comes out. A cast of AI personas plans,
 designs, builds, implements, reviews and maintains the software. A
 human sets direction and is called only on escalation. The system is
 built with its own loop. It follows the
-[AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
-and runs it on two harnesses and two model families. Every issue link
-in this file points at the tracker item that owns that part of the
-design.
+[AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook).
+Every issue link in this file points at the tracker item that owns
+that part of the design.
 
 ## What this is
 
