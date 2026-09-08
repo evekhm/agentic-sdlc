@@ -60,7 +60,21 @@ fixture_tree() {
 }
 
 # write_config <tree> <heredoc-on-stdin>
-write_config() { cat > "$1/config/execution.yaml"; }
+# D20 (#64) makes the loop block required, so a fixture that says
+# nothing about it gets a quiet, valid one prepended; a fixture that
+# carries its own is written as given. write_config_raw writes exactly
+# what it is handed.
+write_config_raw() { cat > "$1/config/execution.yaml"; }
+write_config() {
+  local body
+  body="$(cat)"
+  if grep -q '^loop:' <<<"$body"; then
+    printf '%s\n' "$body" > "$1/config/execution.yaml"
+  else
+    printf 'loop:\n  autonomous_merge: false\n  max_rung_dispatches_per_issue: 12\n  max_cost_usd_per_issue: 50.0\n%s\n' \
+      "$body" > "$1/config/execution.yaml"
+  fi
+}
 
 # ---------------------------------------------------------------------------
 banner "D2/D19 the committed file is the one the gate passes"
@@ -256,6 +270,19 @@ personas:
 YAML
 run 1 "D16: trigger: ladder rejects events" -- "$CHECK" --check
 has "only repo-event subscribes to an event" "D16: trigger: ladder must not carry events"
+
+banner "D20 a config with no loop block fails --check (#64)"
+write_config_raw "$T" <<'YAML'
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D20: --check fails when the loop block is absent" -- "$CHECK" --check
+has "no loop block" "D20: the failure names the missing block"
+run 1 "D20: --loop fails the same way" -- "$CHECK" --loop autonomous_merge
+has "no loop block" "D20: --loop names the missing block"
 
 echo
 echo "execution_test.sh: all scenarios passed"

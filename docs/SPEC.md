@@ -948,6 +948,54 @@ ignore the signal. Tests: `scripts/ops/tests/execution_test.sh`,
 `placement_test.sh` and `post_test.sh`, all three run by the
 `execution` gate (`ci.gates`).
 
+### loop.autonomous
+
+The ladder runs itself between the two human gates (#64, PR #257). One
+`loop:` block in `config/execution.yaml` is required (D20) and is read
+through `scripts/ops/execution.py --loop <key>`:
+
+- `autonomous_merge` (bool): `true` arms the merge and the next-rung
+  dispatch; `false` leaves every guard evaluated and every ledger row
+  written while nothing is merged or dispatched (D18).
+- `max_rung_dispatches_per_issue` (int): the number of dispatch rows
+  one issue may carry before the advancer refuses the next rung (D13).
+- `max_cost_usd_per_issue` (number): the summed cost of those rows at
+  which the same refusal fires.
+
+`scripts/ci/merge_gate.sh <pr>` is the one merger. It runs from
+`.github/workflows/merge-gate.yml` on a closed trigger list (D3) and
+merges only when all eleven D5 conjuncts hold at the pull request's
+current head, among them: both reviewers reviewed that head (Atlas may
+carry forward under D7), the blocking set is empty, the consensus axis
+is agreed, neither `hold` nor `blocked` is present, the merger is a
+different identity from the author, the target rung outranks every rung
+the loop ledger records, and the ledger's head marker is present. With
+the flag off the same evaluation runs and nothing is written.
+
+`scripts/ci/escalate.sh <issue> --reason <code> --head <oid>` is the
+one escalation writer (D9): it swaps `status:*` for
+`status:review-stuck` and posts one comment carrying
+`<!-- escalation:<displaced>:<reason>:<head-oid> -->`, idempotent on
+(reason, head). Its callers are the gate and `lifecycle.yml`; the
+advancer calls no escalation itself (D19). A later gate run at a head
+whose reason has cleared restores the displaced label; `budget` and
+`non-monotonic` stay until a human clears them (D10).
+
+The loop ledger is one container comment per issue,
+`<!-- loop-ledger:<n> -->` … `<!-- loop-ledger-end -->`, with three row
+kinds: `dispatch` (rung entered, merged head-oid, event, pr, at, cost),
+`terminal` (the review rung, D17) and `refusal:<reason>`. Only rows a
+trusted writer posted count — the merge actor App and
+`github-actions[bot]` (D22); anything else on the thread is prose. An
+unreadable or unparseable ledger fails closed and is never read as
+absent.
+
+`.github/workflows/merge-gate.yml` holds `contents: write`,
+`pull-requests: write`, `issues: write`, `checks: read`,
+`statuses: read` and nothing else (acceptance 19); the merge actor
+App's manifest in `scripts/auth/app_manifests.yaml` requests the same
+five plus the `metadata: read` every App carries.
+
 ## Agreed, not yet built
 
 Each entry is on the record as a tracker issue; it moves into the
@@ -960,12 +1008,3 @@ spec body when its implementing PR merges.
 - **intake.automation** — headless Athena on `intent:new` (#10).
 - **maintain.watchers** — Cassandra, control bands, seeded incident
   (#11).
-
-### loop.autonomous
-The loop merges itself autonomously when consensus is reached. Loop limits are defined in the `loop:` block in `config/execution.yaml` (D20):
-- `loop.autonomous_merge`: boolean (`true`/`false`). When `true`, D5 runs its 11-conjunct guard logic and merges the pull request itself if all hold; when `false`, D5 runs its guard logic but drops its outcome and merges nothing.
-- `loop.max_rung_dispatches_per_issue`: integer (e.g. 10). The maximum number of autonomous dispatches (any stage) allowed on one issue. A dispatch that would exceed this budget exits 0 and writes a `refusal:budget` row.
-- `loop.max_cost_usd_per_issue`: float (e.g. 50.0). The maximum accumulated spend allowed on one issue. A dispatch that would exceed this budget exits 0 and writes a `refusal:budget` row.
-
-If the loop limits are missing or unreadable, the gate fails closed. D13/D14 enforce monotonic progress on a loop ledger and D15 enforces hold/blocked. 
-An escalation writes the `status:review-stuck` label (never `status:escalated`).

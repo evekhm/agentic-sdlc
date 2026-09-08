@@ -29,7 +29,7 @@
 # Loop ledger (D13): ONE container comment per issue, appended in place,
 # three row kinds and no other.
 #   <!-- loop-ledger:<issue> -->
-#   <!-- loop-ledger-row: dispatch rung:<n> head-oid:<oid> event:<id> pr:<n> at:<iso> cost:<usd> -->
+#   <!-- loop-ledger-row: dispatch rung:<n> head-oid:<oid> pr:<n> at:<iso> event:<id> cost:<usd> -->
 #   <!-- loop-ledger-row: terminal rung:<n> head-oid:<oid> pr:<n> at:<iso> -->
 #   <!-- loop-ledger-row: refusal:<reason> rung:<n> head-oid:<oid> pr:<n> at:<iso> -->
 #   <!-- loop-ledger-end -->

@@ -517,5 +517,13 @@ pass "MG-19d: the marker sits on its own line"
 [ "$(grep -c '^gh ' "$WRITES")" -eq 2 ] || { cat "$WRITES" >&2; fail "MG-19d: escalate.sh made other than exactly two writes"; }
 pass "MG-19d: exactly two writes (D9)"
 
+banner "MG-20 · D5 D20 · an unevaluable conjunct is a decline: bounds the parser cannot read fail closed, nothing written"
+mk_green
+rm -f "$FX"/loop-*
+run "MG-20: exits 0" 123
+has "Failing closed" "MG-20: the decline names the fail-closed rule"
+not_merged "MG-20"
+no_writes "MG-20"
+
 echo
 echo "merge_gate_test.sh: all scenarios passed"

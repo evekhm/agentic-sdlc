@@ -34,6 +34,7 @@ Touch: `scripts/ci/tests/merge_gate_test.sh`, `scripts/ops/tests/execution_test.
    - Adapter invoked exactly once.
    - Flag `loop.autonomous_merge: false` skips merge and dispatch.
 2. **`execution_test.sh`**: Add scenarios checking that `loop:` top-level block is parsed correctly, `max_rung_dispatches_per_issue` must be positive integer, `trigger: ladder` requires no events.
+   - *Sync (PR #257 round 3, R3-3):* a config with no `loop:` block fails `--check` (D20), so `write_config` prepends a valid block to the older fixtures that say nothing about it and `write_config_raw` writes a fixture verbatim for the scenario that proves the failure.
 
 **Decisions:** D3, D5-D18.
 **Acceptance:** AT-1 to AT-16, AT-18, AT-23, AT-24.
@@ -68,6 +69,7 @@ Touch: `scripts/auth/app_manifests.yaml`, `.github/workflows/merge-gate.yml`
    - Create workflow triggering on `pull_request`, `check_suite: completed`, `status`, `issue_comment: created`, `workflow_dispatch`.
    - Request the 5 required permissions.
    - Action runs `scripts/ci/merge_gate.sh` passing `MERGE_ACTOR_APP_PRIVATE_KEY`.
+   - *Sync (PR #257 round 3, Argus R1-2):* two jobs. `pull_request` runs execute the workflow file from the pull request's head, so that trigger gets a read-only job (`contents/pull-requests/issues/checks/statuses: read`, default token, `DRY_RUN=1`) that fails closed unless `github.base_ref` is `main`; the other four triggers run the writing job from `main` with the five permissions, `environment: merge-actor`, and both actions pinned by SHA. The operator scopes `MERGE_ACTOR_APP_ID` and `MERGE_ACTOR_APP_PRIVATE_KEY` to that Environment with a `main`-only deployment-branch policy. `issue_comment` events on plain issues are skipped.
 
 **Decisions:** D3, D4.
 **Acceptance:** AT-19.
@@ -100,6 +102,7 @@ Touch: `scripts/ci/merge_gate.sh`
    - Evaluates escalation self-clearing (D10) by checking live markers.
    - If D5 conjuncts pass and `execution.py --loop autonomous_merge` is `true`: calls merge API, writes loop-ledger row.
    - If `autonomous_merge` is `false`: writes loop-ledger row but skips merge API call.
+   - *Sync (PR #257 round 3):* D13 names three row kinds and none for a merge, so the gate writes only `refusal:*` rows; the merged head reaches the ledger through the advancer's `dispatch` or `terminal` row for the rung the merge opens, and conjunct (10) reads the highest such rung minus one. A refusal row is written in both flag settings; escalation follows only when the flag is true (D18).
    - If consensus times out or blocks, delegates to `scripts/ci/escalate.sh` (D9, D8).
    - Checks trusted writers (D22) when reading the ledger.
 
@@ -122,6 +125,7 @@ Touch: `scripts/ci/lifecycle_advance.sh`, `.github/workflows/lifecycle.yml`, `sc
 3. **`.github/workflows/lifecycle.yml`**:
    - Update permissions to include `issues: write`.
    - Add a step to invoke `scripts/ci/escalate.sh` when `lifecycle_advance.sh` exits reporting a non-monotonic refusal.
+   - *Sync (PR #257 round 3):* the same step also escalates `budget`, because D13 makes a tripped bound a green exit plus a budget escalation and D19 leaves the advancer with no escalation call of its own. The advancer prints `refusal reason-code: <budget|non-monotonic> for #<n>` on stderr; the step reads both. The advancer also writes the `dispatch` row (before the adapter runs) and the `terminal` row (D17), and its ledger reader is a copy of the gate's, since D19 permits no new shared file.
 
 **Decisions:** D14, D16-D18.
 **Acceptance:** AT-15, AT-16, AT-23.

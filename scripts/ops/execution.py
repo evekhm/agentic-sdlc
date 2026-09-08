@@ -130,20 +130,21 @@ def workflow_events() -> set:
 def check(config: dict) -> None:
     bindings = config.get("personas", {})
     loop = config.get("loop")
-    if loop is not None:
-        if not isinstance(loop, dict):
-            fail("loop block is not a mapping")
-        unknown = sorted(set(loop) - {"autonomous_merge", "max_rung_dispatches_per_issue", "max_cost_usd_per_issue"})
-        if unknown:
-            fail(f"loop block has unknown key(s) {', '.join(unknown)}")
-        if not isinstance(loop.get("autonomous_merge"), bool):
-            fail("loop.autonomous_merge must be a boolean")
-        mrd = loop.get("max_rung_dispatches_per_issue")
-        if isinstance(mrd, bool) or not isinstance(mrd, int) or mrd <= 0:
-            fail("loop.max_rung_dispatches_per_issue must be positive integer")
-        mcu = loop.get("max_cost_usd_per_issue")
-        if isinstance(mcu, bool) or not isinstance(mcu, (int, float)) or mcu <= 0:
-            fail("loop.max_cost_usd_per_issue must be a positive number")
+    if loop is None:
+        fail("config has no loop block; D20 requires one (#64)")
+    if not isinstance(loop, dict):
+        fail("loop block is not a mapping")
+    unknown = sorted(set(loop) - {"autonomous_merge", "max_rung_dispatches_per_issue", "max_cost_usd_per_issue"})
+    if unknown:
+        fail(f"loop block has unknown key(s) {', '.join(unknown)}")
+    if not isinstance(loop.get("autonomous_merge"), bool):
+        fail("loop.autonomous_merge must be a boolean")
+    mrd = loop.get("max_rung_dispatches_per_issue")
+    if isinstance(mrd, bool) or not isinstance(mrd, int) or mrd <= 0:
+        fail("loop.max_rung_dispatches_per_issue must be positive integer")
+    mcu = loop.get("max_cost_usd_per_issue")
+    if isinstance(mcu, bool) or not isinstance(mcu, (int, float)) or mcu <= 0:
+        fail("loop.max_cost_usd_per_issue must be a positive number")
 
     subscribed = set()
     for name in sorted(bindings):
