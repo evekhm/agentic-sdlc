@@ -13,10 +13,11 @@ The repository exists to make one claim concrete. The
 playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
 argues that writing code is no longer the bottleneck. The human-speed
 stages around the code are. This repository runs the playbook end to
-end, on two harnesses and two model families, and records what it
-took. The destination is an orchestrator with a YOLO switch: label an
-issue, and the loop carries it to a merged, verified, closed result.
-A person is only the escalation path.
+end on two harnesses, Claude Code and Antigravity, and on two model
+families, Claude and Gemini, and records what it took. The
+destination is an orchestrator with a YOLO switch: label an issue,
+and the loop carries it to a merged, verified, closed result. A
+person is only the escalation path.
 
 ## What this repository is
 
@@ -143,16 +144,25 @@ authority and the kind of work it does. A compiler emits the prompt
 files each harness loads. A CI gate fails the build if a compiled
 file drifts from its source. The shared standard every session reads
 is also one file, [AGENTS.md](AGENTS.md), with thin per-harness
-adapters beside it. Which harness and which model family run a
-persona is a one-line pin in [`config/`](config/). The same lifecycle
-moves between vendors without touching the lifecycle. Two harnesses
-are compiled and running today.
+adapters beside it.
 
-**Two model families in the review seat, on purpose.** The two
-reviewers are pinned to different families. A blind spot in one
-family stays a blind spot in one family, and consensus between them
-means something. Which family sits where is a fact in `config/` and
-appears in no persona, prompt or document.
+The two harnesses today are Claude Code, Anthropic's terminal agent,
+and Antigravity, Google's agentic IDE with its `agy` command line.
+From one source under [`personas/`](personas/) the compiler emits
+`.claude/agents/<persona>.md` for Claude Code and
+`.agents/agents/<persona>/agent.md` with a JSON manifest for
+Antigravity, 23 targets in all. Each persona is pinned to one harness
+in [`config/deployments.yaml`](config/deployments.yaml). Athena,
+Odyssey, Argus and Cassandra run on Claude Code. Daedalus and Atlas
+run on Antigravity. Swapping a pin is one line and a compiler run.
+The persona source does not change.
+
+**Two model families in the review seat, on purpose.** Argus reads
+every pull request on Claude. Atlas reads the same pull request on
+Gemini. A blind spot in one family stays a blind spot in one family,
+and consensus between them means something. The pairing is declared
+as a constraint in `config/deployments.yaml`, and the family behind
+each reviewer appears in no persona source or prompt.
 
 **Real identities and mechanical authority.** Each persona is its own
 GitHub App. The platform enforces authorship, claims, branch
@@ -160,9 +170,10 @@ namespaces and what a persona may write.
 
 **Cost as a first-class subsystem.** Every tier of work is routed to
 the cheapest capable model. Sessions are measured in dollars. Every
-dispatch carries a spend ceiling. The claim under test: an
-inexpensive model family carries the volume, and a frontier family is
-spent only where its judgment changes the outcome.
+dispatch carries a spend ceiling. The claim under test: Gemini Flash
+carries the volume of specs, plans and implementation, Gemini Pro and
+Claude Opus review it, and Claude Fable is spent only at the spec
+gate and in the advisor seat, where its judgment changes the outcome.
 
 **A living spec beside the change records.** The playbook's
 `intent.md`, `spec.md` and `plan.md` are per-change. This repository
@@ -294,11 +305,14 @@ returns conclusions.
 **Tiers.** Work is graded on a five-step ladder: fast, mechanical,
 implementation, review, frontier. A persona names the grade its work
 needs. Each harness binds the grades to its own models in
-[`config/model_tiers.yaml`](config/model_tiers.yaml). Moving a persona
-to another harness is one line in
-[`config/deployments.yaml`](config/deployments.yaml) and a compiler
-run. The compiler, [`scripts/sync_agents.py`](scripts/sync_agents.py),
-is byte-deterministic, so the drift gate is rebuild and diff.
+[`config/model_tiers.yaml`](config/model_tiers.yaml). On Claude Code
+today: Haiku for fast, Sonnet 5 for mechanical and implementation,
+Opus for review, Fable 5.1 for frontier. On Antigravity: Gemini 3.8
+Flash for fast, mechanical and implementation, Gemini 3.1 Pro for
+review and frontier. The exact model IDs live in that file and
+nowhere else, so a new model version is a one-line change. The
+compiler, [`scripts/sync_agents.py`](scripts/sync_agents.py), is
+byte-deterministic, so the drift gate is rebuild and diff.
 
 ## Distrust is structural
 
@@ -322,8 +336,9 @@ stage and owning persona from the labels and starts that persona
 under its own identity. Nothing else is passed. A flag naming a stage
 would let a session work a rung the labels say is stale. The resolver
 behind the command is a deterministic script with no model in it.
-Both harnesses' commands compile from one source, so they cannot
-drift ([#122](https://github.com/evekhm/agentic-sdlc/issues/122)).
+The command exists on Claude Code today. Its Antigravity counterpart,
+compiled from the same source, is open
+([#122](https://github.com/evekhm/agentic-sdlc/issues/122)).
 
 **Authority is checked.** Branch protection and persona branch
 namespaces bound what each identity can write. The review mutex keeps
@@ -431,10 +446,17 @@ sessions that taught them.
 What is built: a script that prices a session transcript from either
 harness and reports cache hit rate and tokens per message, and a
 per-dispatch spend ceiling that the invoking script enforces. The
-first datum for the thesis is in. The first wave dispatched on the
-inexpensive family produced five pull requests, all merged the same
-morning, each under ten minutes of wall clock
-([`docs/CRITICAL_PATH.md`](docs/CRITICAL_PATH.md)).
+first datum for the thesis is in. The wave of 2026-09-08 ran on
+Gemini: three specs and one implementation on 3.8 Flash, one
+amendment on 3.1 Pro. All five pull requests merged the same morning,
+each under ten minutes of wall clock
+([`docs/CRITICAL_PATH.md`](docs/CRITICAL_PATH.md)). An earlier wave
+taught the provenance lesson. Its sessions were believed to run on
+Flash and ran on Pro, because a bare launch took the model from a
+settings file. Every launch now carries an explicit model flag, and
+the invoking script writes the model into the record
+([#190](https://github.com/evekhm/agentic-sdlc/issues/190),
+[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md)).
 
 What is agreed and open: a cost ledger where every run posts a
 deterministic spend marker on its issue and one loader builds views
