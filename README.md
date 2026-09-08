@@ -8,7 +8,8 @@ identities, gated by merges, measured in dollars, and built by
 following the very loop it demonstrates.
 
 It exists to make a claim concrete. The
-[AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
+[AI-native SDLC
+playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
 argues that code is no longer the bottleneck and that the human-speed
 stages around it are. This repository takes the playbook at its word,
 runs it end to end on more than one harness and more than one model
@@ -23,8 +24,9 @@ Picture a change arriving as a GitHub issue. Nobody writes code yet.
 A product-owner persona turns the idea into an `intent.md` and opens
 a pull request. Someone merges it, and that merge is the only signal
 anything else needs: a deterministic workflow reads which artifact
-landed, moves a label, and the next persona picks the item up on its
-own. The intent becomes a `spec.md` with numbered decisions, the spec
+landed, moves a label, and the label alone tells the next persona
+what the item owes. The intent becomes a `spec.md` with numbered
+decisions, the spec
 becomes a `plan.md` committed before any code, the plan becomes a diff
 with tests, and two independent reviewers on two different model
 families read the result and post findings. Each rung ends in a pull
@@ -43,12 +45,20 @@ intent.md  spec.md   plan.md      code         findings
 ```
 
 The unusual part is that the system in this repository is itself the
-software under development. The personas, their compiler, the label
-state machine, the reviewers and the cost tooling were all specified,
-planned, implemented and reviewed by the personas, through the loop,
-one rung at a time. The folders under [`intent/`](intent/) are the
-change records of that bootstrap. When you watch a rung run here, you
-are watching the system extend itself.
+software under development. A person wrote the first persona sources
+and the review protocol by hand; from then on the compiler, the label
+state machine, the unattended reviewers, the dispatcher and the cost
+tooling were specified, planned, implemented and reviewed by the
+personas, through the loop, one rung at a time. The folders under
+[`intent/`](intent/) are the change records of that bootstrap. When
+you watch a rung run here, you are watching the system extend itself.
+
+That is also why it works as a workshop. The format is a
+presenter-driven demo plus a take-home: the demo drives one real
+change of this repository through every rung in front of the
+audience, and the take-home is this same repository, packaged so the
+whole cast installs with one command
+([INTENT.md, "Workshop storyline"](INTENT.md)).
 
 ## The goal: an orchestrator with a YOLO switch
 
@@ -57,36 +67,57 @@ an orchestrator. Today a person opens a session and types `/work <n>`
 once per rung, merges what comes back, and notices when the next gate
 has opened. The destination is that labeling an issue is the entire
 human act. The orchestrator reads the label, dispatches the owning
-persona at its tier under its own identity, waits at each gate for
-the reviewers' consensus merge rather than for a person, dispatches
-the next rung itself, closes the issue once delivery is verified, and
-stops only on `hold`, a failed consensus, a tripped budget or an open
-security finding. The playbook document calls the two ends of that
-distance YOLO off and YOLO on
-([`docs/PLAYBOOK.md`](docs/PLAYBOOK.md), "Roadmap").
+persona at its tier under its own identity, waits at each gate for a
+merge that the two reviewers' consensus triggers rather than for a
+person, dispatches the next rung itself, closes the issue once
+delivery is verified, and stops only on `hold`, a failed consensus, a
+tripped budget or an open security finding. This is deliberately one
+step past the playbook, whose agents never have a path to the default
+branch: here evidence-based consensus between two model families
+does, and the person becomes the escalation path rather than the
+gate ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)
+reversed the founding intent's rule that humans merge on every
+path). The playbook document calls the two ends of that distance YOLO
+off and YOLO on ([`docs/PLAYBOOK.md`](docs/PLAYBOOK.md), "Roadmap").
 
 Three seats make the orchestrator trustworthy rather than merely
 fast. **Nestor, the advisor,** is the standing frontier-judgment seat
 that helps orchestrate: it decides process questions, authors the
 prompts the cheaper personas are dispatched with, helps at the spec
 gate and keeps the playbook honest, without ever implementing or
-reviewing ([#199](https://github.com/evekhm/agentic-sdlc/issues/199)). **The verifier** is the review stage given depth,
+reviewing ([#199](https://github.com/evekhm/agentic-sdlc/issues/199)).
+**The verifier** is the review stage given depth,
 re-running every gate independently and reading the job log behind
-every green check before anything merges ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)). **Cassandra, the
+every green check before anything merges
+([#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
+**Cassandra, the
 maintainer,** watches the running system and files the next intent
 when a control band breaks, so the orchestrator's backlog refills
-from evidence rather than from someone's memory ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
-The loop is self-improving by construction: every failure a seat
-observes is filed as an issue that moves a rule into the repository,
-and the agreed next step turns each of those scars into a permanent
-eval ([#254](https://github.com/evekhm/agentic-sdlc/issues/254)).
+from evidence rather than from someone's memory
+([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
+The loop is self-improving by construction. The frontier family
+compiles judgment into rules, prompts and repository plumbing; the
+inexpensive family executes; and the gap between what a persona had
+to be told and what it should already have known is filed as an
+issue that moves the rule into the repository, so each wave the
+prompts get shorter and the repository smarter
+([#181](https://github.com/evekhm/agentic-sdlc/issues/181)). The
+agreed next step turns each of those scars into a permanent eval
+([#254](https://github.com/evekhm/agentic-sdlc/issues/254)).
 
 The pieces of the switch are on the tracker: `/work <n>` carrying an
-item through every remaining rung with a subagent per rung ([#89](https://github.com/evekhm/agentic-sdlc/issues/89));
-`mode:autonomous` and per-issue pins as labels ([#147](https://github.com/evekhm/agentic-sdlc/issues/147)); the
+item through every remaining rung with a subagent per rung
+([#89](https://github.com/evekhm/agentic-sdlc/issues/89));
+`mode:autonomous` and per-issue pins as labels
+([#147](https://github.com/evekhm/agentic-sdlc/issues/147)); the
 reviewer-consensus merge and a merge identity that belongs to no
-persona ([#64](https://github.com/evekhm/agentic-sdlc/issues/64), [#251](https://github.com/evekhm/agentic-sdlc/issues/251)); an enforced budget guard and a sequential queue
-driver ([#108](https://github.com/evekhm/agentic-sdlc/issues/108)); and the deterministic close ([#148](https://github.com/evekhm/agentic-sdlc/issues/148)). The demo claim is
+persona ([#64](https://github.com/evekhm/agentic-sdlc/issues/64),
+[#251](https://github.com/evekhm/agentic-sdlc/issues/251)); an enforced
+budget guard and a sequential queue
+driver ([#108](https://github.com/evekhm/agentic-sdlc/issues/108));
+and the deterministic close
+([#148](https://github.com/evekhm/agentic-sdlc/issues/148)). The demo
+claim is
 that a backlog closes itself on the cheapest capable model, safely,
 because every unit of distrust is structural rather than in anyone's
 attention.
@@ -111,10 +142,12 @@ loop in prose. This repository adds five things on top of it.
 vendor-free source file that names its stage, its protocol, its
 authority and the kind of work it does. A compiler emits the prompt
 files each harness actually loads, and a CI gate fails the build if a
-compiled file drifts from its source. Which harness and which model
-family run a persona is a one-line pin in [`config/`](config/), so the
-same lifecycle can be moved between vendors without touching the
-lifecycle.
+compiled file drifts from its source. The shared standard every
+session reads is likewise one file, [AGENTS.md](AGENTS.md), with thin
+per-harness adapters beside it. Which harness and which model family
+run a persona is a one-line pin in [`config/`](config/), so the same
+lifecycle can be moved between vendors without touching the
+lifecycle. Two harnesses are compiled and running today.
 
 **Two model families in the review seat, on purpose.** The two
 reviewers are pinned to different families so that a blind spot in
@@ -167,7 +200,13 @@ implement.
 **Implement.** The implementer is dispatched at a pinned commit
 against the approved spec and the committed plan, works test-first
 in its own branch namespace, and opens one pull request carrying the
-diff, any plan correction, and the living-spec upsert.
+diff, any plan correction, and the living-spec upsert. The playbook's
+test stage lives here rather than as a rung of its own: the session
+verifies its own work against the contract tests before anyone reads
+it, and CI gates on every pull request check that compiled files
+match their sources, that nothing committed leaks a credential or a
+path, that bindings and adapters agree, and that the living spec was
+upserted or explicitly excused.
 
 **Review.** Two reviewers read the change against
 [REVIEW.md](REVIEW.md): severity tiers, per-finding ids, a bounded
@@ -175,7 +214,18 @@ round funnel, consensus keyed to decision ids. A third round
 (`review:3`) escalates the item to `status:review-stuck` for a human.
 Today the review rung is where the
 ladder ends and a human closes the item; a deterministic close rung
-that verifies delivery before closing is agreed and in flight ([#148](https://github.com/evekhm/agentic-sdlc/issues/148)).
+that verifies delivery before closing is agreed and in flight
+([#148](https://github.com/evekhm/agentic-sdlc/issues/148)).
+
+**Deploy.** There is no product behind this repository other than
+the system itself, so deploy means CI shipping the system's own
+automation: the workflows, the compiled personas, the scripts. The
+reviewers already run as event-driven workflows on a hosted runner
+under their own identities; where each persona runs, on what trigger
+and under what spend ceiling is a per-persona binding in
+[`config/execution.yaml`](config/execution.yaml), an axis kept
+deliberately separate from which harness interprets it
+([#25](https://github.com/evekhm/agentic-sdlc/issues/25)).
 
 **Maintain.** Deterministic watchers compare live metrics to control
 bands and respond in proportion: log at one sigma, diagnose read-only
@@ -192,7 +242,8 @@ shadow. Defects in merged work take a shorter path: a repair whose
 spec entry is unchanged skips the intent, spec and plan and goes
 issue, fix pull request with a regression check, review, merge; a
 repair that changes a spec entry is a change and re-enters at plan
-([#32](https://github.com/evekhm/agentic-sdlc/issues/32), [INTENT.md, "Defect repair"](INTENT.md)).
+([#32](https://github.com/evekhm/agentic-sdlc/issues/32), [INTENT.md,
+"Defect repair"](INTENT.md)).
 
 ## The cast
 
@@ -222,15 +273,20 @@ model behind it.
   helps orchestrate: process decisions, dispatch-prompt authoring,
   help at the spec gate, stewardship of the playbook. Owns no rung,
   so no dispatcher can ever resolve to it, and never implements or
-  reviews. Specified and planned, not yet compiled ([#199](https://github.com/evekhm/agentic-sdlc/issues/199)).
+  reviews. Specified and planned, not yet compiled
+  ([#199](https://github.com/evekhm/agentic-sdlc/issues/199)).
 
 Two further seats are on the record. The **verifier** is not a new
 persona but the review stage given depth: independently re-running
 every gate, mutation-testing the tests, reading the job log behind
 every green check, and four mechanizable ladder checks; the
-recommendation is that Argus carries it ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)). A dedicated **merge
+recommendation is that Argus carries it
+([#204](https://github.com/evekhm/agentic-sdlc/issues/204)). A
+dedicated **merge
 identity**, so that no persona ever merges its own pull request,
-arrives with the autonomous loop ([#64](https://github.com/evekhm/agentic-sdlc/issues/64), [#251](https://github.com/evekhm/agentic-sdlc/issues/251)).
+arrives with the autonomous loop
+([#64](https://github.com/evekhm/agentic-sdlc/issues/64),
+[#251](https://github.com/evekhm/agentic-sdlc/issues/251)).
 
 Five sub-agents with no GitHub identity do the delegated work a
 persona hands off, so raw material never enters the persona's own
@@ -273,13 +329,16 @@ under its own identity. Nothing else is passed, because a flag naming
 a stage would let a session work a rung the labels say is not
 current. The resolver behind the command is a deterministic script
 with no model in it, and both harnesses' commands are meant to compile
-from one source so they cannot drift ([#122](https://github.com/evekhm/agentic-sdlc/issues/122)).
+from one source so they cannot drift
+([#122](https://github.com/evekhm/agentic-sdlc/issues/122)).
 
 **Authority is checked, not trusted.** Branch protection and persona
 branch namespaces bound what each identity can write, the review
 mutex keeps a persona from reviewing its own rung, and the
 distinct-family constraint on the reviewers is declared in config and
-becoming a CI gate ([#198](https://github.com/evekhm/agentic-sdlc/issues/198)), so a re-pin cannot silently collapse both
+becoming a CI gate
+([#198](https://github.com/evekhm/agentic-sdlc/issues/198)), so a
+re-pin cannot silently collapse both
 reviewers onto one family.
 
 The field notes behind these rules are the fabrication catalog in
@@ -288,58 +347,91 @@ prompt author fabricates, the environment fabricates green and red,
 and the loop fabricates convergence. Two rules generalize from it:
 one scar, one rule, and stable countermeasures never ask the model
 for testimony. The next step, agreed and open, turns every entry in
-the catalog into a permanent eval in CI ([#254](https://github.com/evekhm/agentic-sdlc/issues/254)) and puts deterministic
-hooks behind the advisory rules ([#255](https://github.com/evekhm/agentic-sdlc/issues/255)).
+the catalog into a permanent eval in CI
+([#254](https://github.com/evekhm/agentic-sdlc/issues/254)) and
+puts deterministic
+hooks behind the advisory rules
+([#255](https://github.com/evekhm/agentic-sdlc/issues/255)).
 
 ## How it built itself, and where it stands
 
 The system could not run its own loop before the loop existed, so the
 backlog was organised as a bootstrap ladder, indexed by one pinned
-tracker issue ([#12](https://github.com/evekhm/agentic-sdlc/issues/12)).
+tracker issue
+([#12](https://github.com/evekhm/agentic-sdlc/issues/12)).
 
 - **Rung 1, wizard of Oz.** A human authored the persona sources, the
   config and the review protocol. Personas ran by hand as sub-agents
-  of the operator's own session. Done.
+  of that person's own session. Done.
 - **Rung 2, the machinery.** The compiler, the CI gates, the label
   taxonomy, the six bot identities, the one-door dispatcher, this
   document, and launching any persona on its own harness. Done, with
   harness-agnostic launch and the session close-out still landing
-  ([#43](https://github.com/evekhm/agentic-sdlc/issues/43), [#85](https://github.com/evekhm/agentic-sdlc/issues/85)).
+  ([#43](https://github.com/evekhm/agentic-sdlc/issues/43),
+  [#85](https://github.com/evekhm/agentic-sdlc/issues/85)).
 - **Rung 3, unattended personas.** The reviewers as event-driven
   workflows running on a hosted runner under their own identities,
   which met its gate on 2026-09-08 when both reviewers posted real
   rounds from the runner itself. The product owner picking up
-  `intent:new` on her own is open ([#10](https://github.com/evekhm/agentic-sdlc/issues/10)), and the reviewer-consensus
-  merge is implementing ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)).
+  `intent:new` on her own is open
+  ([#10](https://github.com/evekhm/agentic-sdlc/issues/10)), and
+  the reviewer-consensus
+  merge is implementing
+  ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)).
 - **Rung 4, maintain.** Deterministic watchers and a seeded incident
-  that files a new intent. Open ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
+  that files a new intent. Open
+  ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
 - **Rung 5, packaging.** The personas compiled into an installable
   plugin, published from an in-repo marketplace, so an attendee can
-  install the whole cast with one command. Open ([#31](https://github.com/evekhm/agentic-sdlc/issues/31)).
+  install the whole cast with one command. Open
+  ([#31](https://github.com/evekhm/agentic-sdlc/issues/31)).
 
-From rung 2 on, every feature was delivered through the repository's
-own ladder: an `intent/<n>-<slug>/` folder, a spec authored under the
+From rung 2 on, features were delivered through the repository's own
+ladder: an `intent/<n>-<slug>/` folder, a spec authored under the
 persona's App identity, a persona-namespaced branch, commits that cite
-reviewer finding ids. Twenty-one change folders exist today.
+reviewer finding ids. Twenty-one change folders exist today. Where
+the bootstrap cut a corner, because the machinery a rung needed was
+the thing being built, it wrote that down as an explicit,
+non-precedent deviation in the spec that cut it, and the field notes
+in [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md) record what each shortcut
+cost.
 
 The live ordering of what remains is
 [`docs/CRITICAL_PATH.md`](docs/CRITICAL_PATH.md), stated as three
 gates. Gate one, unattended review on every rung, is met. Gate two
 turns the trigger into a label and the merge into a decision: a
-`mode:autonomous` switch and per-issue overrides ([#147](https://github.com/evekhm/agentic-sdlc/issues/147)), an enforced
-budget guard and queue driver ([#108](https://github.com/evekhm/agentic-sdlc/issues/108)), the consensus merge ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)), and
-the deterministic close ([#148](https://github.com/evekhm/agentic-sdlc/issues/148)). Gate three makes issues dispatch-ready
-by construction: typed intake ([#117](https://github.com/evekhm/agentic-sdlc/issues/117)), the repair path through the same
-`/work <n>` ([#82](https://github.com/evekhm/agentic-sdlc/issues/82)), and one `/work <n>` that drives all five rungs from
-a single session ([#89](https://github.com/evekhm/agentic-sdlc/issues/89)). Alongside them: a live board of who owns which
-issue at which rung ([#68](https://github.com/evekhm/agentic-sdlc/issues/68)), the past of one issue as a trace ([#71](https://github.com/evekhm/agentic-sdlc/issues/71)), a
-CI gate on the distinct-family constraint ([#198](https://github.com/evekhm/agentic-sdlc/issues/198)), and the ops scripts
-repackaged as skills both harnesses can load ([#122](https://github.com/evekhm/agentic-sdlc/issues/122)).
+`mode:autonomous` switch and per-issue overrides
+([#147](https://github.com/evekhm/agentic-sdlc/issues/147)),
+an enforced
+budget guard and queue driver
+([#108](https://github.com/evekhm/agentic-sdlc/issues/108)),
+the consensus merge
+([#64](https://github.com/evekhm/agentic-sdlc/issues/64)), and
+the deterministic close
+([#148](https://github.com/evekhm/agentic-sdlc/issues/148)). Gate
+three makes issues dispatch-ready
+by construction: typed intake
+([#117](https://github.com/evekhm/agentic-sdlc/issues/117)), the
+repair path through the same
+`/work <n>` ([#82](https://github.com/evekhm/agentic-sdlc/issues/82)),
+and one `/work <n>` that drives all five rungs from
+a single session
+([#89](https://github.com/evekhm/agentic-sdlc/issues/89)). Alongside
+them: a live board of who owns which
+issue at which rung
+([#68](https://github.com/evekhm/agentic-sdlc/issues/68)),
+the past of one issue as a trace
+([#71](https://github.com/evekhm/agentic-sdlc/issues/71)), a
+CI gate on the distinct-family constraint
+([#198](https://github.com/evekhm/agentic-sdlc/issues/198)), and the
+ops scripts
+repackaged as skills both harnesses can load
+([#122](https://github.com/evekhm/agentic-sdlc/issues/122)).
 
-Today a human fires each session and merges on a verifier's
-agreement: YOLO off. When gates two and three close, labeling an
-issue is the entire human act: YOLO on, the orchestrator described
-above.
+Today a person fires each session and merges when an independent
+verifier session agrees: YOLO off. When gates two and three close,
+labeling an issue is the entire human act: YOLO on, the orchestrator
+described above.
 
 ## What it costs, and how we know
 
@@ -353,15 +445,25 @@ sessions that taught them.
 
 What is built: a script that prices a session transcript from either
 harness and reports cache hit rate and tokens per message, and a
-per-dispatch spend ceiling that is enforced, not printed. What is
-agreed and open: a cost ledger where every run posts a deterministic
+per-dispatch spend ceiling that is enforced, not printed. The first
+datum for the thesis is in: the first wave dispatched on the
+inexpensive family produced five pull requests, all merged the same
+morning, each under ten minutes of wall clock
+([`docs/CRITICAL_PATH.md`](docs/CRITICAL_PATH.md)). What is agreed
+and open: a cost ledger where every run posts a deterministic
 spend marker on its issue and one loader builds views per issue, pull
-request, persona, model and configuration ([#104](https://github.com/evekhm/agentic-sdlc/issues/104)); provenance written
-by the invoking script rather than self-reported by the model ([#190](https://github.com/evekhm/agentic-sdlc/issues/190));
+request, persona, model and configuration
+([#104](https://github.com/evekhm/agentic-sdlc/issues/104));
+provenance written
+by the invoking script rather than self-reported by the model
+([#190](https://github.com/evekhm/agentic-sdlc/issues/190));
 model routing keyed on persona and stage with escalation as a
-recorded, once-per-rung hop ([#107](https://github.com/evekhm/agentic-sdlc/issues/107)); and flow metrics beside the cost
+recorded, once-per-rung hop
+([#107](https://github.com/evekhm/agentic-sdlc/issues/107)); and flow
+metrics beside the cost
 ones, because the first traced issue showed under half an hour of
-agent work waiting more than two hours for a human merge ([#71](https://github.com/evekhm/agentic-sdlc/issues/71)).
+agent work waiting more than two hours for a human merge
+([#71](https://github.com/evekhm/agentic-sdlc/issues/71)).
 
 ## Running it yourself
 
@@ -382,7 +484,8 @@ find them. That is what makes the system self-improving, and it is
 why the backlog is the honest picture of the system, not the code
 alone. Two rules bind every filer, person or persona: search the
 tracker first
-([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)),
+([AGENTS.md, "Before filing an
+issue"](AGENTS.md#before-filing-an-issue)),
 and a reviewer's findings about the pull request under review belong
 in that thread, never as new issues. Say what the problem is and what
 would be true if it were solved; the first rung writes the rest.
@@ -397,16 +500,21 @@ rung:
 `<n>` is an issue or pull request number. The command prints what it
 resolved (stage, artifact owed, owning persona, branch, the one-line
 brief the persona is handed) and dispatches that persona; where a
-persona's pinned harness is not the one you are sitting in, it starts
-it there. It refuses, before anything starts, when the item is on
+persona's pinned harness is not the one you are sitting in, it prints
+the launch line today and will start it there itself once
+harness-agnostic launch lands
+([#43](https://github.com/evekhm/agentic-sdlc/issues/43)). It refuses,
+before anything starts, when the item is on
 hold, closed, blocked, claimed by another actor or in contradictory
 state. Because the review rung has two owners it launches neither
 unless you name one. Today one invocation works one rung; the agreed
 end state is that one `/work <n>` carries the item through every
 remaining rung, each as a subagent of the owning persona in its own
 worktree, waiting at each gate for the merge rather than assuming it
-([#89](https://github.com/evekhm/agentic-sdlc/issues/89)), and that the same command drives a defect through the repair
-path ([#82](https://github.com/evekhm/agentic-sdlc/issues/82)). Full contract: [`docs/SPEC.md`](docs/SPEC.md)
+([#89](https://github.com/evekhm/agentic-sdlc/issues/89)), and that
+the same command drives a defect through the repair
+path ([#82](https://github.com/evekhm/agentic-sdlc/issues/82)). Full
+contract: [`docs/SPEC.md`](docs/SPEC.md)
 `ops.dispatch`.
 
 What your merge means is the same at every gate. A merged pull
@@ -415,7 +523,8 @@ A closed pull request is a rejection, and a rejection is not
 relitigated. When a decision in the artifact is wrong, edit it in the
 pull request: the edited row *is* the decision, so you never comment
 asking for a change and wait for a session to make it
-([REVIEW.md, "Merge is the escape hatch"](REVIEW.md#merge-is-the-escape-hatch)).
+([REVIEW.md, "Merge is the escape
+hatch"](REVIEW.md#merge-is-the-escape-hatch)).
 Until the consensus merge lands, a human is the merge authority on
 every path.
 
@@ -438,7 +547,9 @@ every path.
   adopted from each.
 - [`config/`](config/), the only place a harness, vendor or model
   family is named.
-- The pinned tracker issue ([#12](https://github.com/evekhm/agentic-sdlc/issues/12)), the live dashboard of the ladder.
+- The pinned tracker issue
+([#12](https://github.com/evekhm/agentic-sdlc/issues/12)), the live
+dashboard of the ladder.
   There is deliberately no status file.
 
 This file explains and never duplicates: it is normative for nothing,
