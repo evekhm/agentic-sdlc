@@ -126,9 +126,8 @@ the persona layer: the compiled resume protocol's refusals 5 (mutex
 held by daedalus) and 6 (stage owned by daedalus) fire even though
 work.sh bypassed the claim, so only one runner reviewer can reach this
 PR and the verifier's own review is the second voice under #204. That
-defect is filed as #242. The verifier is briefed to be strict on this PR: it is the
-plan under which merge becomes a decision, so its acceptance rows are
-the gate.
+defect is filed as #242. Merged on smoke under the fast path; it is the
+plan under which merge becomes a decision.
 
 **Blocker ahead of the wave-3 plan rungs: #239** (filed by the
 verifier 2026-09-08 06:24, intent:new). #207 bypassed one of four
@@ -142,8 +141,8 @@ live: both reviewers refused PR #223 (docs, resolves to #202) with
 stuck in it today. Ahead in priority, not in sequence: the wave-3 plan
 rungs for #98 and #68 (`~/waves/launch.sh 98p 68p`, prompts
 w3-98-daedalus.txt and w3-68-daedalus.txt) touch intent/** only and can
-launch now; #239 takes the next odyssey dispatch because every later
-escalation lands in the same trap. #236 (below) edits the same file;
+launch now; #239 is deferred under the fast path; it bites only once
+an issue escalates to review-stuck. #236 (below) edits the same file;
 whichever merges second rebases.
 
 | # | Issue | Why it is here | State |
