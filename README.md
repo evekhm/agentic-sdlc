@@ -76,6 +76,10 @@ every green check before anything merges ([#204](https://github.com/evekhm/agent
 maintainer,** watches the running system and files the next intent
 when a control band breaks, so the orchestrator's backlog refills
 from evidence rather than from someone's memory ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
+The loop is self-improving by construction: every failure a seat
+observes is filed as an issue that moves a rule into the repository,
+and the agreed next step turns each of those scars into a permanent
+eval ([#254](https://github.com/evekhm/agentic-sdlc/issues/254)).
 
 The pieces of the switch are on the tracker: `/work <n>` carrying an
 item through every remaining rung with a subagent per rung ([#89](https://github.com/evekhm/agentic-sdlc/issues/89));
@@ -138,9 +142,10 @@ what is true now.
 ## The loop, stage by stage
 
 Lifecycle state lives in GitHub issue labels, never in a chat
-transcript. An issue enters with `intent:new` and no stage label,
-which is exactly what makes it stage *plan* to a session that has
-never seen it.
+transcript. An issue enters, whether a person, the maintainer's
+watchers or the system's own field notes filed it, with `intent:new`
+and no stage label, which is exactly what makes it stage *plan* to a
+session that has never seen it.
 
 **Plan.** The product owner writes `intent.md` into
 `intent/<n>-<slug>/`: problem, outcome, constraints, open questions.
@@ -367,12 +372,20 @@ Apps is [`scripts/auth/README.md`](scripts/auth/README.md), and labels
 and backlog are provisioned idempotently by
 [`scripts/setup/`](scripts/setup/).
 
-Humans file issues. No persona opens an intake issue, Atlas included:
-a reviewer's findings belong in the pull request thread that raised
-them. Search the tracker before you file, every time
-([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)).
-Say what the problem is and what would be true if it were solved; the
-first rung writes the rest.
+Anyone files issues, and the system files its own. An issue enters
+from a person, from the maintainer's watchers when a control band
+breaks, or from the loop's own failures: when a rung goes wrong, the
+gap between what a persona needed to be told and what it should have
+known becomes a tracked issue that moves the rule into the
+repository, and the verifier and the advisor file those gaps as they
+find them. That is what makes the system self-improving, and it is
+why the backlog is the honest picture of the system, not the code
+alone. Two rules bind every filer, person or persona: search the
+tracker first
+([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)),
+and a reviewer's findings about the pull request under review belong
+in that thread, never as new issues. Say what the problem is and what
+would be true if it were solved; the first rung writes the rest.
 
 Then open a session in your harness and type, for any item at any
 rung:
