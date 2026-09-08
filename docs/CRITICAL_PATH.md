@@ -34,25 +34,64 @@ order:
    voices.
 3. #64 implementation rung on agy (odyssey; prompt
    `~/waves/w4-64-odyssey.txt`, launch line `~/waves/launch.sh 64i`),
-   merge on smoke.
-4. #147 minimal, after #64's PR merges (both touch unattended.yml):
-   the working personas become label-triggered on the runner. Today
-   `config/execution.yaml` has athena, daedalus and odyssey as
-   `trigger: manual, placement: vm-local` and `unattended.yml` fires
-   only on `pull_request`; the change adds `issues: [labeled]`, maps
-   `status:spec` / `status:build` / `status:implementing` to the
-   persona that owns the stage, and runs it on gh-actions. Prompt
-   `~/waves/w4-147-odyssey.txt` (being drafted), merge on smoke.
+   merge on smoke. Launched by the operator 2026-09-08 06:50:36 UTC as
+   agy-64i (worktree odyssey-64-autonomous-loop, branch
+   odyssey/64-autonomous-loop); #246 (lifecycle_advance_test.sh run by
+   no workflow, must be baselined and kept green through T6, added to
+   ci-gates.yml) and #245 (no closing keyword in any commit body;
+   "Does not close #108" closed #108) reached the session through the
+   #64 thread (verifier comment 5580549928, advisor comment
+   5580631791) because the launch preceded the prompt amendment.
+   Merge on smoke by the verifier.
+4. #251 + #252, the end-to-end chain after #64. Retired: the #147
+   label-trigger slice — the merged #64 spec D16 reads "No second
+   workflow, no `issues: labeled` trigger, no new event" and flips
+   athena/daedalus/odyssey to `trigger: ladder`, so the chain exists
+   once #64 lands. What is missing (none of it in the #64 plan): (a)
+   #252 — the advancer never releases the finished rung's
+   `in-progress`, and work.sh refusal (g) keys on the persona
+   changing, so a run from intent:new advances one rung
+   (intent→spec, athena resumes herself), writes status:build and
+   stalls with the board looking advanced; fix = the transition
+   releases the claim only when its holder owns the rung just merged,
+   any other holder keeps the loop stopped with a named notice; (b)
+   #251 gap 2 — the D16 dispatch runs the placement adapter in place
+   inside lifecycle.yml (gh-actions/run.sh:128 execs work.sh), which
+   has no harness and no persona key, so it prints a green skip; fix =
+   start unattended.yml through workflow_dispatch (GITHUB_TOKEN may,
+   with actions: write), lifecycle.yml stays secret-free; (c) #251 gap
+   3, the operator's one-time checklist: loop.autonomous_merge true,
+   placement gh-actions for the three personas, merge-actor App
+   installed with its key as a repository secret,
+   ATHENA/DAEDALUS/ODYSSEY_APP_PRIVATE_KEY secrets loaded (names
+   only), first hop stays a human dispatch of athena. Delivery: one PR
+   after the #64 implementation merges, `~/waves/launch.sh 251`
+   (prompt `~/waves/w4-251-odyssey.txt`), merged on smoke.
 5. Demo run: the operator launches one rung by hand with the one-line
    prompt ("work issue #98"), and from there the loop carries it: PR,
    runner reviews, #64 merge, advancer flips the label, the runner
    dispatches the next persona, until the issue is done. The job logs
    and the issue thread are the evidence, and the verifier's job on
-   that run is to watch and write down what broke, not to gate it.
+   that run is to watch and write down what broke, not to gate it. The
+   operator launched 98p (daedalus plan rung) at ~06:44 UTC alongside
+   68p, so the demo on #98 may start at the implement rung; either way
+   it needs step 4 complete, including the operator checklist.
 
 Deferred until after the demo: #239, #236, #238, #148, #191, the
 other wave-3 rows, and the old verifier queue (#185, #135, #202,
-#69).
+#69). Also deferred: #244 (WORK_MAX_USD guard in placement_test.sh
+not hermetic); #249 (eight of eleven hermetic suites, 4,689 lines,
+run by no workflow; verifier authors one PR after #64 merges adding
+all eight to ci-gates.yml plus a glob row; advisor clears it since
+the author cannot verify their own change; the operator should know
+the verifier seat is authoring); #250 (#233 residue: SPEC.md:516 vs
+:477, :499 half wrong, two unfailable work_test rows, work.sh:248
+reads issue state not PR state).
+
+PR #237 was merged by squash with branch auto-delete at 06:44:04 UTC —
+the web-UI shape, neither advisor nor verifier; two seats plus at
+least one other hand share the operator-bot login, so merge
+attribution survives only in the run record.
 
 ## Gate 1: unattended review runs on every rung — MET 2026-09-08
 
