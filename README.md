@@ -280,17 +280,24 @@ where the cheap, low-latency model is the right pin for most stages,
 and Claude Code's job shrinks to the plumbing that stood the process
 up.
 
-List rates, $ per million tokens, resolved by tier from
-[`config/model_tiers.yaml`](config/model_tiers.yaml) (priced the same
-way in [`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh);
-re-check both before citing a number, since a rate or a pin can move):
+List rates, $ per million tokens, for the exact model id each tier
+pins in [`config/model_tiers.yaml`](config/model_tiers.yaml) (priced
+the same way in
+[`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh);
+re-check both before citing a number, since a rate or a pin can move).
+`haiku` and `opus` are aliases the config leaves unpinned; the price
+shown is their current resolution:
 
-| Tier | Claude Code | in | out | Antigravity | in | out |
+| Tier | Claude Code model id | $/1M tok in | $/1M tok out | Antigravity model id | $/1M tok in | $/1M tok out |
 |---|---|---|---|---|---|---|
-| Fast | Haiku | $1.00 | $5.00 | Gemini Flash | $0.15 | $0.60 |
-| Mechanical / Implementation | Sonnet 5 | $2.00 | $10.00 | Gemini Flash | $0.15 | $0.60 |
-| Review | Opus | $5.00 | $25.00 | Gemini Pro | $1.25 | $5.00 |
-| Frontier | Fable 5.1 | $10.00 | $50.00 | Gemini Pro | $1.25 | $5.00 |
+| Fast | `haiku` (Haiku 4.5) | $1.00 | $5.00 | `gemini-3.8-flash-medium` | $0.15 | $0.60 |
+| Mechanical / Implementation | `claude-sonnet-5` | $2.00 | $10.00 | `gemini-3.8-flash-high` | $0.15 | $0.60 |
+| Review | `opus` (Opus 5) | $5.00 | $25.00 | `gemini-3.1-pro-low-thinking` | $1.25 | $5.00 |
+| Frontier | `claude-fable-5-1` | $10.00 | $50.00 | `gemini-3.1-pro-low-thinking` | $1.25 | $5.00 |
+
+Antigravity pins the same model id, `gemini-3.1-pro-low-thinking`, to
+both Review and Frontier — Gemini's own frontier tier is its review
+tier. Claude Code pins Frontier to a separate, pricier model.
 
 The spread is widest at the top: Frontier costs 8-10x more on Claude
 Code than the tier Antigravity treats as its own ceiling. The more of
