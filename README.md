@@ -21,7 +21,8 @@ person is only the escalation path.
 
 ## What this repository is
 
-An idea arrives as a GitHub issue. The product-owner persona writes
+An idea arrives as a GitHub issue. The product-owner persona reads
+it, asks its questions on the issue when the idea is thin, and writes
 it up as `intent.md`: the problem, the outcome wanted, the
 constraints, and the questions still open. It opens a pull request
 with that one file. The pull request is the gate. The person who owns
@@ -258,7 +259,18 @@ watchers, or the system's own field notes can file it.
 
 **Plan.** The product owner writes `intent.md` into
 `intent/<n>-<slug>/`: problem, outcome, constraints, open questions.
-Merging it moves the item to design.
+Merging it moves the item to design. The playbook's capture play is
+a conversation: the filer describes the idea in plain language, the
+agent asks about scope, users, constraints and success, and only
+then writes the template. That is the agreed shape of intake here.
+When an issue lacks a section, Athena posts her questions on the
+issue and marks it `blocked` until the filer answers, at most two
+rounds, and then writes the intent. Today she reads the issue once
+and parks the gaps under Open questions for the person merging to
+fix in the pull request; the conversational form is scoped on
+[#10](https://github.com/evekhm/agentic-sdlc/issues/10), and the
+issue form that carries the five sections up front is
+[#117](https://github.com/evekhm/agentic-sdlc/issues/117).
 
 **Design.** The same persona turns the intent into `spec.md`. Then
 she plays adversary against her own draft: one ambiguity at a time,
@@ -561,7 +573,8 @@ person or persona. Search the tracker first
 issue"](AGENTS.md#before-filing-an-issue)). Keep a reviewer's findings
 on the pull request they review in that pull request's thread. Say
 what the problem is and what would be true if it were solved. The
-first rung writes the rest.
+first rung writes the rest, and when the issue is thin, expect
+questions back on the thread before the intent appears.
 
 Then open a session in your harness and type, for any item at any
 rung:
