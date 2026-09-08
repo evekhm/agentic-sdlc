@@ -280,6 +280,23 @@ where the cheap, low-latency model is the right pin for most stages,
 and Claude Code's job shrinks to the plumbing that stood the process
 up.
 
+List rates, $ per million tokens, resolved by tier from
+[`config/model_tiers.yaml`](config/model_tiers.yaml) (priced the same
+way in [`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh);
+re-check both before citing a number, since a rate or a pin can move):
+
+| Tier | Claude Code | in | out | Antigravity | in | out |
+|---|---|---|---|---|---|---|
+| Fast | Haiku | $1.00 | $5.00 | Gemini Flash | $0.15 | $0.60 |
+| Mechanical / Implementation | Sonnet 5 | $2.00 | $10.00 | Gemini Flash | $0.15 | $0.60 |
+| Review | Opus | $5.00 | $25.00 | Gemini Pro | $1.25 | $5.00 |
+| Frontier | Fable 5.1 | $10.00 | $50.00 | Gemini Pro | $1.25 | $5.00 |
+
+The spread is widest at the top: Frontier costs 8-10x more on Claude
+Code than the tier Antigravity treats as its own ceiling. The more of
+the system's judgment a mature process can push down from Frontier to
+Review or below, the more of that spread it recovers.
+
 ## The playbook, and what this adds
 
 The playbook has six **stages**: Plan, Design, Build, Test, Deploy,
