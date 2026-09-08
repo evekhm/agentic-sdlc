@@ -28,7 +28,7 @@ Touch: `personas/skills/trusted-posting.md`
    ```
    Do not modify this text.
 
-2. **Replace Rule 1.** Replace lines 9-11 with the exact verbatim text from D3, wrapped as needed as long as the content matches exactly. The spec's exact replacement text is:
+2. **Replace Rule 1.** Replace lines 9-11 with the exact verbatim text from D3. The invocation span `scripts/ops/post.sh <number> --as <persona> --body-file <path>` MUST stay on one unbroken line — the compiler inlines skill text verbatim with no re-wrap (`scripts/sync_agents.py:510`), and AT-1/AT-4 are single-line `grep -F` assertions on that exact span, so a line break inside it fails both checks in all six compiled targets. Wrap only outside the backticks if needed. The spec's exact replacement text is:
    ```markdown
    1. **Vetted steps only.** All comment posting on issues and pull requests goes through `scripts/ops/post.sh <number> --as <persona> --body-file <path>`, never ad-hoc API calls composed inline. The body is always a file (there is deliberately no `--body` flag). `hold` is re-read immediately before the write across the target and any closed issues (#25 D13/D14); a hold-suppressed post exits 0 with a notice and must not be retried. The script owns authentication, attribution verification, and escaping.
    ```
@@ -67,7 +67,7 @@ Every command from the repository root, on the working tree with T1–T2 applied
 | 1 | `python3 scripts/sync_agents.py --check` | exit 0 | AT-2 (no compiler drift) |
 | 2 | `bash scripts/ci/compiler_roundtrip.sh` | exit 0 | AT-3 |
 | 3 | `bash scripts/ci/sanitize_check.sh` | exit 0 | AT-6 |
-| 4 | `git diff --name-only origin/main` | Only touches `personas/skills/trusted-posting.md` and compiled files under `.claude/agents/` and `.agents/agents/`. No files under `scripts/`, `tests/`, `config/`, `.github/workflows/`, or `docs/SPEC.md` are touched. | AT-5 (scope boundary) |
+| 4 | `git diff --name-only $(git merge-base origin/main HEAD)` | Only touches `personas/skills/trusted-posting.md` and compiled files under `.claude/agents/` and `.agents/agents/`. No files under `scripts/`, `tests/`, `config/`, `.github/workflows/`, or `docs/SPEC.md` are touched. | AT-5 (scope boundary) |
 
 **Decisions:** D4.
 **Done when:** All four commands output their expected values. If step 4 lists forbidden paths, fix the diff, never the assertion.
@@ -76,7 +76,7 @@ Every command from the repository root, on the working tree with T1–T2 applied
 
 ## Branch, commit, pull request
 
-- **Branch:** `odyssey/98-trusted-posting-plan`. The convention is `<actor>/<n>-<slug>`, and the implement-stage actor is odyssey.
+- **Branch:** `odyssey/98-trusted-posting-md-must`. `scripts/ops/work.sh` derives the branch from the existing `intent/98-trusted-posting-md-must/` folder's slug (`work.sh:525-526`, printed as `branch: $persona/$ISSUE-$slug` at `:881`), and the implement-stage actor is odyssey.
 - **Commits:** One for the skill edit and compiler output.
 - **Closing keyword: none.** The body carries `Refs #98` and must not carry `Closes #98`.
 - **Spec-impact:** Since `personas/skills/trusted-posting.md` is modified and is a behavior-bearing path, but D4 forbids editing `docs/SPEC.md` (because the capability is already documented), the pull request body MUST carry the marker `Spec-impact: none - D4 specifies docs/SPEC.md is unchanged because post.sh is already documented at docs/SPEC.md:932-947`. Paste the output of `bash scripts/ci/spec_check.sh origin/main <body-file>` (using a file containing the PR body text) to prove the check passes. Paste `sanitize_check.sh` output as well.
