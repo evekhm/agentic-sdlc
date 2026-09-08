@@ -471,7 +471,8 @@ request to its issue by a closing keyword and a same-repo `#<n>` in
 the body — any of the ones GitHub honours (`close`, `fix`, `resolve`
 and their `-s`/`-d` forms, case-insensitively), with two distinct
 references an exit 1 naming both rather than a guess — and then by
-the `<actor>/<n>-<slug>` branch name; the stage from the single
+the `<actor>/<n>-<slug>` branch name; a pull request that resolves to
+no issue exits 2 with the condition named (#216); the stage from the single
 `status:*` label — or the first rung when the issue is `intent:new` —
 through `personas/lifecycle.json` (`personas.resume`); the owners
 from the persona sources; the folder by reusing `intent/<n>-*/` when

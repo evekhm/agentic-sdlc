@@ -502,8 +502,8 @@ run 0 "D9: a PR with no Closes falls back to the branch name" -- 110
 has "resolved from #110 via the branch name odyssey/108-deterministic" \
   "D9: the branch name resolves the issue"
 pr 111 "No trailer at all." "not-a-work-branch"
-run 1 "D9: a PR that resolves to no issue exits 1" -- 111
-has "cannot resolve PR #111 to an issue" "D9: it says so rather than guessing"
+run 2 "D9/#216: a PR that resolves to no issue exits 2" -- 111
+has "refused: cannot resolve PR #111 to an issue" "D9/#216: it is a refusal with the condition named"
 
 banner "D9 every closing keyword GitHub honours resolves (Argus R1-3)"
 for kw in Fixes fixed FIX Resolves resolved Resolve Close Closed; do
