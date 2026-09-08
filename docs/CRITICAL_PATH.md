@@ -111,6 +111,6 @@ Needed for the demo story, not for the mechanism.
 
 ## Decisions only the operator can make
 
-- #168 posture (blocks gate 1 after #207).
+- #168 posture (no longer gates gate 1, which is met; it decides how a persona runs on a CI runner before unattended merges at gate 3).
 - Confirm #82 and #198 drop out of the gate-1 blocking set.
 - When to fire #181.
