@@ -35,7 +35,9 @@ The loop has five steps. Every issue climbs them in order. Each step is
 a **rung**. Each rung ends in a pull request that carries one
 artifact. Atlas, the cheap reviewer, reads every pull request. Argus,
 the deep reviewer, joins at the code gate or can be requested on demand. A pull request merges when
-its assigned reviewers have no open finding. The merge means accepted,
+its assigned reviewers have no open blocking finding — a security or
+high defect, per [REVIEW.md](REVIEW.md)'s severity tiers. A suggestion
+or a normal-tier defect is recorded and never gates the merge. The merge means accepted,
 and it moves the issue to the next rung. The chain of merges is the audit trail: who asked for
 what, what the persona produced, who accepted it.
 
@@ -155,9 +157,9 @@ Argus joins at the code gate, on trust-bearing paths, and on a
 `review:deep` grant, and adds the deep checks there. Any persona may apply that grant when the change meets a named
 criterion: privileged operations, a plan deviation, a large diff, an
 escalated tier, a second review round. The grant is consumed on use.
-A push re-triggers a review only when a reviewer has an open finding
-to verify. The author answers each finding. When the assigned
-reviewers are clean, the pull request merges. A third round marks the
+A push re-triggers a review only when a reviewer has an open blocking
+finding to verify. The author answers each blocking finding. When the
+assigned reviewers have none open, the pull request merges. A third round marks the
 issue `status:review-stuck` and the owner decides
 ([#265](https://github.com/evekhm/agentic-sdlc/issues/265)).
 
@@ -199,8 +201,9 @@ Who merges depends on the mode, and the mode is set per issue.
 - **Autonomous mode.** The `mode:autonomous` label switches it on
   ([#147](https://github.com/evekhm/agentic-sdlc/issues/147)). The
   merge identity merges a rung's pull request when CI is green and the
-  assigned reviewers have no open finding. At the code gate both
-  families must be clean. The owner is called only on escalation.
+  assigned reviewers have no open blocking finding. At the code gate
+  both families must be clear of blocking findings. The owner is
+  called only on escalation.
 
 The playbook keeps a human at every merge. Autonomous mode goes one
 step further: consensus between two model families reaches the
