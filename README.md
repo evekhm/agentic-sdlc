@@ -21,17 +21,36 @@ person is only the escalation path.
 
 ## What this repository is
 
-A change arrives as a GitHub issue. Nobody writes code yet. A
-product-owner persona turns the idea into an `intent.md` and opens a
-pull request. Someone merges it. That merge is the only signal
-anything else needs. A deterministic workflow reads which artifact
-landed and moves a label. The label tells the next persona what the
-item owes. The intent becomes a `spec.md` with numbered decisions. The
-spec becomes a `plan.md`, committed before any code. The plan becomes
-a diff with tests. Two independent reviewers on two different model
-families read the result and post findings. Each rung ends in a pull
-request. Each merge is an acceptance. The git history is the audit
-trail the playbook asks for.
+An idea arrives as a GitHub issue. The product-owner persona writes
+it up as `intent.md`: the problem, the outcome wanted, the
+constraints, and the questions still open. It opens a pull request
+with that one file. The pull request is the gate. The person who owns
+the product reads the intent, corrects it in place where it is wrong,
+and merges it. The merge is the acceptance. Closing the pull request
+is the rejection. The merge is also the trigger for everything that
+follows. A workflow with no model in it sees that `intent.md` landed,
+looks up the next stage, and moves the issue's label. The label tells
+the next persona what the issue owes.
+
+The same persona now writes `spec.md`, the design. It reads its own
+intent as an adversary, finds every ambiguity, and resolves each one
+as a numbered decision. A spec is approved only when its open
+questions are empty. Merge, label. The architect writes `plan.md`:
+the ordered steps, the check that proves each decision landed, and
+the tests, written to fail until the code exists. Merge, label. The
+implementer writes the code that makes those tests pass and opens the
+pull request that carries it. Two reviewers, one on Claude and one on
+Gemini, read that pull request against the review policy and post
+findings with severity and ids. When the findings converge, the pull
+request merges and the issue closes.
+
+Each of those five steps is a rung: plan, design, build, implement,
+review. The five rungs are the ladder every issue climbs. Every rung
+ends in a pull request, every merge is an acceptance, and the chain
+of merges is the audit trail the playbook asks for: who asked for
+what, what the agent produced, who accepted it. Today a person is the
+merge authority at every rung. Removing that person from the loop is
+the goal of the next section.
 
 ```text
 issue filed (intent:new)
@@ -240,8 +259,9 @@ separate from which harness interprets the persona
 bands and respond in proportion. At one sigma they log. At two they
 diagnose read-only. At three they file a new `intent:new` issue. That
 issue closes the loop on itself. The stage is reserved in the schema
-and its persona exists. The watchers are the open rung of the
-bootstrap ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
+and its persona exists. The watchers are the open construction phase
+of the bootstrap
+([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
 
 The transition between stages has no model in it. On a merge to the
 default branch a workflow reads which artifact file was added, looks
@@ -353,8 +373,7 @@ prompt author fabricates. The environment fabricates green and red.
 The loop fabricates convergence. Two rules generalize from it: one
 scar, one rule; and a stable countermeasure checks evidence that
 lives outside the model. The agreed next step turns every entry in
-the catalog into
-a permanent eval in CI
+the catalog into a permanent eval in CI
 ([#254](https://github.com/evekhm/agentic-sdlc/issues/254)) and puts
 deterministic hooks behind the advisory rules
 ([#255](https://github.com/evekhm/agentic-sdlc/issues/255)).
@@ -362,20 +381,22 @@ deterministic hooks behind the advisory rules
 ## How it built itself, and where it stands
 
 The system could not run its own loop before the loop existed. So the
-backlog was organised as a bootstrap ladder, indexed by one pinned
-tracker issue
-([#12](https://github.com/evekhm/agentic-sdlc/issues/12)).
+backlog was organised as five construction phases, indexed by one
+pinned tracker issue
+([#12](https://github.com/evekhm/agentic-sdlc/issues/12)). The
+tracker calls them rungs too; they are phases of building the system,
+distinct from the five rungs an issue climbs.
 
-- **Rung 1, wizard of Oz.** A human authored the persona sources, the
+- **Phase 1, wizard of Oz.** A human authored the persona sources, the
   config and the review protocol. Personas ran by hand as sub-agents
   of that person's own session. Done.
-- **Rung 2, the machinery.** The compiler, the CI gates, the label
+- **Phase 2, the machinery.** The compiler, the CI gates, the label
   taxonomy, the six bot identities, the one-door dispatcher, this
   document, and launching any persona on its own harness. Done.
   Harness-agnostic launch and the session close-out are still landing
   ([#43](https://github.com/evekhm/agentic-sdlc/issues/43),
   [#85](https://github.com/evekhm/agentic-sdlc/issues/85)).
-- **Rung 3, unattended personas.** The reviewers run as event-driven
+- **Phase 3, unattended personas.** The reviewers run as event-driven
   workflows on a hosted runner under their own identities. This met
   its gate on 2026-09-08, when both reviewers posted real rounds from
   the runner itself. The product owner picking up `intent:new` on her
@@ -383,19 +404,19 @@ tracker issue
   ([#10](https://github.com/evekhm/agentic-sdlc/issues/10)).
   The reviewer-consensus merge is implementing
   ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)).
-- **Rung 4, maintain.** Deterministic watchers and a seeded incident
+- **Phase 4, maintain.** Deterministic watchers and a seeded incident
   that files a new intent. Open
   ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
-- **Rung 5, packaging.** The personas compiled into an installable
+- **Phase 5, packaging.** The personas compiled into an installable
   plugin, published from an in-repo marketplace. An attendee installs
   the whole cast with one command. Open
   ([#31](https://github.com/evekhm/agentic-sdlc/issues/31)).
 
-From rung 2 on, features were delivered through the repository's own
+From phase 2 on, features were delivered through the repository's own
 ladder: an `intent/<n>-<slug>/` folder, a spec authored under the
 persona's App identity, a persona-namespaced branch, commits that cite
 reviewer finding ids. Twenty-one change folders exist today. Sometimes
-the bootstrap cut a corner, because the machinery a rung needed was
+the bootstrap cut a corner, because the machinery a phase needed was
 the thing being built. Each such shortcut is written down as an
 explicit, non-precedent deviation in the spec that cut it. The field
 notes in [`docs/PLAYBOOK.md`](docs/PLAYBOOK.md) record what each
