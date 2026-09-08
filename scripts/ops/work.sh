@@ -308,6 +308,22 @@ if [ "$status_count" -gt 1 ]; then
     refuse "#$ISSUE carries more than one status:* label: $(tr '\n' ' ' <<<"$status_labels")"
 fi
 
+# --- Owners: derived from the sources, never stored (D2) -----------------------
+# Every kind: persona source whose `stage` list contains this stage.
+owners_of() { # <stage> -> sorted persona names, one per line
+    local want="$1" file name stages
+    for file in "$PERSONA_DIR"/*.yaml; do
+        [ -f "$file" ] || continue
+        grep -qx 'kind: persona' "$file" || continue
+        stages="$(sed -n 's/^stage:[[:space:]]*\[\(.*\)\].*/\1/p' "$file")"
+        [ -n "$stages" ] || continue
+        name="$(basename "$file" .yaml)"
+        case ",$(tr -d '[:space:]' <<<"$stages")," in
+            *",$want,"*) echo "$name" ;;
+        esac
+    done | sort
+}
+
 # --- Stage, from the label, through the one table (D2, D4) ---------------------
 if [ "$status_count" -eq 1 ]; then
     stage="$(jq -r --arg l "$status_labels" \
@@ -327,27 +343,43 @@ else
     refuse "cannot derive a stage for #$ISSUE: it carries no status:* label and no intent:new"
 fi
 
+# --- The review dispatch (#207, D1, D2) ----------------------------------------
+# A reviewer dispatched at a pull request of THIS repository is
+# reviewing that pull request, not claiming the issue's work. All
+# three conjuncts, and nothing else is a review dispatch: the number
+# resolved as a pull request; --as names a persona that declares the
+# review stage; and the head repository is this one. The third is a
+# fail-closed duplicate of a rule .github/workflows/unattended.yml
+# already owns for the unattended path — work.sh is also invoked by
+# hand, where no workflow guard stands in front of it, and if the two
+# ever disagree the workflow is right and this is a bug (D1c).
+#
+# It is evaluated HERE, after (e) and (f): the issue's rung is still
+# derived from its own status:* label alone, so a repair-path pull
+# request whose issue carries only `bug` still refuses at (f) and
+# stays #82's. The retarget then feeds the rung table below, so
+# `label`, `brief`, `artifact` and `owners` all come from the review
+# row of personas/lifecycle.json through the same jq as every other
+# stage — no second derivation, no new label, no new stage value (D4).
+review_dispatch() {
+    [ "$IS_PR" = "1" ] || return 1
+    [ -n "$AS" ] || return 1
+    grep -Fxq "$AS" <<<"$(owners_of review)" || return 1
+    [ -n "$PR_HEAD_REPO" ] && [ "$PR_HEAD_REPO" = "$GITHUB_REPO" ]
+}
+RUNG_STAGE="$stage"
+RUNG_LABEL="$status_labels"
+REVIEW_DISPATCH=0
+if review_dispatch; then
+    REVIEW_DISPATCH=1
+    stage="review"
+fi
+
 row="$(jq -ec --arg s "$stage" '.stages[] | select(.stage == $s)' "$LIFECYCLE_JSON")" \
     || die "no lifecycle row for stage '$stage'"
 label="$(jq -r '.label' <<<"$row")"
 brief="$(jq -r '.dispatch_brief' <<<"$row")"
 artifact="$(jq -r '.artifact // "none — the output is code or a review"' <<<"$row")"
-
-# --- Owners: derived from the sources, never stored (D2) -----------------------
-# Every kind: persona source whose `stage` list contains this stage.
-owners_of() { # <stage> -> sorted persona names, one per line
-    local want="$1" file name stages
-    for file in "$PERSONA_DIR"/*.yaml; do
-        [ -f "$file" ] || continue
-        grep -qx 'kind: persona' "$file" || continue
-        stages="$(sed -n 's/^stage:[[:space:]]*\[\(.*\)\].*/\1/p' "$file")"
-        [ -n "$stages" ] || continue
-        name="$(basename "$file" .yaml)"
-        case ",$(tr -d '[:space:]' <<<"$stages")," in
-            *",$want,"*) echo "$name" ;;
-        esac
-    done | sort
-}
 
 owners="$(owners_of "$stage")"
 [ -n "$owners" ] \
@@ -406,8 +438,19 @@ persona_for_login() { # <login> -> persona name, or empty
 #     claim AGENTS.md prescribes is posted on the unit of work, so a
 #     pull-request-side `in-progress` refuses with both numbers in view
 #     — the one carrying the label and the one whose thread was read.
+#     A REVIEW DISPATCH is passed through here without reading the
+#     claim at all — no label read, no thread read, none of the four
+#     messages above (#207, D3). The mutex protects one issue's working
+#     tree; a review dispatch writes no branch, holds no worktree and
+#     produces comments, so the collision this refusal prevents cannot
+#     occur on that path. Everything else about (g) is unchanged, for
+#     every other caller, at an issue or at a pull request: it keeps its
+#     position in D5's order, it keeps its count, and it keeps its
+#     meaning — passing through rather than re-deciding is what makes
+#     that true. The claim itself is untouched and stays held by the
+#     rung's author for the whole review window (D5).
 claim_holder=""
-if has_label "in-progress"; then
+if [ "$REVIEW_DISPATCH" != 1 ] && has_label "in-progress"; then
     resumers="$owners"
     [ -z "$AS" ] || resumers="$AS"
     held_on="$(label_side in-progress)"
@@ -545,6 +588,15 @@ model_of() { # <persona> -> the model agy is launched with
 # it in the sources would make every hand-opened interactive session emit
 # a machine-readable result line for nobody (D21).
 PROMPT="Work issue #$ISSUE in this repository. Follow your persona instructions and the repository's AGENTS.md; when you finish or refuse, print one final line WORK-RESULT: <ok|refused|blocked> #$ISSUE <one-line reason>."
+# THE REVIEW PROMPT (#207, D8). A reviewer told to "work issue #M" while
+# the artifact under review is pull request #N has to re-derive #N from
+# the issue — the exact guess the resolver exists to prevent. This
+# literal is used only when the review-dispatch predicate holds, and it
+# mirrors PROMPT's WORK-RESULT sentence unchanged. The rule PROMPT
+# protects is intact: a pull-request number is not a stage, a folder, an
+# artifact or a branch, and a review dispatch's stage IS current (D2).
+REVIEW_PROMPT="Review pull request #$NUMBER for issue #$ISSUE in this repository. Follow your persona instructions and the repository's AGENTS.md; when you finish or refuse, print one final line WORK-RESULT: <ok|refused|blocked> #$ISSUE <one-line reason>."
+[ "$REVIEW_DISPATCH" != 1 ] || PROMPT="$REVIEW_PROMPT"
 
 # The launch table (#43, D1, D5, D6). An ARRAY, not a string: a printed
 # command and an executed one must not be two spellings of the same
@@ -695,8 +747,19 @@ echo "==> #$ISSUE · $title"
 # operator standing in a worktree and invoking another tree's copy of
 # this script is a real and silent mistake.
 echo "    root:     $REPO_ROOT"
-echo "    stage:    $stage"
-echo "    label:    $label"
+if [ "$REVIEW_DISPATCH" = 1 ]; then
+    # A job log is the only place a reader can tell a review dispatch
+    # from a rung dispatch, and the operating rule is to read the job
+    # log behind every green check (#207, D10). The label line prints
+    # the issue's OWN rung label, never the review row's: the issue does
+    # not carry that one, and printing it next to a claim the issue does
+    # carry would assert a state that does not exist.
+    echo "    stage:    $stage (pull request #$NUMBER; #$ISSUE is on $RUNG_STAGE)"
+    echo "    label:    ${RUNG_LABEL:--} (#$ISSUE's rung; a review dispatch carries no label of its own)"
+else
+    echo "    stage:    $stage"
+    echo "    label:    $label"
+fi
 echo "    artifact: $artifact"
 echo "    owner:    ${owner_list% }"
 echo "    folder:   $folder ($folder_origin)"
@@ -704,8 +767,14 @@ echo "    folder:   $folder ($folder_origin)"
 # shell-escaped and a human cannot read the prompt out of it.
 echo "    prompt:   $PROMPT"
 if has_label "in-progress"; then
-    # Reaching here with `in-progress` means (e) established a holder.
-    echo "    claim:    in-progress, held by $claim_holder"
+    if [ "$REVIEW_DISPATCH" = 1 ]; then
+        # (g) was passed through, so no holder was established and none
+        # was looked for. Say that, rather than printing an empty name.
+        echo "    claim:    in-progress on $(label_side in-progress), not read — a review dispatch is not measured against it (#207, D3)"
+    else
+        # Reaching here with `in-progress` means (g) established a holder.
+        echo "    claim:    in-progress, held by $claim_holder"
+    fi
 fi
 
 launch_persona=""

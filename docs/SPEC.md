@@ -458,7 +458,10 @@ rung at all — no `status:*` and no `intent:new`, which is every
 defect-repair issue, whose fix pull request is the final stage and has
 no reviewer rung before merge (#129; it was an error before, one red
 reviewer check per fix pull request); `in-progress` claimed by another
-actor; and `--as` naming a persona that does not own the stage. When
+actor — with one documented pass-through, a review dispatch, which
+is not measured against the claim at all and for which neither the
+label nor the thread is read (#207, D3); and `--as` naming a persona
+that does not own the stage. When
 the number given is a pull request, those refusals read the UNION of the
 pull request's own labels and the resolved issue's — a `hold` on either
 side refuses, and the message names the side that carries it, or both
@@ -468,7 +471,21 @@ Atlas AT-1, PR #95; both sides, PR #99). The stage is not part of that
 union:
 it is derived from the issue's labels alone, since the state machine
 belongs to the unit of work and a `status:*` label on a pull request
-must not decide which rung the issue is on. The claim's holder is the
+must not decide which rung the issue is on. One exception, and it is
+not a label: a **review dispatch** — the number given resolved as a
+pull request whose head is in THIS repository, and `--as` names a
+persona that declares the `review` stage — is dispatched at `review`
+rather than at the issue's rung (#207, D1, D2). The issue's rung is
+still derived first and from its own label alone, so a pull request
+whose issue is on no rung still refuses; the retarget then reads the
+`review` row of `personas/lifecycle.json` for its owners, brief and
+artifact, `--as` passes the eighth refusal by construction, and the
+report names both the retarget and the rung it displaced. Nothing is
+written and no label moves: the issue keeps its own `status:*` and
+its claim, held by the rung's author for the whole review window
+(#207, D5). A pull request whose head is a fork takes the ordinary
+path with its ordinary refusals; the workflow's same-repository
+guard remains the authoritative owner of that rule. The claim's holder is the
 *author* of the last comment that opens with `Claim` (AGENTS.md,
 "Working the tracker", step 2), mapped through the persona identity
 table — never a name read out of a comment body, which is an

@@ -46,6 +46,7 @@ set -euo pipefail
 unset GIT_CONFIG_COUNT
 for _i in 0 1 2 3 4 5 6 7; do unset "GIT_CONFIG_KEY_$_i" "GIT_CONFIG_VALUE_$_i"; done
 unset _i
+unset WORK_DISPATCHED_ISSUE
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_SH="$REPO/scripts/ops/work.sh"
@@ -257,14 +258,15 @@ issue() {
     > "$FIXTURES/repos_test_repo_issues_$1.json"
   echo '[]' > "$FIXTURES/repos_test_repo_issues_$1_comments.json"
 }
-# pr <n> <body> <head-ref> [<labels-csv>]
+# pr <n> <body> <head-ref> [<labels-csv>] [<head-repo>]
 pr() {
   jq -n --argjson n "$1" --arg body "$2" --arg labels "${4:-}" \
     '{number: $n, state: "open", title: "a pull request", body: $body,
       labels: ($labels | if . == "" then [] else split(",") end | map({name: .})),
       pull_request: {url: "x"}}' \
     > "$FIXTURES/repos_test_repo_issues_$1.json"
-  jq -n --arg ref "$3" '{head: {ref: $ref}}' \
+  jq -n --arg ref "$3" --arg repo "${5:-test/repo}" \
+    '{head: {ref: $ref, repo: {full_name: $repo}}}' \
     > "$FIXTURES/repos_test_repo_pulls_$1.json"
 }
 # claim <n> <login> <body> [<login> <body> ...]  — the thread, in order
@@ -742,6 +744,86 @@ run 1 "D7: an unknown flag exits 1" -- 108 --stage implement
 has "unknown flag" "D7: a flag naming a stage is refused outright"
 run 1 "D7: a non-numeric argument exits 1" -- not-a-number
 has "is not an issue or pull-request number" "D7: it says why"
+
+banner "#207 a reviewer at a same-repo pull request reviews that pull request"
+# The ladder issue is claimed by the rung's author for the whole review
+# window (AGENTS.md step 5-6), which is wall 1, and its rung is never
+# `review`, which is wall 2. Both fall for a review dispatch and for
+# nothing else.
+issue 207 open "in-progress,status:build" "Review mutex"
+claim 207 "evekhm-daedalus-app[bot]" "Claim: BUILD stage — daedalus."
+pr 208 "Closes #207" "daedalus/207-review-mutex"
+
+# AT-1 (D7): a NON-review persona at that pull request is unchanged.
+run 2 "#207 AT-1: --as odyssey at a ladder PR still refuses at (g)" -- 208 --as odyssey
+has "in-progress on #207 is held by daedalus" \
+  "#207 AT-1: today's (g) message, unchanged"
+hasnt "stage:    review" "#207 AT-1: no retarget for a non-review persona"
+
+# AT-2 (D3 + D2) and AT-8 (D10) and AT-14 (D8): argus passes (g)
+# without reading the thread, is measured against `review`, and is told
+# the pull request number.
+run 0 "#207 AT-2: --as argus at the same PR reaches the launch step" -- 208 --as argus
+has "stage:    review (pull request #208; #207 is on build)" \
+  "#207 AT-8: the report names the retarget and the rung it displaced"
+hasnt "label:    status:in-review" \
+  "#207 AT-8: no line asserts a label the issue does not carry"
+has "label:    status:build" "#207 AT-8: the label line is the issue's own rung"
+has "prompt:   Review pull request #208 for issue #207" \
+  "#207 AT-14: the reviewer is told the pull request number"
+has "==> DRY_RUN=1" "#207 AT-2: it reaches the launch step"
+
+# AT-11 (D1b): atlas gets the property on the same terms.
+run 0 "#207 AT-11: --as atlas at the same PR reaches the launch step" -- 208 --as atlas
+has "--> atlas" "#207 AT-11: the second reviewer is dispatched"
+has "stage:    review (pull request #208; #207 is on build)" \
+  "#207 AT-11: one reviewer's presence does not gate the other's"
+
+# AT-3 (D1b): a review persona at a BARE ISSUE number is refused as
+# today — the pull-request form is a conjunct, not a convenience.
+issue 209 open "status:build" "A build rung with nobody holding it"
+run 2 "#207 AT-3: --as argus at a bare issue on a non-review rung exits 2" -- 209 --as argus
+has "argus does not own stage build" "#207 AT-3: (h) refuses it by the stage it owns"
+
+# AT-4 (D2, refusal f): the retarget happens AFTER the rung is derived,
+# so a repair-path pull request still refuses at (f). #82's, not this
+# issue's. The atlas spelling of this row already exists at :609-611.
+run 2 "#207 AT-4: --as argus at a repair-path PR still refuses at (f)" -- 141 --as argus
+has "refused: cannot derive a stage for #140" \
+  "#207 AT-4: (f) precedes the retarget"
+
+# AT-5 (D1c): a fork head takes the ORDINARY path, fail-closed.
+pr 210 "Closes #207" "daedalus/207-review-mutex" "" "somebody-else/agentic-sdlc"
+run 2 "#207 AT-5: a fork-head PR takes the ordinary path and refuses" -- 210 --as argus
+has "in-progress on #207 is held by daedalus" "#207 AT-5: (g) refuses it as it refuses anyone"
+hasnt "stage:    review" "#207 AT-5: no retarget for a fork head"
+
+# AT-6 (D6): a bare pull-request dispatch is unchanged in both shapes.
+pr 211 "Closes #112" "odyssey/112-under-review"
+DRY=0 run 0 "#207 AT-6: a bare PR at a two-owner stage launches neither" -- 211
+has "printing both and launching neither" "#207 AT-6: #2 D4 is untouched"
+pr 212 "Closes #209" "daedalus/209-a-build-rung"
+run 0 "#207 AT-6: a bare PR at a one-owner stage takes the ordinary path" -- 212
+has "stage:    build" "#207 AT-6: no --as, no retarget"
+
+# AT-7 (D3 order): (a)-(f) still precede the pass-through.
+pr 213 "Closes #207" "daedalus/207-review-mutex" "hold"
+run 2 "#207 AT-7: hold on the pull request refuses a review dispatch at (a)" -- 213 --as argus
+has "#213 (the pull request) carries hold" "#207 AT-7: (a) still runs first and names the side"
+
+# AT-13 (D3): the pass-through is unconditional on the thread, and the
+# thread is not read — not even to discover that it names no holder.
+issue 214 open "in-progress,status:build" "Held, with an empty thread"
+pr 215 "Closes #214" "daedalus/214-held-no-claim"
+run 0 "#207 AT-13: a review dispatch over an unnamed mutex exits 0" -- 215 --as argus
+hasnt "the mutex names no holder" "#207 AT-13: the claim is not read at all"
+
+# AT-14 (D8), second half: every non-review prompt is byte-identical to
+# today's literal. The source-level guard at :682-695 already forbids a
+# second `Work issue #$ISSUE` literal; this asserts the rendered line.
+run 0 "#207 AT-14: an ordinary dispatch still prints today's prompt" -- 108
+has "prompt:   Work issue #108 in this repository. Follow your persona instructions and the repository's AGENTS.md; when you finish or refuse, print one final line WORK-RESULT: <ok|refused|blocked> #108 <one-line reason>." \
+  "#207 AT-14: the ordinary prompt literal is unchanged, byte for byte"
 
 banner "nothing above this line launched or wrote"
 [ ! -s "$WRITES" ] || { cat "$WRITES" >&2; fail "a write or launch was attempted"; }
