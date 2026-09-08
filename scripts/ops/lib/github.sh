@@ -91,6 +91,7 @@ branch_issue() {
 #        IS_PR          1 when the input number was a pull request, else 0
 #        PR_JSON        the input's own API response when IS_PR=1
 #        PR_HEAD_REPO   the head repository of the input when IS_PR=1, empty when it could not be read
+#   returns 2 when the input is a pull request that cannot be resolved to an issue
 #
 # A pull request is not the unit of work; the issue is (#36, D9). A
 # closing keyword and a same-repo `#<n>` in the body first, then the
@@ -119,8 +120,8 @@ resolve_issue() {
     # predicate, and this is the read that already answers it on the
     # fallback path below. Non-fatal here: a pulls read that fails leaves
     # PR_HEAD_REPO empty, which is not a same-repository head, and the
-    # fallback's own `[ -n "$BRANCH_ISSUE" ] || die` still reports an
-    # unresolvable pull request with the message it always did.
+    # fallback's own `[ -n "$BRANCH_ISSUE" ] || return 2` signals an
+    # unresolvable pull request to the caller (#216).
     branch_issue "$number" || true
     closes="$(closing_refs "$(jq -r '.body // ""' <<<"$view")")"
     closes_count=0
@@ -135,7 +136,7 @@ resolve_issue() {
         ISSUE="$closes"
         RESOLVED_VIA="Closes #$ISSUE in the body"
     else
-        [ -n "$BRANCH_ISSUE" ] || die "cannot resolve PR #$number to an issue"
+        [ -n "$BRANCH_ISSUE" ] || return 2
         ISSUE="$BRANCH_ISSUE"
         RESOLVED_VIA="the branch name $BRANCH_REF"
     fi
