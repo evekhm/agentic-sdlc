@@ -61,6 +61,31 @@ binding="$(python3 "$REPO_ROOT/scripts/ops/execution.py" --binding "$PERSONA")" 
     || die "$PERSONA has no execution binding in config/execution.yaml"
 max_cost_usd="$(awk '{print $3}' <<<"$binding")"
 
+# The declared budget becomes the enforced ceiling here (#108). This is
+# the gap docs/SPEC.md named in its own words: "the remaining gap is
+# that nothing yet carries `max_cost_usd` from this file into that
+# ceiling". The adapter is where the carry belongs. work.sh stays blind
+# to config/execution.yaml so that a launch is described by its flags
+# and not by a file it reads behind the caller's back, and D2 keeps
+# execution.py the single parser of that file.
+#
+# Fail-closed, and the reason is specific. execution.py --check already
+# refuses a binding whose max_cost_usd is not a positive number, but
+# --check runs in CI and this runs at launch. If a binding ever reached
+# here unreadable, the export below would set WORK_MAX_USD to the empty
+# string, and work.sh reads empty as "no ceiling" — a parse failure
+# would silently buy an unlimited run. Re-testing the value here is
+# what makes that impossible; the rule is the same one work.sh applies
+# to the variable it receives.
+grep -qE '^[0-9]+(\.[0-9]+)?$' <<<"$max_cost_usd" \
+    || die "$PERSONA has max_cost_usd '$max_cost_usd', which is not a number; refusing to dispatch a run with no ceiling"
+awk -v m="$max_cost_usd" 'BEGIN { exit (m > 0) ? 0 : 1 }' \
+    || die "$PERSONA has max_cost_usd $max_cost_usd; a ceiling of zero cannot authorise a run"
+# An explicit WORK_MAX_USD from the caller wins, so one run can be
+# raised or lowered from the command line without editing the config
+# every other run reads.
+export WORK_MAX_USD="${WORK_MAX_USD:-$max_cost_usd}"
+
 # D4's preflight, inside the only credential path so no adapter can
 # forget it. Non-zero here is a 1: the environment cannot start the
 # run, which is not a decision about the number (D8's 2 keeps meaning
