@@ -143,16 +143,64 @@ independent reader.
 
 ## The playbook, and what this adds to it
 
-The playbook describes six stages. Each ends with a committed
-artifact, and that commit starts the next stage. Plan writes
-`intent.md`. Design writes `spec.md`. Build writes `plan.md` and then
-the diff. Test proves it. Deploy reviews it against a repo-root
-`REVIEW.md` and ships it up to a human gate. Maintain watches control
-bands and writes a fresh `intent.md` when one breaks. Humans stay
-above the loop, at the gates. The distilled reference we design
-against is [`docs/BLOG.md`](docs/BLOG.md). The play-by-play score of
-what is merged here against each play is in
-[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md).
+The playbook has two units. A **stage** is a place on the map of the
+lifecycle. There are six: Plan, Design, Build, Test, Deploy, Maintain.
+Each stage ends with a committed artifact, and that commit starts
+the next stage. Plan writes `intent.md`. Design writes `spec.md`.
+Build writes `plan.md` and then the code. Test proves it. Deploy
+reviews it against a repo-root `REVIEW.md` and ships it up to a human
+gate. Maintain watches control bands and writes a fresh `intent.md`
+when one breaks. A **play** is one named practice inside a stage,
+with four properties: what enforces it, what evidence it leaves, what
+is logged, and who approves. Plan mode with a committed `plan.md` is
+a play. Hooks as deterministic guardrails behind advisory skills is a
+play. Continuous evals of the agent configuration is a play. The
+playbook has fifteen of them, and each sits in the stage where it
+does its work.
+
+The playbook calls the six stages non-linear, and that means two
+things. Work enters wherever its evidence puts it: an idea enters at
+Plan, an incident enters at Maintain and produces a fresh intent, a
+bug enters at Test with a failing test written first, a review
+finding enters at Build. And plays are adopted independently: a team
+can run the Deploy plays today and add the Test plays next quarter,
+because each play leaves its own committed evidence.
+
+This repository maps the six stages onto its five rungs, and per
+issue it is deliberately stricter than the playbook. One issue climbs
+plan, design, build, implement, review in that order, and nothing
+else. Test lives inside implement. Deploy has no rung, because there
+is no product behind the repository other than the system itself.
+Maintain has a persona and no rung yet. The non-linearity lives at
+the level of the whole system, in the entry points and return paths:
+
+- **Maintain to Plan.** A watcher at three sigma files a new
+  `intent:new` issue
+  ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
+- **Any seat to Plan.** The verifier and the advisor file every gap
+  they observe as an issue.
+- **Defect to Implement.** A repair that leaves the spec entry
+  unchanged enters at the fix pull request. A repair that changes a
+  spec entry re-enters at Plan
+  ([#32](https://github.com/evekhm/agentic-sdlc/issues/32)).
+- **Review back to a person.** A third review round moves the issue
+  to `status:review-stuck`. The `hold` label stops any rung.
+- **Many issues at once.** Different issues sit at different rungs in
+  parallel, one worktree each.
+
+The distilled reference we design against is
+[`docs/BLOG.md`](docs/BLOG.md). The scorecard in
+[`docs/PLAYBOOK.md`](docs/PLAYBOOK.md) has one row per play: what the
+playbook asks, what is merged here, a status, and the issue that
+tracks the gap. Read across it today, this repository is ahead of the
+playbook on three plays, partial on six, absent on three, and three
+do not apply because nothing here deploys. The three absent plays are
+hooks as guardrails
+([#255](https://github.com/evekhm/agentic-sdlc/issues/255)),
+continuous evals
+([#254](https://github.com/evekhm/agentic-sdlc/issues/254)) and the
+maintain watchers
+([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
 
 The playbook is written for one vendor's tooling and describes the
 loop in prose. This repository adds five things on top of it.
