@@ -12,10 +12,10 @@ file is the live ordering under it. The advisor seat owns both; update
 this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line.
 
-Status line: 2026-09-07, ~08:30 UTC. Live `gh issue list` state always
-beats this file.
+Status line: 2026-09-08. Live `gh issue list` state always beats this
+file.
 
-## Gate 1: unattended review runs on every rung
+## Gate 1: unattended review runs on every rung — MET 2026-09-08
 
 Two exit criteria, in order.
 
@@ -33,28 +33,48 @@ at 07:44 came from a local session holding the app token, not from the
 runner (no runner job on that branch produced it), so atlas has not yet
 reviewed unattended.
 
-**1b, not met:** the runner reviews every rung's pull request, not only
-a bug-fix branch outside the ladder. Every ladder PR is refused at the
-claim mutex for its whole open window (#207). Until #207 lands, 1a is a
-proof of mechanism, not of coverage. Order matters.
+**1b, met 2026-09-08:** by run 34186361378 (job 101935396240) on PR
+#233 itself, the #207 implementation, merged as ec18f8d 05:41 UTC. The
+job log shows "stage: review (pull request #233; #207 is on
+implement)" and "claim: in-progress on #207, not read — a review
+dispatch is not measured against it (#207, D3)", then a full argus
+round-1 review posted under `evekhm-argus-app[bot]` (comment
+5579181753), claude-opus-5, 9m48s, `total_cost_usd` 2.75 against a
+printed `max_cost_usd` 2.0 with the check green — that overrun is
+#108's gap, and PR #232 is its fix. Correction to this file's own
+earlier framing: the "not met" text above implied 1b would be
+measured only after #207 *lands* (merges), but `unattended.yml` checks
+out the PR head, so a work.sh fix decides its own review dispatch —
+"after it merges" was the wrong horizon for that class of change; the
+review ran, and counted, on #207's own open PR.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
-| 1 | #207 | The claim mutex refuses every ladder PR's review for its whole open window, and the derived stage is never `review`. Two walls; 1b is measurable only after this lands. | spec merged (PR #212); plan PR #218 open; implement rung follows |
-| 2 | #167 | atlas cannot see its model on the runner: every atlas job fails at launch with "invalid model selection (--model gemini-3.1-pro-low-thinking)", last measured in run 34096818383 at 07:43. The re-pin is PR #215, open with merge conflicts; nothing has landed on main. Gate 1a stands on argus alone until this merges and a status-labelled PR's atlas log shows a model call. | open, in-progress; PR #215 open, conflicting |
+| 1 | #207 | The claim mutex refuses every ladder PR's review for its whole open window, and the derived stage is never `review`. Two walls; 1b is measurable only after this lands. | implementation PR #233 merged ec18f8d; issue at status:in-review; the agy-207 claim (in-progress) still on the issue at write time, to be released by the operator |
+| 2 | #167 | atlas cannot see its model on the runner: every atlas job fails at launch with "invalid model selection (--model gemini-3.1-pro-low-thinking)", last measured in run 34096818383 at 07:43. The re-pin is already on main (11b88aa, 056ff96); PR #215 is a no-op, to be closed. The live fix is PR #221 (fix/167-agy-adc-credential), mergeable, argus round 1 posted 2026-09-07 16:40 UTC; it and #233 both edit scripts/ops/work.sh, so #221 needs a rebase. Gate 1a stands on argus alone until this merges and a status-labelled PR's atlas log shows a model call. | open, in-progress; PR #221 open (rebase needed), PR #215 open as a no-op to be closed |
 | 3 | #169 | jsonschema is missing on the runner, so a persona cannot run the compiler gate. | done: PR #214 merged 07:50, issue closed |
 | 4 | #168 | Permission posture for a persona on a CI runner: bypass or allowlist. An operator decision, not a build. | open, intent:new |
 | 5 | #191 | Claims land under the bare human login. Identity as a hard claim-time parameter; needed before any board reading is trustworthy. | open |
 
 ## Gate 2: the trigger becomes a label and merge becomes a decision
 
-Start once gate 1's criterion 1b is met.
+Start once gate 1's criterion 1b is met — met 2026-09-08 (above); this
+gate is open.
+
+**Agy wave dispatched 2026-09-08 04:06–04:08 UTC:** PR #228 (#151
+amendment r1 of the #64 spec, resolves R3-1, R3-2), PR #229 (#98
+spec), PR #230 (#68 spec), PR #231 (#85 spec) — all open, verifier
+queue in that order after #233. The #64 plan rung launches after #228
+merges. Model facts, stated plainly: the #207 implementation and the
+#98/#68/#85 specs were produced on gemini-3.8-flash-high, the #151
+amendment on gemini-3.1-pro-low-thinking, each in under ten minutes of
+wall clock; verdicts pending.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | 6 | #147 | `mode:autonomous` and per-issue override labels honored by work.sh, unattended.yml and the driver. The switch itself. | open, intent:new |
-| 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | open, intent:new |
-| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 holds two round-3 findings left open at spec merge. | #64 at status:build; #151 open |
+| 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | PR #232 open 2026-09-08 04:15 (operator bot login), carries `max_cost_usd` into scripts/placement/gh-actions/run.sh and vm-local/run.sh; the gate-1b run (34186361378) is the datum showing the ceiling is printed but not enforced on a gh-actions claude launch |
+| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at status:build; PR #228 open, verifier queue after #233 |
 | 9 | #148 | A deterministic closer after review. Removes the last by-hand step. | open, intent:new |
 
 ## Gate 3: issues dispatch-ready by construction
@@ -77,8 +97,8 @@ Needed for the demo story, not for the mechanism.
   regression, not a blocker; slides to whenever config is next touched.
 - **#216** — a pull request with no resolvable issue dies with exit 1 in
   the resolver, so the runner check goes red instead of the exit-2
-  refusal the workflow expects. A bug, kept separate from #82; fix
-  whenever a session is free.
+  refusal the workflow expects. A bug, kept separate from #82. Now
+  unblocked; launch pending (operator, `~/waves/launch.sh 216`).
 
 ## Standing seats
 
@@ -91,6 +111,6 @@ Needed for the demo story, not for the mechanism.
 
 ## Decisions only the operator can make
 
-- #168 posture (blocks gate 1 after #207).
+- #168 posture (no longer gates gate 1, which is met; it decides how a persona runs on a CI runner before unattended merges at gate 3).
 - Confirm #82 and #198 drop out of the gate-1 blocking set.
 - When to fire #181.
