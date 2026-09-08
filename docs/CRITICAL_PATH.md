@@ -261,10 +261,10 @@ tracker"; the advisor's recommendation is stated where it has one.
 - **nestor's harness pin on #199** (plan T3): post it on the issue
   before the implementation dispatch. The seat runs on claude /
   claude-fable-5-1 today; the pin is the operator's config call.
-- **Fast-forward cadence for the primary checkout.** Advisor
-  recommendation: deferred, no tracker. The read-only primary plus
-  the rule to cite files at the PR base SHA with `git show` removed
-  the pain.
+- **Fast-forward cadence for the primary checkout.** DECIDED by the
+  operator 2026-09-08: the operator never pulls; whoever merges a
+  pull request fast-forwards the primary with `git pull --ff-only`
+  (AGENTS.md "Whoever merges fast-forwards the primary checkout").
 - **Operator-bot login stem.** The operator's alone; it decides which
   login the ops PRs (#232, #234, this one) are attributed to.
 - **Who runs `scripts/ops/worktrees.sh --prune`.** Twice on
