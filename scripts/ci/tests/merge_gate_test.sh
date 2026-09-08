@@ -170,13 +170,13 @@ loop_ledger() { # <issue> [row-text ...]   row-text = what follows "loop-ledger-
   local r; for r in "$@"; do out="$out"$'\n'"- row <!-- loop-ledger-row: $r -->"; done
   printf '%s\n%s\n' "$out" "<!-- loop-ledger-end -->"
 }
+# D13: a dispatch row at rung n carries the merged head that opened rung
+# n, so it records that rung n-1 merged; three dispatches (2, 3, 4) mean
+# rungs 1-3 merged and the issue sits at rung 4, status:implementing.
 GREEN_LOOP_ROWS=(
-  "merge rung:1 head-oid:$H0 pr:11 at:2026-01-01T00:00:00Z"
-  "dispatch rung:2 head-oid:$H0 event:e1 at:2026-01-01T00:00:00Z cost:5.00"
-  "merge rung:2 head-oid:$H0 pr:12 at:2026-01-02T00:00:00Z"
-  "dispatch rung:3 head-oid:$H0 event:e2 at:2026-01-02T00:00:00Z cost:5.00"
-  "merge rung:3 head-oid:$H0 pr:13 at:2026-01-03T00:00:00Z"
-  "dispatch rung:4 head-oid:$H0 event:e3 at:2026-01-03T00:00:00Z cost:10.00"
+  "dispatch rung:2 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:5.00"
+  "dispatch rung:3 head-oid:$H0 event:e2 pr:12 at:2026-01-02T00:00:00Z cost:5.00"
+  "dispatch rung:4 head-oid:$H0 event:e3 pr:13 at:2026-01-03T00:00:00Z cost:10.00"
 )
 mk_green() {
   rm -rf "$FX"; mkdir -p "$FX"; : > "$WRITES"; : > "$INVOKES"
@@ -277,6 +277,14 @@ wrote "loop-ledger-row: refusal:budget rung:4 head-oid:$H pr:123 at:" "MG-4b: th
 wrote "^gh issue edit 456 --add-label status:review-stuck --remove-label status:implementing" "MG-4b: escalate.sh swapped the label (D9)"
 wrote "<!-- escalation:status:implementing:budget:$H -->" "MG-4b: the escalation marker carries the head OID, never the pull request number"
 not_merged "MG-4b"
+mk_green; loop_limits false 12 50.00
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "${rows[@]}")" 2026-01-03T00:00:00Z 702)"
+run "MG-4c: the bound with autonomous_merge false exits 0" 123
+has "max_rung_dispatches_per_issue exceeded (12/12)" "MG-4c: the bound is not under the flag (D18)"
+wrote "loop-ledger-row: refusal:budget rung:4 head-oid:$H pr:123 at:" "MG-4c: the refusal row is still written"
+not_wrote "^gh issue edit" "MG-4c: no label moves while the flag is false (D18)"
+not_wrote "<!-- escalation:" "MG-4c: and no escalation is posted"
+not_merged "MG-4c"
 
 banner "MG-5 · D13 · cost bound, summed from trusted dispatch rows only"
 mk_green
@@ -426,9 +434,9 @@ not_merged "MG-14"
 
 banner "MG-15 · conjunct (10) · D14 · the rung must exceed the highest merged rung"
 mk_green
-comments_fixture 456 "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}" "merge rung:4 head-oid:$H0 pr:14 at:2026-01-04T00:00:00Z")" 2026-01-03T00:00:00Z 705)"
+comments_fixture 456 "$(comment "$ACTIONS" "$(loop_ledger 456 "${GREEN_LOOP_ROWS[@]}" "terminal rung:5 head-oid:$H0 pr:14 at:2026-01-04T00:00:00Z")" 2026-01-03T00:00:00Z 705)"
 run "MG-15: exits 0" 123
-has "conjunct (10): false" "MG-15: rung 4 is not greater than merged rung 4"
+has "conjunct (10): false" "MG-15: a terminal row at rung 5 records rung 4 merged; rung 4 is not greater than 4"
 not_merged "MG-15"
 
 banner "MG-16 · conjunct (9) · rung structural facts, read from the head tree"

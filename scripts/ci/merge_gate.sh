@@ -26,15 +26,19 @@
 #   severity: security|high|normal|low   status: open|fixed|withdrawn
 #   peer: pending|agree|dispute|none
 #
-# Loop ledger (D13): ONE container comment per issue, appended in place.
+# Loop ledger (D13): ONE container comment per issue, appended in place,
+# three row kinds and no other.
 #   <!-- loop-ledger:<issue> -->
-#   <!-- loop-ledger-row: dispatch rung:<n> head-oid:<oid> event:<id> at:<iso> cost:<usd> -->
-#   <!-- loop-ledger-row: merge rung:<n> head-oid:<oid> pr:<n> at:<iso> -->
+#   <!-- loop-ledger-row: dispatch rung:<n> head-oid:<oid> event:<id> pr:<n> at:<iso> cost:<usd> -->
+#   <!-- loop-ledger-row: terminal rung:<n> head-oid:<oid> pr:<n> at:<iso> -->
 #   <!-- loop-ledger-row: refusal:<reason> rung:<n> head-oid:<oid> pr:<n> at:<iso> -->
 #   <!-- loop-ledger-end -->
-# dispatch and merge rows are keyed (rung, head-oid); refusal rows
-# (rung, head-oid, reason). The advancer writes dispatch and merge rows;
-# this gate writes refusal rows.
+# A dispatch or terminal row at rung n carries the merged head that
+# opened rung n, so it records that rung n-1 merged (D14): the highest
+# merged rung is the highest such rung minus one. dispatch and terminal
+# rows are keyed (rung, head-oid); refusal rows (rung, head-oid,
+# reason). The advancer writes dispatch and terminal rows; this gate
+# writes refusal rows. Only dispatch rows count against the bounds.
 set -euo pipefail
 
 TARGET="${1:?usage: merge_gate.sh <pull-request-number>}"
@@ -131,7 +135,7 @@ LEDGER_BODY=""
 [ -z "$LEDGER_ID" ] || LEDGER_BODY="$(jq -r --argjson i "$LEDGER_ID" '.[] | select(.id == $i) | .body' <<<"$ISSUE_TRUSTED")"
 ROWS="$(grep -oE '<!-- loop-ledger-row: [^>]*-->' <<<"$LEDGER_BODY" || true)"
 n_rows_any="$(grep -c 'loop-ledger-row:' <<<"$LEDGER_BODY" || true)"
-n_rows_ok="$(grep -cE '^<!-- loop-ledger-row: (dispatch|merge|refusal:[a-z-]+) rung:[0-9]+ head-oid:[0-9a-f]{40}( [a-z-]+:[^ ]+)* -->$' <<<"$ROWS" || true)"
+n_rows_ok="$(grep -cE '^<!-- loop-ledger-row: (dispatch|terminal|refusal:[a-z-]+) rung:[0-9]+ head-oid:[0-9a-f]{40}( [a-z-]+:[^ ]+)* -->$' <<<"$ROWS" || true)"
 if [ "$n_rows_any" != "$n_rows_ok" ]; then
     decline "the loop ledger on #$ISSUE has a row this gate cannot parse — unreadable is not absent (D13)"
 fi
@@ -142,8 +146,9 @@ if [ "$DISPATCH_COUNT" != "$n_costs" ]; then
     decline "a dispatch row on #$ISSUE carries no cost — the ledger is the only source of spend (D13)"
 fi
 SUMMED_COST="$(rows_of dispatch | sed -nE 's/.* cost:([0-9.]+) .*/\1/p' | awk '{s += $1} END {printf "%.2f", s}')"
-HIGHEST_MERGED_RANK="$(rows_of merge | sed -nE 's/.* rung:([0-9]+) .*/\1/p' | sort -n | tail -1)"
-: "${HIGHEST_MERGED_RANK:=0}"
+HIGHEST_ENTERED="$(rows_of '(dispatch|terminal)' | sed -nE 's/.* rung:([0-9]+) .*/\1/p' | sort -n | tail -1)"
+HIGHEST_MERGED_RANK=0
+[ -z "$HIGHEST_ENTERED" ] || HIGHEST_MERGED_RANK=$((HIGHEST_ENTERED - 1))
 
 # --- writers ------------------------------------------------------------------------
 # Every write is preceded by a fresh hold/blocked read (D15) and skipped
@@ -190,15 +195,14 @@ n_status="$(grep -c . <<<"$STATUS" || true)"
 [ "$n_status" -le 1 ] || decline "#$ISSUE carries more than one status:* label ($(tr '\n' ' ' <<<"$STATUS")) — corrupted state, nothing written"
 rung_of() { jq -r --arg l "$1" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON"; }
 
+# The bound is not under the flag (D18): the refusal row is written in
+# both settings; the escalation is an unattended act and waits on it.
 if [ -n "$over_budget" ]; then
     log "Decline: $over_budget"
-    if [ "$AUTONOMOUS" = "true" ]; then
-        idx="$(rung_of "$STATUS")"; [ "$idx" != "null" ] && rung=$((idx + 1)) || rung=0
-        ledger_append "refusal:budget" "$rung"
-        escalate budget
-    else
-        log "autonomous_merge is false — no refusal row, no escalation (D18)"
-    fi
+    idx="$(rung_of "$STATUS")"; [ "$idx" != "null" ] && rung=$((idx + 1)) || rung=0
+    ledger_append "refusal:budget" "$rung"
+    if [ "$AUTONOMOUS" = "true" ]; then escalate budget
+    else log "autonomous_merge is false — refusal recorded, no escalation (D18)"; fi
     finish "no merge for #$TARGET"
 fi
 
