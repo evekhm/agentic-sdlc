@@ -33,9 +33,10 @@ working software and a better version of itself.
 
 The loop has five steps. Every issue climbs them in order. Each step is
 a **rung**. Each rung ends in a pull request that carries one
-artifact. Two reviewers read every pull request. When they agree, the
-system merges it. The merge means accepted, and it moves the issue to
-the next rung. The chain of merges is the audit trail: who asked for
+artifact. Atlas, the cheap reviewer, reads every pull request. Argus,
+the deep reviewer, joins at the code gate. A pull request merges when
+its assigned reviewers have no open finding. The merge means accepted,
+and it moves the issue to the next rung. The chain of merges is the audit trail: who asked for
 what, what the persona produced, who accepted it.
 
 ```text
@@ -73,16 +74,21 @@ thinks at, and the GitHub identity it acts as.
 - **Odyssey, the implementer.** Writes the code that makes the tests
   pass. Starts at a pinned commit in its own branch namespace. One
   pull request per rung. Implementation tier.
-- **Argus and Atlas, the reviewers.** Read the same pull request with
-  the same protocol on two different model families. They post
-  findings. They never approve, merge, close or edit a label. Review
+- **Atlas, the reviewer of everything.** Reads every pull request at
+  every rung on Gemini, the cheap seat. Posts findings with severity
+  and ids. Never approves, merges, closes or edits a label. Review
   tier.
-- **The verifier.** The review seat given depth. It re-runs every
-  gate independently, mutation-tests the tests, and reads the job log
-  behind every green check before a merge. Argus carries it
-  ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
-- **The merge identity.** Merges when the reviewers agree. It belongs
-  to no persona, so no persona merges its own work
+- **Argus, the deep reviewer.** Joins at the code gate, on any change
+  to a trust-bearing path, and on a `review:deep` grant. Runs the same
+  protocol on Claude, the other family. At the code gate it is the
+  verifier: it re-runs every gate, mutation-tests the tests, and reads
+  the job log behind every green check. Comment-only like Atlas.
+  Review tier
+  ([#265](https://github.com/evekhm/agentic-sdlc/issues/265),
+  [#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
+- **The merge identity.** Merges in autonomous mode when the assigned
+  reviewers are clean. It belongs to no persona, so no persona merges
+  its own work
   ([#64](https://github.com/evekhm/agentic-sdlc/issues/64),
   [#251](https://github.com/evekhm/agentic-sdlc/issues/251)).
 - **Cassandra, the maintainer.** Runs watchers over the live system.
@@ -136,11 +142,17 @@ and opens the pull request. The playbook's Test stage lives here. CI
 checks that compiled files match their sources, that nothing leaks a
 credential or a path, and that the living spec was updated.
 
-**Review.** Argus and Atlas read the pull request against
-[REVIEW.md](REVIEW.md) and post findings with severity and ids.
-Odyssey answers each finding. The verifier re-runs the gates. When the
-findings converge, the merge identity merges. A third round marks the
-issue `status:review-stuck` and the owner decides.
+**Review.** Atlas reads every pull request against
+[REVIEW.md](REVIEW.md) and posts findings with severity and ids. Argus
+joins at the code gate, on trust-bearing paths, and on a `review:deep`
+grant. Any persona may apply that grant when the change meets a named
+criterion: privileged operations, a plan deviation, a large diff, an
+escalated tier, a second review round. The grant is consumed on use.
+A push re-triggers a review only when a reviewer has an open finding
+to verify. The author answers each finding. When the assigned
+reviewers are clean, the pull request merges. A third round marks the
+issue `status:review-stuck` and the owner decides
+([#265](https://github.com/evekhm/agentic-sdlc/issues/265)).
 
 **Close.** A deterministic check verifies that the delivery matches
 the spec and closes the issue
@@ -167,17 +179,29 @@ check, review, merge. A fix that changes the spec re-enters at plan
 The owner files an issue and marks it ready for the loop. From that
 moment the orchestrator owns the issue. It reads the issue's state,
 finds the rung it is at, and dispatches the owning persona on its
-harness, at its tier, under its own identity. At each gate it waits for the reviewers to agree and
-the merge identity to merge. It dispatches the next rung. It closes
-the issue once delivery is verified. It stops on `hold`, on a failed
-consensus, on a tripped budget and on an open security finding, and
-calls the owner.
+harness, at its tier, under its own identity. At each gate it waits
+for the merge. It dispatches the next rung. It closes the issue once
+delivery is verified. It stops on `hold`, on a failed consensus, on a
+tripped budget and on an open security finding, and calls the owner.
 
-The playbook keeps a human at every merge. This system goes one step
-further: consensus between two model families reaches the default
-branch ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)).
-Three seats make that safe. Nestor holds the judgment. The verifier
-checks the evidence. Cassandra refills the backlog from measurements.
+Who merges depends on the mode, and the mode is set per issue.
+
+- **Manual mode.** The owner is the gate. The owner reads each pull
+  request and its findings and merges it by hand. A merge is
+  acceptance. A close is rejection.
+- **Autonomous mode.** The `mode:autonomous` label switches it on
+  ([#147](https://github.com/evekhm/agentic-sdlc/issues/147)). The
+  merge identity merges a rung's pull request when CI is green and the
+  assigned reviewers have no open finding. At the code gate both
+  families must be clean. The owner is called only on escalation.
+
+The playbook keeps a human at every merge. Autonomous mode goes one
+step further: consensus between two model families reaches the
+default branch
+([#64](https://github.com/evekhm/agentic-sdlc/issues/64)). Three
+seats make that safe. Nestor holds the judgment. Argus at the code
+gate checks the evidence. Cassandra refills the backlog from
+measurements.
 
 Dispatch has one door. Inside a harness session the instruction is
 `/work <n>`. The command resolves the number to its rung and owning
