@@ -77,7 +77,9 @@ HEADLESS="${HEADLESS:-0}"
 # Unattended-run controls (#108). All three are opt-in: unset, this script
 # behaves exactly as it did before.
 #   WORK_MAX_USD          spend ceiling (pre-emptive for Claude, post-hoc for Antigravity)
-#   WORK_PERMISSION_MODE  passed to --permission-mode; without it an
+#   WORK_PERMISSION_MODE  claude-code's vocabulary, translated per harness
+#                         (--permission-mode there, --dangerously-skip-
+#                         permissions / --mode on agy); without it an
 #                         unattended persona is denied Edit/git/gh
 #   WORK_COST_FILE        path the observed cost (line 1) and the model the run
 #                         actually billed to (line 2) are written to,
@@ -125,10 +127,15 @@ Modes are environment variables, never flags:
 Unattended-run controls, all opt-in (#108):
   WORK_MAX_USD=<amount>       spend ceiling (pre-emptive for Claude,
                               post-hoc detection after run for Antigravity).
-  WORK_PERMISSION_MODE=<mode> passed to --permission-mode. Without it
-                              the default mode denies Edit, git and gh,
-                              and the persona spends its preamble to
-                              report that it could not act.
+  WORK_PERMISSION_MODE=<mode> claude-code's vocabulary, translated to
+                              whatever the resolved harness calls it —
+                              --permission-mode for claude-code;
+                              bypassPermissions, acceptEdits and plan
+                              for agy, and any other value refuses the
+                              launch rather than dropping the mode.
+                              Without it the default mode denies Edit,
+                              git and gh, and the persona spends its
+                              preamble to report that it could not act.
   WORK_COST_FILE=<path>       write this run's observed cost there, so a
                               caller can meter a dispatch without
                               scanning transcripts — which is wrong for
@@ -645,6 +652,9 @@ headless_for() { # <harness> -> 1 | 0
 launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
     local persona="$1" harness="$2" mins wrap model headless
     LAUNCH_ARGV=()
+    # Set instead of exiting when this persona cannot be launched as
+    # configured; the caller decides whether that is fatal (D20).
+    ARGV_REFUSAL=""
     case "$harness" in
         claude-code|antigravity) ;;
         *) return 0 ;;
@@ -705,6 +715,53 @@ launch_argv() { # <persona> <harness> -> fills LAUNCH_ARGV; empty = no row
             LAUNCH_ARGV+=( agy -p "$PROMPT" --agent "$persona"
                            --add-dir "$REPO_ROOT" --model "$model"
                            --output-format json --print-timeout "${mins}m" )
+            # The antigravity half of WORK_PERMISSION_MODE. Headless agy
+            # cannot prompt, so it AUTO-DENIES every tool that needs the
+            # `command` permission and then exits 0 having produced
+            # nothing — "no output produced — a tool required the
+            # 'command' permission that headless mode cannot prompt
+            # for". A reviewer that cannot run a command cannot read a
+            # diff, so this is not a degraded review, it is no review.
+            #
+            # Measured on the first runner dispatch that reached a model
+            # at all (#167): SUCCESS, 380 output tokens, empty response.
+            #
+            # The caller's vocabulary is claude-code's, because that is
+            # what the workflow already sets, and each value that agy
+            # has a flag for is translated to it (`agy --help`:
+            # `--dangerously-skip-permissions`, `--mode
+            # accept-edits|plan`). Only `bypassPermissions` has been
+            # measured on this harness; the other two are mapped on the
+            # help text alone. Anything else is refused rather than
+            # silently ignored — a permission mode that does not reach
+            # the harness is exactly the failure above. The scope, and
+            # the objection to its width, are the same as the
+            # claude-code branch's: see
+            # .github/workflows/unattended.yml and #168.
+            case "${WORK_PERMISSION_MODE:-}" in
+                '') ;;
+                bypassPermissions)
+                    LAUNCH_ARGV+=( --dangerously-skip-permissions ) ;;
+                acceptEdits)
+                    LAUNCH_ARGV+=( --mode accept-edits ) ;;
+                plan)
+                    LAUNCH_ARGV+=( --mode plan ) ;;
+                *)
+                    # NOT `exit 1`. This function runs once per owner of
+                    # the stage, for printing as well as for launching,
+                    # and D20 puts an unusable row on exactly one side
+                    # of that line: a broken atlas must not stop
+                    # `--as argus`, and a plain `work.sh <n>` on a
+                    # two-owner stage launches nothing and so cannot be
+                    # stopped by a value nothing will use. Recorded as a
+                    # marker here and made fatal below, for the one
+                    # persona actually about to launch — the same split
+                    # the missing-target preflight already draws
+                    # (argus R2-1 / atlas A1-2 on PR #221).
+                    LAUNCH_ARGV=()
+                    ARGV_REFUSAL="WORK_PERMISSION_MODE=$WORK_PERMISSION_MODE has no agy flag; this harness maps bypassPermissions, acceptEdits and plan (#167)"
+                    return 0 ;;
+            esac
             ;;
     esac
 }
@@ -781,6 +838,7 @@ launch_persona=""
 launch_harness=""
 launch_target=""
 launch_missing=0
+launch_refusal=""
 launch_model=""
 LAUNCH=()
 while read -r persona; do
@@ -801,7 +859,9 @@ while read -r persona; do
         missing=1
     fi
     LAUNCH_ARGV=()
+    ARGV_REFUSAL=""
     [ "$missing" -eq 1 ] || launch_argv "$persona" "$harness"
+    refusal="$ARGV_REFUSAL"
     echo "--> $persona"
     echo "    harness:  $harness"
     if [ -z "$target" ]; then
@@ -813,7 +873,9 @@ while read -r persona; do
     fi
     echo "    branch:   $persona/$ISSUE-$slug"
     echo "    brief:    $brief"
-    if [ "${#LAUNCH_ARGV[@]}" -gt 0 ]; then
+    if [ -n "$refusal" ]; then
+        echo "    command:  refused — $refusal"
+    elif [ "${#LAUNCH_ARGV[@]}" -gt 0 ]; then
         # printf '%q ' so what is shown is exactly what runs.
         echo "    command:  $(printf '%q ' "${LAUNCH_ARGV[@]}")"
     else
@@ -825,6 +887,7 @@ while read -r persona; do
         launch_harness="$harness"
         launch_target="$target"
         launch_missing="$missing"
+        launch_refusal="$refusal"
         LAUNCH=( ${LAUNCH_ARGV[@]+"${LAUNCH_ARGV[@]}"} )
     fi
 done <<<"$owners"
@@ -839,6 +902,9 @@ if [ "$owner_count" -gt 1 ]; then
     echo "==> stage $stage has $owner_count owners; printing both and launching neither."
     echo "    Re-run with --as <persona> to launch exactly one."
     exit 0
+fi
+if [ -n "$launch_refusal" ]; then
+    die "refused: $launch_refusal"
 fi
 if [ "$launch_missing" -eq 1 ]; then
     die "$launch_persona is pinned to $launch_harness but $launch_target does not exist in $REPO_ROOT; run scripts/sync_agents.py and commit the result. Launching without it would silently run the harness's stock agent and exit 0"
@@ -1015,6 +1081,37 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
         export "GIT_CONFIG_VALUE_$((base + 3))=git@github.com:"
         export GIT_CONFIG_COUNT=$((base + 4))
         export WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:+$WORK_DISPATCHED_ISSUE:}$ISSUE"
+        # agy needs a DIFFERENT cloud credential than claude-code, and
+        # this is the only place that knows which harness is about to
+        # launch — the workflow is harness-blind by design (D18), so it
+        # cannot make this choice for us (#167).
+        #
+        # Why a second credential at all. agy ships no built-in model
+        # list: it fetches its catalog at startup from
+        # cloudcode-pa.googleapis.com, which serves that catalog per
+        # IDENTITY ENTITLEMENT, not per project. A federated service
+        # account has no Antigravity entitlement, so under WIF the fetch
+        # returns nothing ("timed out waiting for available models") and
+        # agy then rejects EVERY --model value with "not recognized as a
+        # known model" — which is why re-pinning the model never fixed
+        # this and no IAM role can. Measured on a runner: WIF service
+        # account 0 models; an authorized_user ADC credential, same
+        # runner shape, 15 models and a successful Pro call.
+        #
+        # claude-code is untouched: it talks to Vertex, where the WIF
+        # service account works and stays least-privilege.
+        #
+        # The VALUE never reaches this environment at all — the caller
+        # passes a path — and for a claude-code dispatch the file that
+        # path named was deleted before this function was called
+        # (argus/atlas R1-1, atlas A1-1 on PR #221). Unsetting the path
+        # is tidiness, not the control: a path is not a secret, and
+        # `unset` cannot take back an environment a parent already has
+        # in /proc, which is precisely why the value is not in one.
+        unset ANTIGRAVITY_ADC_FILE
+        [ -z "${AGY_CREDENTIAL_FILE:-}" ] \
+            || export GOOGLE_APPLICATION_CREDENTIALS="$AGY_CREDENTIAL_FILE"
+        unset AGY_CREDENTIAL_FILE
         exec "${LAUNCH[@]}"
     )
 }
@@ -1026,6 +1123,55 @@ launch_child() { # runs "${LAUNCH[@]}" with the persona's credentials in its env
 # than the one whose personas, labels and targets it just resolved.
 # Measured: the first smoke run wrote its artifact into a sibling clone.
 cd "$REPO_ROOT"
+
+# agy's credential, kept or destroyed HERE (#167).
+#
+# Why the credential at all: agy ships no built-in model list. It
+# fetches its catalog from cloudcode-pa.googleapis.com, which serves
+# that catalog per IDENTITY ENTITLEMENT — not per project and not per
+# IAM role. A federated service account holds none, gets an empty
+# catalog, and agy then rejects EVERY --model value with "not
+# recognized as a known model". Measured on a runner: WIF service
+# account 0 models; the same runner shape with an authorized_user ADC
+# credential, 15 models and a successful Pro call. No re-pin and no
+# role grant reaches this.
+#
+# The caller passes a PATH, never the value. An earlier round of this
+# change took the value in $ANTIGRAVITY_ADC_JSON and wrote the file
+# here, on the theory that `unset` before the launch withheld it from
+# the harnesses that must not see it. It does not: the kernel keeps
+# every process's INITIAL environment in /proc/<pid>/environ, so a
+# value exported into the step that hosts the harness stays readable —
+# to any child, under the same runner user, for the whole run — no
+# matter what this script unsets. `cat /proc/$PPID/environ` is the
+# whole attack (atlas A1-1 on PR #221).
+#
+# A path can be taken back, by deleting what it points at. So the
+# workflow stages the file for every runner because it is harness-blind
+# by design (D18), and this is the first point in the chain that knows
+# which harness is about to launch — and therefore the last point at
+# which the file can be destroyed before any session exists to read it.
+# A claude-code dispatch reaches its launch with the path pointing at
+# nothing.
+AGY_CREDENTIAL_FILE=""
+cleanup_agy_credential() {
+    [ -z "$AGY_CREDENTIAL_FILE" ] || rm -f "$AGY_CREDENTIAL_FILE"
+}
+if [ -n "${ANTIGRAVITY_ADC_FILE:-}" ] && [ -f "$ANTIGRAVITY_ADC_FILE" ]; then
+    if [ "$launch_harness" = "antigravity" ]; then
+        AGY_CREDENTIAL_FILE="$ANTIGRAVITY_ADC_FILE"
+        # Deleted on the way out however this ends, including the
+        # signals a cancelled Actions job sends.
+        trap cleanup_agy_credential EXIT INT TERM
+    else
+        rm -f "$ANTIGRAVITY_ADC_FILE"
+    fi
+elif [ "$launch_harness" = "antigravity" ]; then
+    echo "==> WARNING: no ANTIGRAVITY_ADC_FILE, so $launch_persona has no" >&2
+    echo "    entitled credential and agy will report every model as unrecognized." >&2
+    echo "    Provision it with scripts/setup/wif_setup.sh --check (#167)." >&2
+fi
+export AGY_CREDENTIAL_FILE
 
 if [ "$(headless_for "$launch_harness")" != "1" ]; then
     # D15 and D23, both as amended (PR #60, AT-5): the interactive row

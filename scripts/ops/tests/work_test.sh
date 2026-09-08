@@ -304,6 +304,7 @@ run() {
   set +e
   OUT="$(DRY_RUN="${DRY:-1}" HEADLESS="${HL:-0}" WORK_COST_FILE="${WORK_COST_FILE:-}" \
     WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:-}" \
+    WORK_PERMISSION_MODE="${WPM:-}" \
     "${TREE:-$REPO}/scripts/ops/work.sh" "$@" 2>&1)"
   rc=$?
   set -e
@@ -668,6 +669,32 @@ has "WORK-RESULT: <ok|refused|blocked> #113" "D2: the prompt asks for the result
 hasnt 'agy -p \#113 ' "D2: a bare #<n> is never the prompt"
 HL=1 run 0 "D5: antigravity under HEADLESS=1 resolves the same row" -- 113
 has "command:  timeout 2760 agy -p " "D5: antigravity has one row, not two"
+
+banner "#167 WORK_PERMISSION_MODE is translated per harness, and an unmappable value stops the launch only"
+# The caller speaks claude-code's vocabulary whatever the harness, so
+# every value that agy has a flag for has to become that flag. A value
+# that silently does not arrive is the failure #167's first successful
+# dispatch produced: a session that resolved a model, auto-denied every
+# tool and returned an empty response with SUCCESS.
+WPM=bypassPermissions run 0 "#167: bypassPermissions reaches agy" -- 113
+has " --dangerously-skip-permissions" "#167: bypassPermissions becomes agy's bypass flag"
+WPM=acceptEdits run 0 "#167: acceptEdits reaches agy" -- 113
+has " --mode accept-edits" "#167: acceptEdits becomes --mode accept-edits"
+WPM=plan run 0 "#167: plan reaches agy" -- 113
+has " --mode plan" "#167: plan becomes --mode plan"
+issue 131 open "status:implementing" "Implement the thing, on the other harness"
+HL=1 WPM=bypassPermissions run 0 "#167: claude-code still takes the value verbatim" -- 131
+has " --permission-mode bypassPermissions" "#167: the claude-code branch is unchanged"
+# D20's split, on a value rather than a target. A print-only run
+# launches nothing, so nothing can be broken by a mode nothing will
+# use: the unmappable row is a marker and the exit stays 0.
+DRY=0 WPM=frobnicate run 0 "#167 D20: an unmappable mode does not stop a print-only run" -- 112
+has "command:  refused — WORK_PERMISSION_MODE=frobnicate" "#167 D20: the unusable row is printed as a marker"
+has "printing both and launching neither" "#167 D20: the enumeration still finished"
+# And is fatal for the one persona actually about to launch, because a
+# mode that does not reach the harness is worse than no launch.
+WPM=frobnicate run 1 "#167: an unmappable mode refuses the launch it would have broken" -- 113
+has "refused: WORK_PERMISSION_MODE=frobnicate has no agy flag" "#167: the refusal names the value and the vocabulary"
 
 banner "#43 D5 claude-code is interactive by default and headless on demand"
 issue 130 open "status:implementing" "Implement the thing"

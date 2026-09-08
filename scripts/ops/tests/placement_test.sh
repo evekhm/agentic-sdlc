@@ -285,6 +285,23 @@ if grep -qE 'secrets\.[A-Z_]*(KEY|TOKEN|CREDENTIAL)' "$WORKFLOW"; then
   fail "#146: unattended.yml names a cloud key or token secret; model access is federation, not a key at rest"
 fi
 pass "#146: unattended.yml carries no cloud key at rest"
+# agy's model credential is the one cloud credential federation cannot
+# supply (#167), so it IS read from `secrets` — and the whole of its
+# containment is that it is read into a step that stages it and exits,
+# never into the step that hosts the session. A value in the hosting
+# step's environment cannot be withdrawn: /proc/<pid>/environ keeps
+# every process's initial environment, so `unset` inside work.sh would
+# leave it readable to any child under the runner user for the whole
+# run (atlas A1-1 on PR #221). Line order is the assertion.
+adc_at="$(grep -n 'secrets.ANTIGRAVITY_ADC_JSON' "$WORKFLOW" | cut -d: -f1)"
+[ "$(wc -l <<<"$adc_at")" = "1" ] && [ -n "$adc_at" ] \
+  || fail "#167: unattended.yml reads secrets.ANTIGRAVITY_ADC_JSON $(grep -c 'secrets.ANTIGRAVITY_ADC_JSON' "$WORKFLOW") times; exactly one staging step may"
+dispatch_step_at="$(grep -n '^      - name: Dispatch$' "$WORKFLOW" | head -1 | cut -d: -f1)"
+[ -n "$dispatch_step_at" ] && [ "$adc_at" -lt "$dispatch_step_at" ] \
+  || fail "#167: secrets.ANTIGRAVITY_ADC_JSON is read at line $adc_at, at or after the Dispatch step at $dispatch_step_at; the value must not be in the environment of the step that hosts the session"
+grep -q 'ANTIGRAVITY_ADC_FILE=' "$WORKFLOW" \
+  || fail "#167: the staging step exports no ANTIGRAVITY_ADC_FILE, so the launcher gets no path to keep or delete"
+pass "#167: agy's model credential is staged as a file before Dispatch, never as a value inside it"
 
 # ===========================================================================
 T="$(fixture_tree)"
