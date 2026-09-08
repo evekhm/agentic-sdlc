@@ -524,6 +524,56 @@ not prose):
    dated handoff file) is updated the day reality moves, and a failed
    prediction is corrected there, dated.
 
+## Reference standard: the AI-native SDLC playbook, play by play
+
+The golden standard this repo is measured against is the AI-native
+SDLC playbook (claude.com blog, 2026-08-21; the distilled copy is
+[BLOG.md](BLOG.md), and on any doubt the article wins). It was the
+founding source of [INTENT.md](../INTENT.md); this table makes the
+comparison a maintained record instead of a memory. One row per play
+in the article's order; the verdict is what is true on `main` at the
+date in the heading of the last revision, and every row that is not
+met names the issue that owns the gap or says "deferred, no tracker"
+so the operator can see the call. The advisor seat owns this table
+under the same rule as the status snapshot: re-verify each verdict at
+the fetched ref before relying on it, and correct it, dated, the day
+reality moves. BLOG.md's "what the article does NOT define" lists
+where this repo deliberately goes beyond the article (multi-harness
+personas, per-role model tiers, reviewer model-family diversity,
+Decision-ID traceability, the fabrication catalog); those are not
+repeated here.
+
+Verdicts: **ahead** (the repo does more than the play asks), **met**,
+**partial**, **absent**, **n/a** (the play presumes something this
+repo does not have, such as a deployable product).
+
+| Stage | Play | State on main (2026-09-08) | Verdict | Owner |
+|---|---|---|---|---|
+| Plan | Capture as `intent.md`; product owner accepts by merge | `intent/<issue>-<slug>/intent.md`, athena at the gate, the merge is the transition and `lifecycle.yml` mirrors it into `status:spec` | ahead | met |
+| Design | `spec.md` from the accepted intent, concerns flagged against policy skills | Decision IDs, the `spec-adversary` grill, `spec_check.sh` in CI. No policy skills exist; `personas/skills/` holds four protocol skills | ahead on rigor; policy skills absent | policy skills: deferred, no tracker (no policy owner yet) |
+| Design | Intent acceptance fires a non-interactive spec job; each accepted artifact triggers the next gate | Every gate is a human merge (YOLO off above) | partial | gate 2: #147, #64/#151, #148 |
+| Build | Plan mode by default; committed `plan.md`; a deviation updates the plan in the same commit | Daedalus rung emits `plan.md` plus failing contract tests. No satisfiability proof of the contract suite yet; no deviation check | partial | #204 (constructive check); deviation check: deferred, no tracker |
+| Build | `CLAUDE.md` under a page with "things Claude gets wrong"; a repeated mistake becomes a line | The catalog in this file is the "gets wrong" list and is far richer than the play asks; AGENTS.md is 590 lines and GEMINI.md carries the numbered rules | content ahead, form behind | #181 (rules into the repo, shorter prompts) |
+| Build | Skills for knowledge that must apply consistently; policy owner signs off | Protocol skills only (review, spec-adversary, trusted-posting, resume) | partial | see Design row |
+| Build | Hooks as build-time guardrails: protected paths, formatter, credentials | No committed `.claude/settings.json`; one git pre-commit that #224 showed never ran | absent | #255 (Claude-side hooks), #224/#197 (git-side guard) |
+| Build | Parallel sessions per worktree; scoped subagents; a verifier that reports and does not fix | `claim.sh`, `worktrees.sh`, one session one worktree; argus/explorer/scanner/mechanic; the verifier seat | ahead | #204 formalizes the verifier |
+| Test | Single-command test loop listed in `CLAUDE.md`; "fix the code, not the test", protected by a hook | Suites exist under `scripts/*/tests/`; CI runs 3 of 11; no test-file protection | partial | #249; #255 (hook 2) |
+| Test | Continuous evals: 20 to 50 real tasks, run on config changes, every incident a permanent eval | Nothing. `compiler_roundtrip.sh` checks the compile is faithful, not that a countermeasure still catches its scar | absent | #254 |
+| Deploy | Layered AI review with a `REVIEW.md`; the author cannot approve; second-time findings go into `CLAUDE.md` | Two reviewers of distinct model families, six App identities, REVIEW.md with severity and round funnels keyed to Decision IDs. The recorder behind its enforcement map is unbuilt, so it is prompt-enforced with a human backstop; `distinct_model_families` has no CI gate | ahead in design, partial in enforcement | #238 (G1/G2), #64/#151 (consensus merge), #198 |
+| Deploy | Hooks as approval gates; tiered autonomy dev to prod; agent acts up to the production gate | No deployable product; `deploy` is a stage enum with no rung by construction. The nearest gate is the spend ceiling | n/a | #108 (ceiling) |
+| Deploy | CI/CD: read-only `claude -p` steps first, write steps behind gates, DORA | `unattended.yml` runs both reviewers on every rung; no deploy pipeline to instrument | n/a | gate 1 met (CRITICAL_PATH.md) |
+| Maintain | Deterministic detector, versioned `bands.yaml`, 1σ log / 2σ diagnose / 3σ propose an `intent.md` | Cassandra's charter says exactly this; no watchers, no bands. Scope note of 2026-09-08 on the thread: first watched metrics are the SDLC's own | absent | #11 |
+| Maintain | Scheduled security scans with a baseline; an on-call agent in the incident channel | None. The `scanner` subagent runs credential and path checks at review time | n/a | deferred, no tracker |
+| All | A leading and a lagging metric per stage | Cost is measured (`session_spend.sh`); flow is not. #57 was measured once, by hand: 27 minutes of agent work against 2 hours 10 minutes of merge wait | partial | #71 (metric definitions as acceptance criteria, comment of 2026-09-08), #68 aggregates, #104 cost ledger |
+
+Two rows above turned into seat rules on 2026-09-08 and are input to
+#199's implementation rung: **one scar, one rule, one eval** (#254; a
+field-notes entry is complete only when it names the eval case that
+replays it, or says why none is mechanical) and **prefer a hook to a
+prompt rule when the rule is checkable** (#255; a countermeasure lands
+in the strongest layer available, and the record says which layer
+holds it).
+
 ## Roadmap: from YOLO off to YOLO on
 
 The four items below are the shape and the reasons. The live ordering
