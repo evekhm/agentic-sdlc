@@ -122,6 +122,19 @@ order:
 - PRs cut before a workflow-file merge need a REBASE, not a re-run.
 - A fix round is always a fresh agy session pointed at a fix-prompt
   file; never argue with a stalled session — re-dispatch.
+- 2026-09-08: a work.sh change lands its own effect on its own pull
+  request, because `unattended.yml` checks out the PR head — verify
+  such fixes on the fixing PR's own runner job, not after merge (#207,
+  PR #233).
+- 2026-09-08: `max_cost_usd` is printed by the gh-actions launch but
+  not enforced for claude: run 34186361378 spent 2.75 against a
+  printed ceiling of 2.0 and the check stayed green; until #108 (PR
+  #232) lands, every ladder PR push costs two reviewer sessions with
+  no ceiling and no round counter.
+- 2026-09-08: a session-side opus review subagent can go idle and
+  return nothing (15 minutes, three prompts, verifier seat); when that
+  happens the seat reviews directly — full diff read plus a mutation
+  battery — instead of re-prompting the subagent.
 
 ## Resuming in a fresh session
 
