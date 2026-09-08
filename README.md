@@ -21,10 +21,15 @@ reviewers. Cassandra is the maintainer. Nestor is the advisor. A
 persona runs inside a coding harness, Claude Code or Antigravity, on
 a model chosen for its job.
 
-The **owner** is the human who runs the repository. The owner files
-ideas as issues, answers the questions the personas ask, and decides
-escalations. Labeling an issue is the whole human act. Everything
-after the label is the system's work.
+The **owner** is the human who runs the repository. The owner speaks
+intent: an idea, a problem, an outcome wanted, written as a GitHub
+issue in plain language. The owner answers the questions the personas
+ask back, and decides escalations. What comes out the other end is
+specified, planned, implemented, tested and reviewed work, merged on
+the default branch. Every lesson learned on the way, a rule a persona
+had to be told, a gap a check missed, a measurement that drifted,
+comes back as a new issue. The system consumes intent and produces
+working software and a better version of itself.
 
 The loop has five steps. Every issue climbs them in order. Each step is
 a **rung**. Each rung ends in a pull request that carries one
@@ -159,9 +164,10 @@ check, review, merge. A fix that changes the spec re-enters at plan
 
 ## The orchestrator
 
-The owner labels an issue. The orchestrator reads the label. It
-dispatches the owning persona on its harness, at its tier, under its
-own identity. At each gate it waits for the reviewers to agree and
+The owner files an issue and marks it ready for the loop. From that
+moment the orchestrator owns the issue. It reads the issue's state,
+finds the rung it is at, and dispatches the owning persona on its
+harness, at its tier, under its own identity. At each gate it waits for the reviewers to agree and
 the merge identity to merge. It dispatches the next rung. It closes
 the issue once delivery is verified. It stops on `hold`, on a failed
 consensus, on a tripped budget and on an open security finding, and
