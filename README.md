@@ -271,19 +271,23 @@ being specified — each check that lands moves another stage onto the
 cheap pin.
 
 $/1M tokens, at or under 200k tokens (this system's own context
-ceiling, AGENTS.md). Claude rates match
-[`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh); Gemini
-rates are Google Cloud's own Gemini Enterprise / Agent Platform price,
-which `session_spend.sh` still needs
-([#269](https://github.com/evekhm/agentic-sdlc/issues/269)). Flash's
-rate rises to $1.50 / $7.50 on 2027-01-01:
+ceiling, AGENTS.md): input / cache write (5m TTL) / cache read /
+output. Claude rates match
+[`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh) — a 1h
+TTL write costs 2x input, the default 5m TTL costs 1.25x, and Fable
+5.1's cache read is $0.25, a deeper discount than the family's usual
+0.1x ratio. Gemini rates are Google Cloud's own Gemini Enterprise /
+Agent Platform price, which `session_spend.sh` still needs
+([#269](https://github.com/evekhm/agentic-sdlc/issues/269)); its
+caching is automatic, with no separate write charge in this data, and
+Flash's rate rises to $1.50 / $0.15 / $7.50 on 2027-01-01:
 
-| Tier | Claude Code | $/1M in / out | Antigravity | $/1M in / out |
+| Tier | Claude Code | $/1M in / write / read / out | Antigravity | $/1M in / read / out |
 |---|---|---|---|---|
-| Fast | `haiku` | $1.00 / $5.00 | `gemini-3.8-flash-low` | $0.75 / $3.75 |
-| Mechanical / Implementation | `claude-sonnet-5` | $2.00 / $10.00 | `gemini-3.8-flash-medium` | $0.75 / $3.75 |
-| Review | `opus` | $5.00 / $25.00 | `gemini-3.8-flash-high` | $0.75 / $3.75 |
-| Frontier | `claude-fable-5-1` | $10.00 / $50.00 | `gemini-3.8-flash-high` | $0.75 / $3.75 |
+| Fast | `haiku` | $1.00 / $1.25 / $0.10 / $5.00 | `gemini-3.8-flash-low` | $0.75 / $0.075 / $3.75 |
+| Mechanical / Implementation | `claude-sonnet-5` | $2.00 / $2.50 / $0.20 / $10.00 | `gemini-3.8-flash-medium` | $0.75 / $0.075 / $3.75 |
+| Review | `opus` | $5.00 / $6.25 / $0.50 / $25.00 | `gemini-3.8-flash-high` | $0.75 / $0.075 / $3.75 |
+| Frontier | `claude-fable-5-1` | $10.00 / $12.50 / $0.25 / $50.00 | `gemini-3.8-flash-high` | $0.75 / $0.075 / $3.75 |
 
 Antigravity's rate is flat across the ladder — thinking level spends
 more tokens, and the rate per token holds steady. Claude Code carries
