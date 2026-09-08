@@ -180,7 +180,7 @@ order:
    `config/model_tiers.yaml` (`claude --model claude-fable-5-1` for the
    advisor's FRONTIER tier, `claude --model opus` for the verifier's
    REVIEW tier) and the one-line file pointer; the dated
-   `~/handoff-plan-*.txt` the previous advisor left is the execution
+   `ops/handoffs/handoff-plan-*.txt` the previous advisor left is the execution
    state on top of this document. **Verify every seat holder live**
    before acting on it — ListAgents AND a reply to a SendMessage —
    never from a name in a handoff or observations file: a handoff
@@ -482,7 +482,7 @@ Field lessons, each with the incident that taught it:
   token). A Refs-only amendment PR on an intent:new issue leaves the
   advancer with no first status to write, so the operator closes that
   issue by hand (#151, 2026-09-08).
-- **Wave-launcher facts**, from `~/waves/launch.sh` (not yet in the
+- **Wave-launcher facts**, from `ops/waves/launch.sh` (not yet in the
   repo; an intent is pending the operator's go): one claim path only,
   `scripts/ops/claim.sh`, never a second implementation; a key column
   separate from the issue number so a later rung of the same issue can

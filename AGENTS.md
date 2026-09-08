@@ -356,6 +356,25 @@ handoff comment.
   the same directory. A `runs/` that appears inside a worktree is a
   bug: move its contents to the shared root before the worktree is
   removed.
+- **Operator state lives in `ops/`, beside `runs/`, under the same
+  rules.** Seat charters not yet tracked, dated handoff files, wave
+  dispatch prompts and the launch scripts that drive local agy sessions
+  are machine-local state: they carry live pull-request numbers and
+  operator paths and would rot in git, yet the repo has to name them.
+  They live in the primary checkout's gitignored `ops/`:
+  `ops/charters/`, `ops/handoffs/`, `ops/waves/` (prompts, `launch.sh`,
+  `watch-then-launch.sh`), `ops/worktrees/` (worktrees a seat keeps
+  outside `.claude/worktrees`). One per machine, resolved like
+  `RUNS_ROOT` with `ops` in place of `runs`, never inside a worktree,
+  never flat in the home directory. Because `ops/` is ignored and
+  inside the working tree, `git clean -xfd` at the checkout root
+  deletes it, charters and handoffs included, with no copy anywhere;
+  the same is true of `runs/`. Never run `git clean -x` in the
+  primary checkout. Repo documents cite it by its repo-relative path
+  (`ops/handoffs/handoff-plan-<date>.txt`), never by a `~/` path.
+  Anything that stops being dated graduates into a tracked
+  location through the ladder: a charter into `personas/`, a launcher
+  into `scripts/ops/`.
 - **Bookkeeping: every run artifact records its disposition.** By the
   time a session ends, every artifact the session produced carries a
   disposition naming what became of it: the issue or PR it turned
