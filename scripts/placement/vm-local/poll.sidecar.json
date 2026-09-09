@@ -1,0 +1,13 @@
+{
+  "command": "bash",
+  "args": [
+    "-c",
+    "exec scripts/placement/vm-local/poll.sh"
+  ],
+  "restart_policy": "always",
+  "display_name": "VM-Local SDLC Poller",
+  "description": "Continuous poller discovering candidate work and dispatching vm-local placement adapter",
+  "env": {
+    "POLL_INTERVAL_SECONDS": "30"
+  }
+}
