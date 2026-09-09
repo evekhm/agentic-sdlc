@@ -47,6 +47,7 @@ unset GIT_CONFIG_COUNT
 for _i in 0 1 2 3 4 5 6 7; do unset "GIT_CONFIG_KEY_$_i" "GIT_CONFIG_VALUE_$_i"; done
 unset _i
 unset WORK_DISPATCHED_ISSUE
+unset WORK_MAX_USD
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_SH="$REPO/scripts/ops/work.sh"
@@ -1480,5 +1481,32 @@ has "branch:   odyssey/107-fix" "AT-13: retains PR head branch"
 pass "AT-13 (D2, D8): work.sh fix-round dispatch succeeds"
 
 echo
+banner "#312 D1/D2/D5/D6/D8 stream interrupt and headless outcome error demotion"
+printf '%s\n' '{"status":"ERROR","error":"The stream was interrupted. Please continue the task you were working on.","response":"Review finished.\nWORK-RESULT: ok #113 posted clean review"}'   > "$WORK/agy_stream_interrupt_ok.json"
+printf '%s\n' '{"status":"ERROR","error":"The stream was interrupted. Please continue the task you were working on.","response":"Cannot proceed.\nWORK-RESULT: refused #113 hold present"}'   > "$WORK/agy_stream_interrupt_refused.json"
+printf '%s\n' '{"status":"ERROR","error":"The stream was interrupted. Please continue the task you were working on.","response":"Processing half way through and stopped."}'   > "$WORK/agy_stream_interrupt_no_result.json"
+printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"error":"Connection reset by peer","result":"All checks passed.\nWORK-RESULT: ok #130 implemented"}'   > "$WORK/cc_stream_interrupt_ok.json"
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_stream_interrupt_ok.json" AGY_RC=0   run 0 "AT-312-1 (D1, D2, D5, D6, D8): stream interrupt with WORK-RESULT: ok exits 0" -- 113
+has "daedalus reported: ok" "AT-312-1: reported verdict ok"
+has "warning: daedalus's harness reported status ERROR with error: The stream was interrupted. Please continue the task you were working on.; terminal WORK-RESULT observed, proceeding." "AT-312-1: emitted warning line to stderr"
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_stream_interrupt_refused.json" AGY_RC=0   run 2 "AT-312-2 (D1, D2, D5, D8): stream interrupt with WORK-RESULT: refused exits 2" -- 113
+has "daedalus reported: refused" "AT-312-2: reported verdict refused"
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_stream_interrupt_no_result.json" AGY_RC=0   run 1 "AT-312-3 (D1, D5, D8): stream interrupt with no WORK-RESULT line exits 1" -- 113
+has "session did not complete (exit 0, status ERROR)" "AT-312-3: fails closed and reports did not complete"
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_stream_interrupt_ok.json" AGY_RC=1   run 1 "AT-312-4 (D1, D8): non-zero child exit code (rc=1) fails closed even with WORK-RESULT: ok" -- 113
+has "session did not complete (exit 1, status ERROR)" "AT-312-4: child exit 1 takes precedence"
+
+: > "$LAUNCHES"; : > "$WRITES"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 CLAUDE_JSON="$WORK/cc_stream_interrupt_ok.json" CLAUDE_RC=0   run 0 "AT-312-5 (D1, D2, D5, D8): claude-code is_error true with WORK-RESULT: ok exits 0" -- 130
+has "odyssey reported: ok" "AT-312-5: reported verdict ok for claude-code"
+
 echo "work_test.sh: all scenarios passed"
 
