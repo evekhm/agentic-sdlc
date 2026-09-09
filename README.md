@@ -1,15 +1,19 @@
 # agentic-sdlc
 
-**TL;DR:** a software development lifecycle run by AI agents. A GitHub
-issue goes in. Reviewed, merged code comes out. Every stage runs on
-the cheapest harness and model that does the job well, and expensive
-judgment is bought only where it changes the outcome (the [cost
-thesis](#two-harnesses-two-model-families)).
+**TL;DR:** Say what you want. A cast of AI agents turns it into
+reviewed, merged software, then improves the system that made it.
 
-The system follows the
+An intent goes in. One agent sharpens it into a specification, one
+plans the work, one builds it, two independent reviewers from
+different model families judge the result, and a maintainer watches
+it run and proposes what comes next. A human sets direction and
+decides escalations. Each role runs wherever it fits best: frontier
+reasoning where judgment shapes the outcome, fast capacity where the
+process has matured. Any role can move between harnesses and model
+families with a one-line change (the [placement
+thesis](#two-harnesses-two-model-families)). The system follows the
 [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
-and builds itself with its own loop. Every issue link in this file
-points at the tracker item that owns that part of the design.
+and builds itself with its own loop.
 
 ## What this is
 
@@ -78,7 +82,7 @@ at, and the GitHub identity it acts as.
   pass. Starts at a pinned commit in its own branch namespace. One pull
   request per rung. Implementation tier.
 - **Reviewer of every gate, *Atlas*.** Reads every pull request at
-  every rung on Gemini, the cheap seat. Posts findings with severity
+  every rung on Gemini, the high-volume seat. Posts findings with severity
   and ids. Runs the verification checklist for the rung. Never
   approves, merges, closes or edits a label. Review tier
   ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
@@ -93,7 +97,7 @@ at, and the GitHub identity it acts as.
   sweeps, review tier for diagnosis
   ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
 - **Advisor, *Nestor*.** The standing judgment seat. Decides process
-  questions, writes the prompts the cheaper personas run with, and
+  questions, writes the prompts the other personas run with, and
   helps at the spec gate. Owns no rung, implements nothing, reviews
   nothing ([#199](https://github.com/evekhm/agentic-sdlc/issues/199)).
 - **Merge actor, *Themis*.** A system actor with no prompt, no harness
@@ -295,8 +299,8 @@ the second review family at the code gate, and the frontier seats a
 team already invested in Claude keeps there, such as the advisor
 ([#199](https://github.com/evekhm/agentic-sdlc/issues/199)).
 
-**The cost thesis.** A stage that is well specified and well gated
-runs on the cheapest capable model. The tier names the judgment; the
+**The placement thesis.** A stage that is well specified and well gated
+runs well on a fast, light model. The tier names the judgment; the
 pin decides the cost. The two review seats show it: *Atlas* reads
 every pull request on Flash-high, and *Argus* reads the code gate on
 Opus, both at review tier. Keep a seat on the pricier model where a
@@ -354,8 +358,8 @@ On top of the playbook this system adds five things:
 - **A real GitHub identity per persona**, so the platform enforces
   authorship and authority. The merge actor is one more identity that
   no persona holds.
-- **Cost as a subsystem.** Every tier routed to the cheapest capable
-  model, every session priced, every dispatch under a spend ceiling,
+- **Cost as a subsystem.** Every tier routed to the model that fits
+  it, every session priced, every dispatch under a spend ceiling,
   and a ledger per issue, pull request, persona and model
   ([#104](https://github.com/evekhm/agentic-sdlc/issues/104)).
 - **A living spec**, [`docs/SPEC.md`](docs/SPEC.md), that says what is
@@ -427,7 +431,8 @@ and the owner is the escalation path.
   ([#12](https://github.com/evekhm/agentic-sdlc/issues/12)), the live
   dashboard.
 
-This file describes the system as designed. It is normative for
-nothing. Where it and any of those documents disagree, the other is
+This file describes the system as designed. Every issue link in it
+points at the tracker item that owns that part of the design. It is
+normative for nothing. Where it and any of those documents disagree, the other is
 right. Its section list lives in
 [`intent/35-readme/spec.md`](intent/35-readme/spec.md).
