@@ -31,7 +31,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 should_run() {
-    [ -z "$FILTER" ] || grep -qE "$FILTER" <<<"$1"
+    [ -z "$FILTER" ] && return 0
+    grep -qE "^($FILTER)( |$)" <<<"$1"
 }
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -118,23 +119,82 @@ for a in "$@"; do
 done
 
 cmd="${args[0]:-}"
-if [ "$cmd" = "issue" ] || [ "$cmd" = "pr" ]; then
+label_filter=""
+json_fields=""
+jq_expr=""
+for (( idx=0; idx<${#args[@]}; idx++ )); do
+    case "${args[$idx]}" in
+        --label|-l)
+            idx=$((idx + 1))
+            label_filter="${args[$idx]:-}"
+            ;;
+        --label=*)
+            label_filter="${args[$idx]#--label=}"
+            ;;
+        --json)
+            idx=$((idx + 1))
+            json_fields="${args[$idx]:-}"
+            ;;
+        --json=*)
+            json_fields="${args[$idx]#--json=}"
+            ;;
+        --jq|-q)
+            idx=$((idx + 1))
+            jq_expr="${args[$idx]:-}"
+            ;;
+        --jq=*|-q=*)
+            jq_expr="${args[$idx]#*=}"
+            ;;
+    esac
+done
+
+output_json() {
+    local raw="$1"
+    if [ -n "$jq_expr" ]; then
+        "$REAL_JQ" -r "$jq_expr" <<<"$raw"
+    else
+        echo "$raw"
+    fi
+    exit 0
+}
+
+if [ "$cmd" = "issue" ] || [ "$cmd" = "pr" ] || [ "$cmd" = "search" ]; then
     subcmd="${args[1]:-}"
     target="${args[2]:-}"
     if [ "$subcmd" = "view" ]; then
         if [ -f "$FIXTURES/issue-$target.unreadable" ]; then
             exit 1
         fi
+        content=""
         if [ -f "$FIXTURES/issue-$target.json" ]; then
-            cat "$FIXTURES/issue-$target.json"
-            exit 0
+            content="$(cat "$FIXTURES/issue-$target.json")"
+        elif [ -f "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${target}.json" ]; then
+            content="$(cat "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${target}.json")"
+        else
+            content="$("$REAL_JQ" -nc --argjson n "$target" '{number: $n, state: "OPEN", labels: [], comments: []}')"
         fi
-        if [ -f "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${target}.json" ]; then
-            cat "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${target}.json"
-            exit 0
+        if [ -n "$json_fields" ]; then
+            fields_expr="$(echo "$json_fields" | sed 's/,/, /g')"
+            content="$("$REAL_JQ" -c "{$fields_expr}" <<<"$content")"
         fi
-        "$REAL_JQ" -nc --argjson n "$target" '{number: $n, state: "OPEN", labels: [], comments: []}'
-        exit 0
+        output_json "$content"
+    fi
+
+    if [ "$subcmd" = "list" ] || [ "$cmd" = "search" ]; then
+        content="[]"
+        if [ "$cmd" = "pr" ] || [ "$subcmd" = "prs" ]; then
+            [ -f "$FIXTURES/pr-list.json" ] && content="$(cat "$FIXTURES/pr-list.json")"
+        else
+            [ -f "$FIXTURES/issue-list.json" ] && content="$(cat "$FIXTURES/issue-list.json")"
+        fi
+        if [ -n "$label_filter" ]; then
+            content="$("$REAL_JQ" --arg l "$label_filter" '[.[] | select(.labels | if type == "array" then any(.[]; (.name // .) == $l) else false end)]' <<<"$content")"
+        fi
+        if [ -n "$json_fields" ]; then
+            fields_expr="$(echo "$json_fields" | sed 's/,/, /g')"
+            content="$("$REAL_JQ" -c "[.[] | {$fields_expr}]" <<<"$content")"
+        fi
+        output_json "$content"
     fi
 fi
 
@@ -187,6 +247,25 @@ if [ "$cmd" = "api" ]; then
         exit 0
     fi
     case "$clean_path" in
+        */issues/*/comments*|repos/*/issues/*/comments*)
+            n="${clean_path#*issues/}"
+            n="${n%%/*}"
+            if [ "$method" = "POST" ]; then
+                printf 'POST comments %s\n' "$n" >> "$WRITES"
+                echo '{"status": "ok", "id": 9999}'
+                exit 0
+            fi
+            if [ -f "$FIXTURES/comments-$n.json" ]; then
+                cat "$FIXTURES/comments-$n.json"
+                exit 0
+            fi
+            if [ -f "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${n}_comments.json" ]; then
+                cat "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${n}_comments.json"
+                exit 0
+            fi
+            echo '[]'
+            exit 0
+            ;;
         repos/*/issues/[0-9]*)
             n="${clean_path##*/}"
             if [ -f "$FIXTURES/issue-$n.json" ]; then
@@ -216,24 +295,17 @@ if [ "$cmd" = "api" ]; then
             echo '[]'
             exit 0
             ;;
-        */issues/*/comments*|repos/*/issues/*/comments*)
-            n="${clean_path#*/issues/}"
-            n="${n%%/*}"
-            if [ "$method" = "POST" ]; then
-                printf 'POST comments %s\n' "$n" >> "$WRITES"
-                echo '{"status": "ok", "id": 9999}'
-                exit 0
+        repos/*/issues|repos/*/issues\?*|repos/*/pulls|repos/*/pulls\?*)
+            content="[]"
+            if [[ "$clean_path" == *"pulls"* ]]; then
+                [ -f "$FIXTURES/pr-list.json" ] && content="$(cat "$FIXTURES/pr-list.json")"
+            else
+                [ -f "$FIXTURES/issue-list.json" ] && content="$(cat "$FIXTURES/issue-list.json")"
             fi
-            if [ -f "$FIXTURES/comments-$n.json" ]; then
-                cat "$FIXTURES/comments-$n.json"
-                exit 0
+            if [ -n "$label_filter" ]; then
+                content="$("$REAL_JQ" --arg l "$label_filter" '[.[] | select(.labels | if type == "array" then any(.[]; (.name // .) == $l) else false end)]' <<<"$content")"
             fi
-            if [ -f "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${n}_comments.json" ]; then
-                cat "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${n}_comments.json"
-                exit 0
-            fi
-            echo '[]'
-            exit 0
+            output_json "$content"
             ;;
         */issues/*/labels/in-progress|repos/*/issues/*/labels/in-progress)
             n="${clean_path#*/issues/}"
@@ -330,15 +402,40 @@ chmod +x "$WORK/bin/run.sh"
 
 cat > "$WORK/bin/claim.sh" <<'CLAIMSTUB'
 #!/usr/bin/env bash
-echo "claim.sh $*" >> "$CLAIMS"
+echo "claim.sh CLAIM_ACTOR=${CLAIM_ACTOR:-} CLAIM_SESSION=${CLAIM_SESSION:-} $*" >> "$CLAIMS"
+issue="${1:-}"
+issue="${issue#\#}"
+if [ -f "$FIXTURES/issue-$issue.json" ]; then
+    if "$REAL_JQ" -e '.labels[]? | select((.name // .) == "in-progress")' "$FIXTURES/issue-$issue.json" >/dev/null 2>&1; then
+        echo "already claimed" >&2
+        exit 1
+    fi
+fi
 exit 0
 CLAIMSTUB
 chmod +x "$WORK/bin/claim.sh"
 
-# Setup synthetic git ranges for lifecycle tests (Decision B)
+# Setup synthetic git ranges for lifecycle tests (Decision B, NB 3)
 SANDBOX="$WORK/repo"
-mkdir -p "$SANDBOX/personas" "$SANDBOX/scripts/placement/vm-local"
+mkdir -p "$SANDBOX/personas" "$SANDBOX/scripts"
 cp "$REPO/personas/lifecycle.json" "$SANDBOX/personas/lifecycle.json"
+cp -r "$REPO/scripts/ops" "$SANDBOX/scripts/"
+cp -r "$REPO/scripts/placement" "$SANDBOX/scripts/"
+
+cat > "$SANDBOX/scripts/ops/claim.sh" <<'SANDBOXCLAIM'
+#!/usr/bin/env bash
+echo "claim.sh CLAIM_ACTOR=${CLAIM_ACTOR:-} CLAIM_SESSION=${CLAIM_SESSION:-} $*" >> "$CLAIMS"
+issue="${1:-}"
+issue="${issue#\#}"
+if [ -f "$FIXTURES/issue-$issue.json" ]; then
+    if "$REAL_JQ" -e '.labels[]? | select((.name // .) == "in-progress")' "$FIXTURES/issue-$issue.json" >/dev/null 2>&1; then
+        echo "already claimed" >&2
+        exit 1
+    fi
+fi
+exit 0
+SANDBOXCLAIM
+chmod +x "$SANDBOX/scripts/ops/claim.sh"
 
 cat > "$SANDBOX/scripts/placement/vm-local/run.sh" <<'SANDBOXRUN'
 #!/usr/bin/env bash
@@ -606,11 +703,17 @@ EOF
     echo "50.00" > "$FIXTURES/loop-max_cost_usd_per_issue"
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
-    local out_a=""
+    local out_a="" pass_a=0
     out_a="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
     local res_line_a=""
     res_line_a="$(grep -E '^--> #999' <<<"$out_a" || true)"
     [ -z "$res_line_a" ] || echo "    $res_line_a"
+
+    if grep -qE "withholding dispatch: in-progress held by (foreign login|foreign-user)" <<<"$out_a" \
+       && ! grep -qF "DELETE labels 999 in-progress" "$WRITES" \
+       && [ ! -s "$LAUNCHES" ]; then
+        pass_a=1
+    fi
 
     # Sub-case B: unparseable / missing claim comment
     reset_fixtures
@@ -643,15 +746,8 @@ EOF
     echo "50.00" > "$FIXTURES/loop-max_cost_usd_per_issue"
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
-    local out_b=""
+    local out_b="" pass_b=0
     out_b="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
-
-    local pass_a=0 pass_b=0
-    if grep -qE "withholding dispatch: in-progress held by (foreign login|foreign-user)" <<<"$out_a" \
-       && ! grep -qF "DELETE labels 999 in-progress" "$WRITES" \
-       && [ ! -s "$LAUNCHES" ]; then
-        pass_a=1
-    fi
 
     if grep -qE "withholding dispatch: in-progress held without a readable claim|unparseable claim" <<<"$out_b" \
        && ! grep -qF "DELETE labels 999 in-progress" "$WRITES" \
@@ -907,6 +1003,7 @@ run_at8() {
     cat > "$FIXTURES/issue-251.json" <<'EOF'
 {
   "number": 251,
+  "title": "Issue 251",
   "state": "open",
   "labels": [{"name": "status:planning"}],
   "comments": [
@@ -920,6 +1017,7 @@ EOF
     cat > "$FIXTURES/repos_evekhm_agentic-sdlc_issues_251.json" <<'EOF'
 {
   "number": 251,
+  "title": "Issue 251",
   "state": "open",
   "labels": [{"name": "status:planning"}]
 }
@@ -933,16 +1031,17 @@ EOF
 ]
 EOF
 
-    # Issue 252: status:planning, in-progress, held by odyssey
+    # Issue 252: status:planning, in-progress, held by daedalus
     cat > "$FIXTURES/issue-252.json" <<'EOF'
 {
   "number": 252,
+  "title": "Issue 252",
   "state": "open",
   "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
   "comments": [
     {
-      "user": {"login": "evekhm-odyssey-app[bot]"},
-      "body": "Claim: odyssey (session-1) stage:plan path:.claude/worktrees/odyssey-252-test"
+      "user": {"login": "evekhm-daedalus-app[bot]"},
+      "body": "Claim: daedalus (session-1) stage:plan path:.claude/worktrees/daedalus-252-test"
     },
     {
       "user": {"login": "evekhm-themis-app[bot]"},
@@ -954,6 +1053,7 @@ EOF
     cat > "$FIXTURES/repos_evekhm_agentic-sdlc_issues_252.json" <<'EOF'
 {
   "number": 252,
+  "title": "Issue 252",
   "state": "open",
   "labels": [{"name": "status:planning"}, {"name": "in-progress"}]
 }
@@ -961,8 +1061,8 @@ EOF
     cat > "$FIXTURES/comments-252.json" <<'EOF'
 [
   {
-    "user": {"login": "evekhm-odyssey-app[bot]"},
-    "body": "Claim: odyssey (session-1) stage:plan path:.claude/worktrees/odyssey-252-test"
+    "user": {"login": "evekhm-daedalus-app[bot]"},
+    "body": "Claim: daedalus (session-1) stage:plan path:.claude/worktrees/daedalus-252-test"
   },
   {
     "user": {"login": "evekhm-themis-app[bot]"},
@@ -971,14 +1071,52 @@ EOF
 ]
 EOF
 
+    # Issue list fixture for work discovery
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 251,
+    "title": "Issue 251",
+    "state": "open",
+    "labels": [{"name": "status:planning"}],
+    "comments": [
+      {
+        "user": {"login": "evekhm-themis-app[bot]"},
+        "body": "<!-- loop-ledger:251 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+      }
+    ]
+  },
+  {
+    "number": 252,
+    "title": "Issue 252",
+    "state": "open",
+    "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+    "comments": [
+      {
+        "user": {"login": "evekhm-daedalus-app[bot]"},
+        "body": "Claim: daedalus (session-1) stage:plan path:.claude/worktrees/daedalus-252-test"
+      },
+      {
+        "user": {"login": "evekhm-themis-app[bot]"},
+        "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+      }
+    ]
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
     local out="" rc=0
-    out="$(RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once 2>&1)" || rc=$?
+    out="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
 
     local has_mint=0 has_claim=0 has_launch=0 no_claimed_dispatch=0
     grep -qE "mint_app_token\.py.*athena" "$MINTS" && has_mint=1
-    (grep -qE "POST comment 251.*Claim: athena \(poll-" "$WRITES" || grep -qE "athena.*251" "$CLAIMS") && has_claim=1
+    grep -qE 'claim\.sh CLAIM_ACTOR=athena CLAIM_SESSION=poll-[0-9]+ 251( |$)' "$CLAIMS" && has_claim=1
     grep -qE "run\.sh 251 --as athena" "$LAUNCHES" && has_launch=1
-    if ! grep -q "252" "$CLAIMS" && ! grep -qE "POST comment 252" "$WRITES" && ! grep -q "252" "$LAUNCHES"; then
+    if ! grep -q "252" "$LAUNCHES"; then
         no_claimed_dispatch=1
     fi
 
@@ -1198,12 +1336,13 @@ EOF
     cat > "$FIXTURES/issue-252.json" <<'EOF'
 {
   "number": 252,
+  "title": "Issue 252",
   "state": "open",
-  "labels": [{"name": "status:spec"}],
+  "labels": [{"name": "status:build"}],
   "comments": [
     {
       "user": {"login": "evekhm-themis-app[bot]"},
-      "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:2 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+      "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:3 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
     }
   ]
 }
@@ -1212,13 +1351,46 @@ EOF
 [
   {
     "user": {"login": "evekhm-themis-app[bot]"},
-    "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:2 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+    "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:3 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
   }
 ]
 EOF
 
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 251,
+    "title": "Issue 251",
+    "state": "open",
+    "labels": [{"name": "status:planning"}],
+    "comments": [
+      {
+        "user": {"login": "evekhm-themis-app[bot]"},
+        "body": "<!-- loop-ledger:251 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+      }
+    ]
+  },
+  {
+    "number": 252,
+    "title": "Issue 252",
+    "state": "open",
+    "labels": [{"name": "status:build"}],
+    "comments": [
+      {
+        "user": {"login": "evekhm-themis-app[bot]"},
+        "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:3 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+      }
+    ]
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
     local out="" rc=0
-    out="$(FAIL_MINT_PERSONA="athena" RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once 2>&1)" || rc=$?
+    out="$(cd "$SANDBOX" && FAIL_MINT_PERSONA="athena" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
     if [ "$rc" -eq 0 ] && grep -qF "missing key for athena, skipping its rows" <<<"$out" \
        && ! grep -q "251" "$LAUNCHES" \
        && grep -qE "run\.sh 252 --as daedalus" "$LAUNCHES"; then
@@ -1248,6 +1420,7 @@ run_at15() {
     cat > "$FIXTURES/issue-300.json" <<'EOF'
 {
   "number": 300,
+  "title": "Issue 300",
   "state": "open",
   "labels": [{"name": "intent:new"}],
   "comments": []
@@ -1256,6 +1429,7 @@ EOF
     cat > "$FIXTURES/repos_evekhm_agentic-sdlc_issues_300.json" <<'EOF'
 {
   "number": 300,
+  "title": "Issue 300",
   "state": "open",
   "labels": [{"name": "intent:new"}]
 }
@@ -1264,20 +1438,44 @@ EOF
 []
 EOF
 
-    local out="" rc=0
-    out="$(RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once 2>&1)" || rc=$?
+    # Issue list fixture for work discovery contains only issue 300 (Decision D)
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 300,
+    "title": "Issue 300",
+    "state": "open",
+    "labels": [{"name": "intent:new"}],
+    "comments": []
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
 
-    local has_claim=0 has_launch=0 no_ledger=0
-    (grep -qE "POST comment 300.*Claim: athena \(poll-" "$WRITES" || grep -qE "athena.*300" "$CLAIMS") && has_claim=1
-    grep -qE "run\.sh 300 --as athena" "$LAUNCHES" && has_launch=1
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local out="" rc=0
+    out="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
+
+    local has_claim=0 single_launch=0 no_ledger=0 clean_worktree=0
+    grep -qE 'claim\.sh CLAIM_ACTOR=athena CLAIM_SESSION=poll-[0-9]+ 300( |$)' "$CLAIMS" && has_claim=1
+    if [ "$(wc -l < "$LAUNCHES")" -eq 1 ] && grep -qE '^run\.sh 300 --as athena$' "$LAUNCHES"; then
+        single_launch=1
+    fi
     if ! grep -q "loop-ledger" "$WRITES"; then
         no_ledger=1
     fi
+    local repo_status=""
+    repo_status="$("$REAL_GIT" -C "$REPO" status --porcelain | grep -vE '(scripts/placement/vm-local/poll\.sh|intent/251-e2e-chain/plan\.md|scripts/ci/tests/e2e_chain_test\.sh)' || true)"
+    if [ -z "$repo_status" ] && ! ls -d "$REPO/.claude/worktrees/athena-300"* >/dev/null 2>&1; then
+        clean_worktree=1
+    fi
 
-    if [ "$rc" -eq 0 ] && [ "$has_claim" -eq 1 ] && [ "$has_launch" -eq 1 ] && [ "$no_ledger" -eq 1 ]; then
-        pass "AT-15 (D5): first hop claimed and dispatched open intent:new issue with zero ledger writes"
+    if [ "$rc" -eq 0 ] && [ "$has_claim" -eq 1 ] && [ "$single_launch" -eq 1 ] && [ "$no_ledger" -eq 1 ] && [ "$clean_worktree" -eq 1 ]; then
+        pass "AT-15 (D5): first hop claimed and dispatched open intent:new issue with single launch, zero ledger writes, and clean worktree"
     else
-        fail "AT-15 (D5): poll.sh did not claim/dispatch open intent:new issue or wrote ledger row (rc=$rc claim=$has_claim launch=$has_launch no_ledger=$no_ledger)"
+        fail "AT-15 (D5): poll.sh did not claim/dispatch open intent:new issue or wrote ledger row (rc=$rc claim=$has_claim launch=$single_launch no_ledger=$no_ledger clean=$clean_worktree)"
     fi
 }
 run_at15
@@ -1302,7 +1500,7 @@ run_at17() {
     manual_count="$(grep -c 'odyssey `manual`' "$spec_doc" || true)"
     ladder_count="$(grep -c 'odyssey `ladder`' "$spec_doc" || true)"
 
-    if [ "$steps" -eq 7 ] && [ "$manual_count" -eq 0 ] && [ "$ladder_count" -eq 1 ]; then
+    if grep -qF "## Deployment status" "$spec_doc" && [ "$steps" -eq 7 ] && [ "$manual_count" -eq 0 ] && [ "$ladder_count" -eq 1 ]; then
         pass "AT-17 (D6, D8): docs/SPEC.md deployment status section and table updated"
     else
         fail "AT-17 (D6, D8): docs/SPEC.md missing 7-step checklist or odyssey ladder update (steps: $steps, manual: $manual_count, ladder: $ladder_count)"
@@ -1326,13 +1524,13 @@ run_at20() {
     fi
 
     reset_fixtures
-    cat > "$FIXTURES/issue-108.json" <<'EOF'
+    cat > "$FIXTURES/issue-4242.json" <<'EOF'
 {
-  "number": 108,
+  "number": 4242,
   "state": "open",
-  "title": "PR 108",
+  "title": "PR 4242",
   "labels": [{"name": "status:in-review"}],
-  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/108"},
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
   "comments": [
     {
       "user": {"login": "evekhm-argus-app[bot]"},
@@ -1341,15 +1539,15 @@ run_at20() {
   ]
 }
 EOF
-    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_108.json" <<'EOF'
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_4242.json" <<'EOF'
 {
   "head": {
-    "ref": "odyssey/107-fix",
+    "ref": "odyssey/4241-fix",
     "repo": {"full_name": "evekhm/agentic-sdlc"}
   }
 }
 EOF
-    cat > "$FIXTURES/comments-108.json" <<'EOF'
+    cat > "$FIXTURES/comments-4242.json" <<'EOF'
 [
   {
     "user": {"login": "evekhm-argus-app[bot]"},
@@ -1358,15 +1556,31 @@ EOF
 ]
 EOF
 
-    local lock_file="${TMPDIR:-/tmp}/poll-pr-108.lock"
+    cat > "$FIXTURES/pr-list.json" <<'EOF'
+[
+  {
+    "number": 4242,
+    "title": "PR 4242",
+    "state": "open",
+    "labels": [{"name": "status:in-review"}],
+    "headRefName": "odyssey/4241-fix"
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local lock_file="${TMPDIR:-/tmp}/poll-pr-4242.lock"
     rm -f "$lock_file"
 
     local rc1=0
-    RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once >/dev/null 2>&1 || rc1=$?
+    (cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc1=$?
 
     local has_launch1=0 no_claim=0
-    grep -qE "run\.sh 108 --as odyssey" "$LAUNCHES" && has_launch1=1
-    if [ ! -s "$CLAIMS" ] && ! grep -qE "POST comment 108.*Claim:" "$WRITES"; then
+    grep -qE "^run\.sh 4242 --as odyssey$" "$LAUNCHES" && has_launch1=1
+    if [ ! -s "$CLAIMS" ]; then
         no_claim=1
     fi
 
@@ -1375,20 +1589,19 @@ EOF
 
     # Simulate active lock
     touch "$lock_file"
-
     local rc2=0
-    RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once >/dev/null 2>&1 || rc2=$?
-    rm -f "$lock_file"
+    (cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc2=$?
 
     local lock_prevented=0
-    if [ "$rc2" -eq 0 ] && [ "$(cat "$LAUNCHES")" = "$launches_first" ]; then
+    if [ "$(cat "$LAUNCHES")" = "$launches_first" ]; then
         lock_prevented=1
     fi
+    rm -f "$lock_file"
 
-    if [ "$rc1" -eq 0 ] && [ "$has_launch1" -eq 1 ] && [ "$no_claim" -eq 1 ] && [ "$lock_prevented" -eq 1 ]; then
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$has_launch1" -eq 1 ] && [ "$no_claim" -eq 1 ] && [ "$lock_prevented" -eq 1 ]; then
         pass "AT-20 (D2): fix-round claim bypass and per-PR lock verified"
     else
-        fail "AT-20 (D2): poll.sh failed fix-round claim bypass or locking (rc1=$rc1 launch=$has_launch1 no_claim=$no_claim lock_prevented=$lock_prevented)"
+        fail "AT-20 (D2): poll.sh failed fix-round claim bypass or locking (rc1=$rc1 rc2=$rc2 launch=$has_launch1 no_claim=$no_claim lock_prevented=$lock_prevented)"
     fi
 }
 run_at20

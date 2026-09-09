@@ -145,7 +145,7 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 - **AT-18 (D7, Synthetic validation - operator precondition)**: Dedicated synthetic issue run verification: running `gh api repos/evekhm/agentic-sdlc/issues/<n>/comments --jq '.[].body | select(test("<!-- loop-ledger"))'` shows four `dispatch` rows and one `terminal` row; running `gh run list --workflow lifecycle.yml --branch main --limit 5 --json databaseId,conclusion` and `gh run list --workflow merge-gate.yml --branch main --limit 5 --json databaseId,conclusion` show all conclusions as `success`; and `gh issue view <n> --json labels --jq '.labels[].name'` outputs `status:in-review` with `in-progress` absent.
   - Mapped to: NOT RUN (operator precondition)
 - **AT-19 (D8)**: Pre-merge validation checks exit 0:
-  `BODY_FILE="$(mktemp)"; echo "Spec-impact: none - intent/** only; no behavior changes" > "$BODY_FILE"; bash scripts/ci/spec_check.sh origin/main "$BODY_FILE"; rm -f "$BODY_FILE"`
+  `BODY_FILE="$(mktemp)"; echo "Spec-impact: none - intent/** only, not a behavior-bearing path" > "$BODY_FILE"; bash scripts/ci/spec_check.sh origin/main "$BODY_FILE"; rm -f "$BODY_FILE"`
   and `bash scripts/ci/sanitize_check.sh`.
   - Mapped to: T9 (gates table pre-merge validation checks in Rule 9)
 - **AT-20 (D2)**: Hermetic fix-round claim bypass and locking: Under the stub, executing `scripts/placement/vm-local/poll.sh --once` on a fixture PR authored by odyssey at `status:in-review` with an unconsumed blocking review row launches `scripts/placement/vm-local/run.sh <pr> --as odyssey` and records zero calls to `scripts/ops/claim.sh`; a second `--once` execution while the lock exists launches nothing.
@@ -216,34 +216,34 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
   dispatch (AT-13).
 - Test: `bash scripts/ops/tests/work_test.sh` and `e2e_chain_test.sh` (AT-12, AT-13 turn green).
 
-### T6: Continuous Background Poller (D2, D4, D5, D8, AT-8, AT-14, AT-15, AT-20)
+### T6: Continuous Poller Implementation (D2, D4, D5, AT-8, AT-14, AT-15, AT-20)
 - Files: `scripts/placement/vm-local/poll.sh`
-- Decisions: D2, D4, D5, D8
+- Decisions: D2, D4, D5
 - Acceptance: AT-8, AT-14, AT-15, AT-20
-- Description: Implement executable poller script `scripts/placement/vm-local/poll.sh`.
-  Design details:
-  1. Modes: Supports `--once` for single-tick execution and continuous loop mode with a 30-second sleep interval.
-  2. Queue evaluation: Evaluates unconsumed `dispatch` ledger rows in issue threads matching
-     `^<!-- loop-ledger-row: dispatch rung:[0-9]+ head-oid:[0-9a-f]{40}`.
-     Poller observables verified by contract tests include token mint via `python3 scripts/auth/mint_app_token.py <persona>`,
-     claim comment creation via `scripts/ops/claim.sh` or logged as `POST comment <n> Claim: <persona> (poll-...`,
-     launch of `run.sh <issue> --as <persona>`, and skipping rows already claimed by another persona.
-  3. First hop intake: Scans open, unclaimed `intent:new` issues. Claims via `claim.sh` under minted persona
+- Description: Implement continuous VM poller in `scripts/placement/vm-local/poll.sh`:
+  1. Flag handling: `--once` executes a single pass and exits 0; default loop sleeps for polling interval.
+  2. Work discovery: discovers candidate work through label queries via GitHub API or CLI (`gh issue list --label <l> --state open` and `gh pr list --state open`); never hardcodes issue numbers.
+  3. Ledger consumption: Scans open issues for unconsumed `dispatch` rows in loop ledger comments. Verifies rung owner persona,
+     mints token, claims issue via `scripts/ops/claim.sh`, launches `run.sh <issue> --as <persona>`, and skips rows already claimed.
+  4. First hop intake: Scans open, unclaimed `intent:new` issues via label queries. Claims via `claim.sh` under minted persona
      token for `athena`, launches `run.sh <issue> --as athena`, and writes zero loop ledger rows (D5).
-  4. Mutex and claim handling: Claims an issue before launch via
+  5. Mutex and claim handling: Claims an issue before launch via
      `CLAIM_ACTOR=<persona> CLAIM_SESSION=poll-<pid> scripts/ops/claim.sh <n>` under
      `GH_TOKEN="$(python3 scripts/auth/mint_app_token.py <persona>)"` minted per claim.
      Skips already-claimed issues. `poll.sh` never releases a claim; claim release belongs to ladder advance
      in `lifecycle_advance.sh`. Restart idempotence follows design note P2 (lines 61-67): dead pids allow
      lock recovery and live pids preserve the active process.
-  5. Fix rounds: Consumes blocking review rows on pull requests authored by vm-local personas.
-     Launches `run.sh <pr> --as <author persona>`, bypassing `claim.sh`.
+  6. Fix rounds: Consumes blocking review rows on pull requests authored by vm-local personas.
+     Discovers candidate PRs via open PR list queries. Launches `run.sh <pr> --as <author persona>`, bypassing `claim.sh`.
      Guards duplicates via a per-PR lock file at `${TMPDIR:-/tmp}/poll-pr-<number>.lock` released when `run.sh` exits.
      A second `--once` tick while the lock exists launches nothing.
-  6. Missing credential handling: Runs preflight `python3 scripts/auth/mint_app_token.py <persona> --require-repo --quiet`.
+  7. Missing credential handling: Runs preflight `python3 scripts/auth/mint_app_token.py <persona> --require-repo --quiet`.
      If missing or unreadable, logs `missing key for <persona>, skipping its rows` and continues polling remaining personas.
-  7. Robustness: Empty or unparseable ledger comments log a diagnostic notice and exit 0.
+  8. Robustness: Empty or unparseable ledger comments log a diagnostic notice and exit 0.
      Passes `--as "$persona"` to all adapter invocations.
+  9. Test harness interception: In test suites, `scripts/ops` and `scripts/placement` are copied into the sandbox environment,
+     with `claim.sh` intercepted by a test stub recording `claim.sh CLAIM_ACTOR=... CLAIM_SESSION=... <n>` to `$CLAIMS`,
+     preserving worktree cleanliness.
 - Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-8, AT-14, AT-15, AT-20 turn green).
 
 ### T7: Supervisor Unit Configurations (D2, D8, AT-9, AT-10)
@@ -336,11 +336,25 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 21. `NB 8`: Quoted full `spec_check.sh` output line with declared reason in PR body.
 22. `NB 9`: Documented pre-existing `work_test.sh` failure at merge base in Gates table and PR body.
 
+### Round 4 Review Findings (Operator Decisions A-E, Smoke Items B1-B8, NB 1-5)
+1. `Decision A (R3-2, B3)`: Work discovery in stub. `gh` stub handles `gh issue list --label <l> --state open` and `gh pr list --state open` reading from `$FIXTURES/issue-list.json` and `$FIXTURES/pr-list.json`, evaluating `--json` and `--jq`. Stated in T6 that `poll.sh` discovers work via label queries and never hardcodes issue numbers. Reordered comments route above generic issue route.
+2. `Decision B (R2-1, B1, B5)`: Observable claim shape. `claim.sh` stubs log `claim.sh CLAIM_ACTOR=${CLAIM_ACTOR:-} CLAIM_SESSION=${CLAIM_SESSION:-} $*` to `$CLAIMS`. AT-8 and AT-15 assert this exact format; dropped `$WRITES` branch of disjunction. Added `title` field to issue fixtures 251, 252, and 300. In AT-8, set issue 252 claim author to `evekhm-daedalus-app[bot]`, stub exits 1 with `already claimed`, and scenario asserts no launch for 252.
+3. `Decision C (R3-1, B4)`: AT-14 persona alignment. Set issue 252 fixture to `status:build` with ledger `rung:3`, owned by `daedalus` under `personas/lifecycle.json`. Failed athena mint, asserted `run.sh 252 --as daedalus` launched and issue 251 did not launch.
+4. `Decision D`: Hardcoded refusal. In AT-15, `issue-list.json` carries issue 300 only; scenario asserts `$LAUNCHES` contains one line naming 300.
+5. `Decision E (R3-3, R3-4, NB 1)`: AT-4 base status. Documented AT-4 as green at base by construction (pure negative predicate asserting two log lines already printed and absences holding vacuously before D1). Gates Table records RED expectation as 15 of 16 RED at build rung with AT-4 green by construction.
+6. `Smoke B6`: AT-3 evaluation order. Evaluated `pass_a` immediately after sub-case A before `reset_fixtures` wipes state; evaluated `pass_b` after sub-case B.
+7. `Smoke B7`: AT-19 line 148 restoration. Restored verbatim marker `Spec-impact: none - intent/** only, not a behavior-bearing path`.
+8. `Smoke B8`: PR body declaration. Added `Spec-impact:` line to PR body and verified clean zero exit on `spec_check.sh origin/main`.
+9. `Smoke NB 2`: Anchored `-k` regex in `should_run` (`grep -qE "^($FILTER)( |$)" <<<"$1"`).
+10. `Smoke NB 3`: Sandbox interception. Copied `scripts/ops` and `scripts/placement` into `$SANDBOX/scripts`, placed claim stub at `$SANDBOX/scripts/ops/claim.sh`, ran `poll.sh` from sandbox, and asserted worktree cleanliness.
+11. `Smoke NB 4`: AT-17 section check. Added check for `grep -qF "## Deployment status"` in living spec.
+12. `Smoke NB 5`: Plan synthetic git range documentation. Documented three synthetic git ranges used by `get_range`.
+
 ## Gates Table
 
 | Gate / Test Suite | Command | Scope | Rung Status |
 |---|---|---|---|
-| Contract Suite | `bash scripts/ci/tests/e2e_chain_test.sh` | Acceptance AT-1 to AT-10, AT-12 to AT-15, AT-17, AT-20 | FAIL (RED at build rung; 1 passed, 15 failed out of 16 run) |
+| Contract Suite | `bash scripts/ci/tests/e2e_chain_test.sh` | Acceptance AT-1 to AT-10, AT-12 to AT-15, AT-17, AT-20 | FAIL (15 of 16 RED at build rung, AT-4 green by construction; 1 passed, 15 failed out of 16 run) |
 | Advancer Suite | `bash scripts/ci/tests/lifecycle_advance_test.sh` | Lifecycle state transitions | PASS |
 | Work Suite | `bash scripts/ops/tests/work_test.sh` | Dispatch and stage resolution | FAIL (pre-existing failure at merge base: D8 harness print mismatch, fixed in T5) |
 | Claim Suite | `bash scripts/ops/tests/claim_test.sh` | Mutex and claim validation | PASS |
@@ -348,6 +362,8 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 | Sanitize Gate | `bash scripts/ci/sanitize_check.sh` | Security and secret scan | PASS |
 | Spec Gate | `BODY_FILE="$(mktemp)"; echo "Spec-impact: none - contract tests run by no workflow until #246 wires them; no behavior changes" > "$BODY_FILE"; bash scripts/ci/spec_check.sh origin/main "$BODY_FILE"; rm -f "$BODY_FILE"` | Living spec impact check | PASS |
 | Shellcheck | `shellcheck -S warning scripts/ci/tests/e2e_chain_test.sh` | Shell script static analysis | PASS |
+
+Note: AT-4 is green at the base commit by construction (pure negative predicate asserting two log lines already printed and absences that hold vacuously before D1).
 
 ### NOT RUN List (Operator Preconditions)
 
