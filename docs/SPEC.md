@@ -577,20 +577,20 @@ Tests: `scripts/ops/tests/session_spend_test.sh`.
 session from a number (#36, `intent/36-dispatch/`). Deterministic
 bash + `gh` + `jq`, no model call: the tracker's labels, the merged
 folder layout and three committed data files are the whole input, so
-the same number always resolves the same way. It resolves a pull
-request to its issue by a closing keyword and a same-repo `#<n>` in
-the body — any of the ones GitHub honours (`close`, `fix`, `resolve`
-and their `-s`/`-d` forms, case-insensitively), with two distinct
-references an exit 1 naming both rather than a guess — and then by
-the `<actor>/<n>-<slug>` branch name; a pull request that resolves to
-no issue exits 2 with the condition named (#216); the stage from the single
-`status:*` label — or the first rung when the issue is `intent:new` —
-through `personas/lifecycle.json` (`personas.resume`); the owners
-from the persona sources; the folder by reusing `intent/<n>-*/` when
-one exists and otherwise deriving a slug from the title (cut at the
-first `:` or `;`, lowercased, runs of other characters to `-`, ≤24
-characters at a word boundary); the branch `<persona>/<n>-<slug>`;
-and the harness from `config/deployments.yaml`. There is deliberately
+the same number always resolves the same way. A pull request resolves
+to its issue by unioning body references (`Closes #n`, `Fixes #n`,
+`Resolves #n`, `Refs #n`, `References #n`), `closingIssuesReferences`
+(in merge gate), and `<actor>/<n>-<slug>` head branch. If the union
+contains more than one issue, execution halts as corrupted input without
+guessing (#298). If the union is empty, merge gate skips with exit 0
+(unlinked PR outside ladder), while `work.sh` refuses with exit 2 (#216,
+#298); the stage from the single `status:*` label — or the first rung
+when the issue is `intent:new` — through `personas/lifecycle.json`
+(`personas.resume`); the owners from the persona sources; the folder by
+reusing `intent/<n>-*/` when one exists and otherwise deriving a slug
+from the title (cut at the first `:` or `;`, lowercased, runs of other
+characters to `-`, ≤24 characters at a word boundary); the branch
+`<persona>/<n>-<slug>`; and the harness from `config/deployments.yaml`. There is deliberately
 no flag naming a stage, folder, artifact or branch — one would let a
 session work a stage the labels say is not current. Preflight verifies
 the environment can support a run — GitHub read access and a base
@@ -1074,15 +1074,20 @@ through `scripts/ops/execution.py --loop <key>`:
 - `max_cost_usd_per_issue` (number): the summed cost of those rows at
   which the same refusal fires.
 
-`scripts/ci/merge_gate.sh <pr>` is the one merger. It runs from
-`.github/workflows/merge-gate.yml` on a closed trigger list (D3) and
-merges only when all eleven D5 conjuncts hold at the pull request's
-current head, among them: both reviewers reviewed that head (Atlas may
-carry forward under D7), the blocking set is empty, the consensus axis
-is agreed, neither `hold` nor `blocked` is present, the merger is a
-different identity from the author, the target rung outranks every rung
-the loop ledger records, and the ledger's head marker is present. With
-the flag off the same evaluation runs and nothing is written.
+`scripts/ci/merge_gate.sh <pr>` is the one merger. Mutating jobs (record,
+gate) run from `.github/workflows/merge-gate.yml` on main-ref events under
+`environment: themis` (#298). Pull request evaluation runs in a dedicated
+`.github/workflows/merge-gate-evaluate.yml` workflow with default token in
+dry-run mode, creating a single `merge-gate (evaluate)` check run and leaving
+zero skipped checks on the PR head commit (#298). Concurrency in `ci-gates.yml`
+is keyed per-commit SHA to eliminate cancel-in-progress races between
+successive pushes (#298). The gate merges only when all eleven D5 conjuncts
+hold at the pull request's current head, among them: both reviewers reviewed
+that head (Atlas may carry forward under D7), the blocking set is empty,
+the consensus axis is agreed, neither `hold` nor `blocked` is present, the
+merger is a different identity from the author, the target rung outranks every
+rung the loop ledger records, and the ledger's head marker is present. With the
+flag off the same evaluation runs and nothing is written.
 
 Before merge evaluation executes, `.github/workflows/merge-gate.yml` runs
 a dedicated `record` job (`scripts/ci/review_recorder.sh <pr>`) ahead of `gate`
@@ -1105,11 +1110,16 @@ rather than reconstructed from a required-checks list: `CLEAN` or
 `UNSTABLE` with every check run and commit status on the head other
 than the gate's own — excluded by run identity
 (`checkSuite.workflowRun.databaseId`), never by name — passing, and at
-least one such check existing. `UNKNOWN` is retried up to three times
-before it is treated as unevaluable; `BEHIND` is the one false conjunct
-that escalates, with reason-code `behind`, gated by `autonomous_merge`
-(D18 governs it like any other escalation) and self-clearing when a
-later read finds the head no longer behind (D24, D27, D28).
+least one such check existing. Check roll-up evaluation queries `databaseId`
+on `CheckRun`. Foreign check runs with the same name are deduplicated by
+selecting the entry with the highest `databaseId`, ensuring superseded runs
+(such as cancelled checks replaced by successful retries) do not block
+conjunct (2) (#298). The merge gate excludes its own run by workflow run
+databaseId. `UNKNOWN` is retried up to three times before it is treated
+as unevaluable; `BEHIND` is the one false conjunct that escalates, with
+reason-code `behind`, gated by `autonomous_merge` (D18 governs it like any
+other escalation) and self-clearing when a later read finds the head no
+longer behind (D24, D27, D28).
 
 `scripts/ci/escalate.sh <issue> --reason <code> --head <oid>` is the
 one escalation writer (D9): it swaps `status:*` for

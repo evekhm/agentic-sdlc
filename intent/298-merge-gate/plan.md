@@ -323,10 +323,18 @@ In `scripts/ops/lib/github.sh`:
            | grep -Eo '[0-9]+$' | sort -un || true
    }
    ```
-2. In `resolve_issue()` (lines 125-142), rewrite issue extraction to union body references and branch name:
+2. In `resolve_issue()` (lines 125-142), rewrite issue extraction to union body references and branch name, preserving the distinct error message when multiple closing keywords are present to satisfy existing contract tests:
    ```bash
        branch_issue "$number" || true
        local body_refs branch_refs union union_count
+       closes="$(closing_refs "$(jq -r '.body // ""' <<<"$view")")"
+       closes_count=0
+       [ -z "$closes" ] || closes_count="$(grep -c . <<<"$closes")"
+       if [ "$closes_count" -gt 1 ]; then
+           die "PR #$number closes more than one issue: $(sed 's/^/#/' <<<"$closes" \
+               | tr '\n' ' ')— dispatch one of them by its own number"
+       fi
+
        body_refs="$(issue_refs "$(jq -r '.body // ""' <<<"$view")")"
        branch_refs=""
        [ -z "$BRANCH_ISSUE" ] || branch_refs="$BRANCH_ISSUE"
@@ -342,7 +350,6 @@ In `scripts/ops/lib/github.sh`:
        fi
 
        ISSUE="$union"
-       closes="$(closing_refs "$(jq -r '.body // ""' <<<"$view")")"
        if grep -qxE "$ISSUE" <<<"$closes"; then
            RESOLVED_VIA="Closes #$ISSUE in the body"
        elif grep -qxE "$ISSUE" <<<"$body_refs"; then

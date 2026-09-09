@@ -532,6 +532,31 @@ pr 124 "Closes #108, and again: closes #108." "not-a-work-branch"
 run 0 "D9: the same issue named twice is still one issue" -- 124
 has "resolved from #124 via Closes #108" "D9: distinct numbers, not occurrences"
 
+banner "D5/D8 a PR with Refs #n in body resolves to its issue"
+pr 130 "Refs #108" "ops/flip-flag"
+run 0 "D5/D8: 'Refs #108' resolves the issue on an operator branch" -- 130
+has "resolved from #130 via Refs #108" "D5/D8: Refs #n resolves the issue"
+has "==> #108" "D5/D8: the referenced issue is the unit of work"
+
+banner "D5 review dispatch on ladder PR with Refs #n in body"
+issue 131 open "status:build" "Ladder issue"
+pr 132 "Refs #131" "athena/131-slug"
+run 0 "D5: review dispatch on ladder PR with Refs #131 succeeds" -- 132 --as argus
+has "stage:    review" "D5: reviewer dispatches at review stage"
+has "#131" "D5: resolves to issue 131"
+
+banner "D6 a PR linking conflicting issues fails as corrupted input"
+pr 133 "Refs #100" "odyssey/200-slug"
+run 1 "D6: conflicting body and branch issues exits 1" -- 133
+has "links more than one issue" "D6: conflicting issues fails as corrupted input"
+has "#100" "D6: names body issue"
+has "#200" "D6: names branch issue"
+
+banner "D6/D8 an unlinked PR on an operator branch exits 2"
+pr 134 "No issue references anywhere" "ops/no-issue"
+run 2 "D6/D8: unlinked operator branch exits 2" -- 134
+has "refused: cannot resolve PR #134 to an issue" "D6/D8: refusal condition named"
+
 banner "D5(a)/D9 hold on the PULL REQUEST refuses too (#50, Atlas AT-1)"
 # Resolving a PR to its issue must not throw the PR's own labels away:
 # the circuit breaker is placed where the operator is looking, and on a

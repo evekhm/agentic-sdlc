@@ -1,0 +1,49 @@
+# Merge Gate Evaluate (#298, D1): read-only dry-run evaluation on pull request events.
+# Runs with the default token, read-only, DRY_RUN=1. Creates exactly one check run
+# `merge-gate (evaluate)` with conclusion SUCCESS. Zero skipped check runs on PR head.
+name: Merge Gate Evaluate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  evaluate:
+    name: merge-gate (evaluate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      checks: read
+      statuses: read
+    steps:
+      - name: Fail closed unless the base is the default branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$BASE_REF" != "main" ]; then
+            echo "::error::merge-gate: the pull request's base is '$BASE_REF'; only main is gated (D5 conjunct 1)"
+            exit 1
+          fi
+
+      - name: Checkout the default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Evaluate the eleven conjuncts (dry run, no writes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: "1"
+          TARGET: ${{ github.event.pull_request.number }}
+        run: |
+          if [ ! -f scripts/ci/merge_gate.sh ]; then
+            echo "scripts/ci/merge_gate.sh is not on main — nothing to evaluate"
+            exit 0
+          fi
+          bash scripts/ci/merge_gate.sh "$TARGET"
