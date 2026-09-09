@@ -3,16 +3,14 @@
 # evaluates D5's eleven conjuncts and is runnable locally by the same
 # command this file runs.
 #
-# Two jobs, one script. `evaluate` runs on pull_request events with the
-# default token, read-only, DRY_RUN=1: a same-repo pull_request run
-# executes the workflow file from the pull request's head, so nothing
-# that can write or mint the merge actor's token may run on that
-# trigger. `gate` runs on the other four triggers, which execute the
-# workflow file from the default branch, and it alone holds the five
-# permissions (acceptance 19) and the App credential. The credential is
-# scoped to the `themis` Environment whose deployment-branch policy
-# admits `main` only — an operator step named in PR #257 — so a workflow
-# file on any other branch cannot mint it.
+# Three jobs. `evaluate` runs on pull_request events with the default
+# token, read-only, DRY_RUN=1: a same-repo pull_request run executes the
+# workflow file from the pull request's head, so nothing that can write
+# or mint the merge actor's token may run on that trigger. `record` and
+# `gate` run on the other four triggers, which execute the workflow file
+# from the default branch, under the `themis` Environment whose
+# deployment-branch policy admits `main` only. `record` maintains the
+# consensus ledger, and `gate` evaluates merge readiness.
 #
 # Themis (`<owner>-themis-app`) holds the merge-actor role; it is a
 # system actor with no prompt, harness or goals, and the six personas in
@@ -25,6 +23,7 @@ name: Merge Gate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened]
   check_suite:
     types: [completed]
   status:
@@ -79,9 +78,73 @@ jobs:
           fi
           bash scripts/ci/merge_gate.sh "$TARGET"
 
+  record:
+    name: merge-gate (record)
+    if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: themis
+    concurrency:
+      group: merge-gate
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+      - name: Checkout the default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Mint the merge actor's token
+        id: themis-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.THEMIS_APP_ID }}
+          private-key: ${{ secrets.THEMIS_APP_PRIVATE_KEY }}
+
+      - name: Resolve the pull request and record review consensus
+        env:
+          GH_TOKEN: ${{ steps.themis-token.outputs.token }}
+          THEMIS_TOKEN: ${{ steps.themis-token.outputs.token }}
+          GITHUB_EVENT_SENDER_LOGIN: ${{ github.event.sender.login }}
+          EVENT_NAME: ${{ github.event_name }}
+          CS_PR: ${{ github.event.check_suite.pull_requests[0].number }}
+          CS_SHA: ${{ github.event.check_suite.head_sha }}
+          STATUS_SHA: ${{ github.event.sha }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          DISPATCH_PR: ${{ github.event.inputs.pull_request }}
+        run: |
+          case "$EVENT_NAME" in
+            check_suite)
+              TARGET="$CS_PR"
+              [ -n "$TARGET" ] || TARGET="$(gh api "repos/$GITHUB_REPOSITORY/commits/$CS_SHA/pulls" -q '.[0].number' 2>/dev/null || true)";;
+            status)
+              TARGET="$(gh api "repos/$GITHUB_REPOSITORY/commits/$STATUS_SHA/pulls" -q '.[0].number' 2>/dev/null || true)";;
+            issue_comment)
+              TARGET="$ISSUE_NUMBER";;
+            workflow_dispatch)
+              TARGET="$DISPATCH_PR";;
+            *)
+              TARGET="";;
+          esac
+          if [ -z "$TARGET" ] || [ "$TARGET" = "null" ]; then
+            echo "no pull request behind this $EVENT_NAME event — nothing to record"
+            exit 0
+          fi
+          if [ ! -f scripts/ci/review_recorder.sh ]; then
+            echo "scripts/ci/review_recorder.sh is not on main — nothing to record"
+            exit 0
+          fi
+          bash scripts/ci/review_recorder.sh "$TARGET"
+
   gate:
     name: merge-gate
-    if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+    needs: [record]
+    if: ${{ always() && github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: themis

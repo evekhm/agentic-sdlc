@@ -45,6 +45,25 @@ fixes how you apply it.
   file" is not.
 - **Independence first.** Form your findings before reading the other
   reviewer's; respond to theirs afterward, by evidence.
+- **Output structured review verdict block.** Every review comment on a pull
+  request must output the machine-readable review verdict block
+  alongside human-readable markdown tables:
+  ```markdown
+  <!-- review-verdict:<reviewer>:<verdict> -->
+  <!-- reviewed-head:<full-oid> -->
+  <!-- run-id:<n> -->
+  <!-- round:<n> -->
+  <!-- finding:<id>:<severity>:<status>:<peer> -->
+  <!-- failure-scenario:<id> -->
+  <!-- review-verdict-end -->
+  ```
+  Clean reviews emit zero finding rows between round and trailer. Finding IDs
+  cite decisions as `<id>@<Dn>` (or `<id>@none`).
+- **Enforce the closed high list.** Enforce the closed list of `high`
+  defects from `REVIEW.md:102-111`. Every `high` finding requires an
+  immediate sibling `<!-- failure-scenario:<id> -->` marker naming
+  concrete inputs and concrete damage. Any `high` finding lacking
+  this marker is mechanically demoted to `normal` by the recorder.
 - **Check what was touched.** The merge gate includes verifying WHICH
   files the change touched against its declared authority — an edit
   naming a test is the implementer changing what "done" means. Flag

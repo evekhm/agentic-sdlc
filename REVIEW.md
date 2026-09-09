@@ -16,20 +16,17 @@ agent regardless of role is in [AGENTS.md](AGENTS.md); why the system
 exists and who the personas are is in [INTENT.md](INTENT.md); what
 the system does today is in [docs/SPEC.md](docs/SPEC.md).
 
-**Automation status.** The enforcement points below name a
-*recorder*: the trusted posting step that validates reviewer output
-against a schema and performs every GitHub write itself. No recorder
-exists in this repository yet — it ports with issues #8 and #9 — so
-every rule here is currently prompt-enforced with a human as the
-backstop. The rules are stated normatively anyway, so the ported code
-has exactly one target.
+**Automation status.** The enforcement points below name the
+recorder (`scripts/ci/review_recorder.sh`), running in the `record` job
+of `.github/workflows/merge-gate.yml`. The recorder is the trusted
+step that validates reviewer output against schema and performs every
+GitHub write directly.
 
 ## The two reviewers
 
 - **Argus** (`evekhm-argus-app[bot]`) — the event-driven reviewer. Reviews on
   PR open, on pushes to a PR branch, and on mention. Owns the
-  findings ledger and, once the automation lands, the recorder that
-  writes it.
+  findings ledger and emits the review blocks that the recorder writes.
 - **Atlas** (`evekhm-atlas-app[bot]`) — the independent second opinion,
   the reviewer that makes consensus mean something. Runs round 1 in
   full and afterwards only where the protocol requires it.
@@ -115,7 +112,7 @@ including every class that stretches rounds: doc-number drift, prose
 precision, same-class-elsewhere instances outside the diff, missing
 polish on error paths that gate neither money nor security.
 
-Enforcement (recorder, not prompt — ports with #8/#9):
+Enforcement (recorder execution via scripts/ci/review_recorder.sh):
 
 - Severity must be one of the four enum values; anything else fails
   validation.
@@ -124,7 +121,8 @@ Enforcement (recorder, not prompt — ports with #8/#9):
   recorded as `normal`, and the demotion is noted in the ledger row —
   loudly, never silently.
 - A human can retier any finding with one comment verb
-  (`@argus retier R2-1 normal`); the recorder records the override
+  (`@argus retier <id> <severity>` or `@atlas retier <id> <severity>`,
+  e.g. `@argus retier R2-1 normal`); the recorder records the override
   and recomputes labels. Human overrides are not debatable by either
   reviewer.
 
@@ -183,8 +181,8 @@ row, then closes the ledger
   unverifiable applier is refused). Manual dispatch is always
   allowed. A daily run brake and a dispute cap of three exchanges sit
   beside it. The funnel is what the gate was missing: the gate bounds
-  round count, the funnel bounds round *scope*. (Gate automation
-  ports with #8/#9.)
+  round count, the funnel bounds round *scope*. The recorder
+  (`scripts/ci/review_recorder.sh`) enforces the funnel on every review round.
 
 Why both bounds are needed, from the predecessor repo
 (`agentic-experiments-lab`): with an automated fixer as PR author and
@@ -221,9 +219,31 @@ that caps the bill.
 - Pending age belongs to the row, not to the last review marker: a
   marker's age resets on every push, so a PR receiving a commit every
   23 hours would never trip a 24-hour stale-peer alert.
-- The head a review refers to is carried by a machine marker
-  (`Reviewed-head: <full-oid>`) that the deterministic passes match
-  on. The human-facing signature never replaces that marker.
+- The head a review refers to and machine-readable review findings are
+  carried in a structured review verdict block emitted alongside the
+  human-facing markdown review tables:
+
+  ```markdown
+  <!-- review-verdict:<reviewer>:<verdict> -->
+  <!-- reviewed-head:<full-oid> -->
+  <!-- run-id:<n> -->
+  <!-- round:<n> -->
+  <!-- finding:<id>:<severity>:<status>:<peer> -->
+  <!-- failure-scenario:<id> -->
+  <!-- review-verdict-end -->
+  ```
+
+  Where:
+  - `<reviewer>` is `argus` or `atlas`.
+  - `<verdict>` is `clean` or `findings`. A clean review emits zero
+    `<!-- finding:... -->` lines between the round line and the
+    `<!-- review-verdict-end -->` trailer.
+  - `<full-oid>` is the full 40-hex commit SHA of the reviewed head.
+  - `<run-id>` is the integer Actions run ID from `.github/workflows/unattended.yml`.
+  - `<round>` is the integer review round counter (`1`, `2`, `3`, ...).
+  - Each finding line matches `^<!-- finding:([A-Za-z0-9@-]+):(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none) -->$`.
+  - Findings citing spec decisions use format `<id>@<Dn>` (e.g. `R1-1@D4`) or `<id>@none` when uncited.
+  - Each `high` finding must be immediately accompanied by its sibling marker `<!-- failure-scenario:<id> -->`.
 - Both reviewers are stateless between runs. Every conversational
   comment is therefore self-contained: the finding IDs, the head it
   refers to, and the evidence. The thread is the only memory.
@@ -299,7 +319,9 @@ IDs rather than to diff hunks:
   concerns (`Decision: D4`). A finding about behavior no Decision
   covers carries `Decision: none` — and that absence is itself worth
   reading, because unspecified behavior in an implementation PR is
-  usually a missed ambiguity.
+  usually a missed ambiguity. Findings cite decisions in machine
+  markers using format `<id>@<Dn>` (e.g. `R1-1@D4`) or `<id>@none`
+  when uncited.
 - Peer verdicts are recorded **per Decision ID**, not per diff hunk.
   When both reviewers file findings against the same Decision, they
   reconcile into one verdict on that Decision instead of two parallel
@@ -399,7 +421,7 @@ the unbounded loop.
 
 ## Dispatch policy
 
-Automation ports with #8/#9; the rules bind it when it lands.
+Automation runs in the record job via scripts/ci/review_recorder.sh; the rules bind it directly.
 
 - Reviews are dispatched by: PR opened, push to a PR branch (through
   the budget gate), an explicit reviewer mention, or manual dispatch.
@@ -438,11 +460,10 @@ funnel exists.
 ## Enforcement map
 
 Prompts state the rules so the reviewers aim correctly; the recorder
-enforces them so a drifting model cannot break the budget. **Every
-rule must exist in code before a prompt may describe it in the
-present tense** — a prompt that describes unbuilt behavior sends the
-agent's output into a void. Until the recorder lands (#8/#9), the
-rows marked *recorder* are prompt-enforced with a human backstop.
+(`scripts/ci/review_recorder.sh`) enforces them in the `record` job so
+a drifting model cannot break the budget. Every rule exists in code
+before a prompt describes it in the present tense. The rows marked
+*recorder* are enforced by `scripts/ci/review_recorder.sh`.
 
 - Severity enum, the `high` failure-scenario requirement, and loud
   demotion — *recorder*, through schema validation.
@@ -453,8 +474,8 @@ rows marked *recorder* are prompt-enforced with a human backstop.
   *recorder* label derivation.
 - Decision-ID keying of findings and verdicts — *recorder*, against
   the spec's Decisions table.
-- The single post-merge follow-up issue — *recorder*, on the merge or
-  close event.
+- The single post-merge follow-up issue: *merge actor* (#64 D16), on
+  the merge event.
 - Budget gate, daily brake, dispute cap — deterministic gates that
   run ahead of any model call.
 - Round-1 thoroughness, verification scope discipline, verdict format

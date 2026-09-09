@@ -122,6 +122,15 @@ ensure_label "review:1" "C2F0EA" "Review iteration 1"
 ensure_label "review:2" "76D7C4" "Review iteration 2"
 ensure_label "review:3" "117A65" "Review iteration 3 — sets status:review-stuck"
 
+# Review and consensus labels derived by Themis from the findings ledger (#267).
+ensure_label "argus:findings"    "D93F0B" "Open blocking findings (security or high) on the pull request"
+ensure_label "argus:suggestions" "C5DEF5" "Open non-blocking findings (normal or suggestion) on the pull request"
+ensure_label "consensus:agreed"  "0E8A16" "All security findings agreed and no disputes on blocking rows"
+ensure_label "consensus:pending" "FBCA04" "Security findings awaiting peer review concurrence"
+ensure_label "consensus:disputed" "B60205" "Active dispute on one or more blocking findings"
+ensure_label "review:merge-ready" "0E8A16" "No open blocking findings, consensus agreed, reviewed at current head"
+ensure_label "review:verifying"  "1D76DB" "Open blocking findings exist and pull request head is newer than reviewed head"
+
 if [ "$LABELS_ONLY" -eq 1 ]; then
   echo "==> Done (--labels-only). No issue was read, filed, or pinned."
   exit 0
