@@ -68,6 +68,7 @@ done
 NUMBER=""
 AS=""
 BODY_FILE=""
+ADD_LABEL=""
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage; exit 0 ;;
@@ -79,6 +80,10 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || die "--body-file needs a path"
             BODY_FILE="$2"; shift 2 ;;
         --body-file=*) BODY_FILE="${1#--body-file=}"; shift ;;
+        --add-label)
+            [ "$#" -ge 2 ] || { echo "post.sh: --add-label accepts only deep-review on a pull request" >&2; exit 2; }
+            ADD_LABEL="$2"; shift 2 ;;
+        --add-label=*) ADD_LABEL="${1#--add-label=}"; shift ;;
         --body|--body=*)
             die "the body is always a file: use --body-file <path> (D6)" ;;
         -*) usage >&2; die "unknown flag '$1'" ;;
@@ -96,9 +101,17 @@ case "$AS" in
     *[!a-z-]*) die "--as '$AS' is not a persona name" ;;
 esac
 [ -f "$PERSONA_DIR/$AS.yaml" ] || die "no persona source at personas/$AS.yaml"
-[ -n "$BODY_FILE" ] || die "--body-file <path> is required"
-[ -r "$BODY_FILE" ] || die "cannot read the body file $BODY_FILE"
-[ -s "$BODY_FILE" ] || die "the body file $BODY_FILE is empty; there is nothing to post"
+
+if [ -n "$ADD_LABEL" ] && [ "$ADD_LABEL" != "deep-review" ]; then
+    echo "post.sh: --add-label accepts only deep-review on a pull request" >&2
+    exit 2
+fi
+
+[ -n "$BODY_FILE" ] || [ -n "$ADD_LABEL" ] || die "either --body-file <path> or --add-label <label> is required"
+if [ -n "$BODY_FILE" ]; then
+    [ -r "$BODY_FILE" ] || die "cannot read the body file $BODY_FILE"
+    [ -s "$BODY_FILE" ] || die "the body file $BODY_FILE is empty; there is nothing to post"
+fi
 
 # --- The hold set (D14) ---------------------------------------------------------
 # The target, plus — for a pull request — every issue it closes. Built
@@ -108,8 +121,14 @@ target_view=""
 target_view="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER")" \
     || die "cannot read #$NUMBER from $GITHUB_REPO"
 
+is_pr="$(jq -r 'if .pull_request then "pr" else "issue" end' <<<"$target_view")"
+if [ -n "$ADD_LABEL" ] && [ "$is_pr" != "pr" ]; then
+    echo "post.sh: --add-label accepts only deep-review on a pull request" >&2
+    exit 2
+fi
+
 HOLD_SET=( "$NUMBER" )
-if [ "$(jq -r 'if .pull_request then "pr" else "issue" end' <<<"$target_view")" = "pr" ]; then
+if [ "$is_pr" = "pr" ]; then
     closes="$(closing_refs "$(jq -r '.body // ""' <<<"$target_view")")"
     if [ -n "$closes" ]; then
         # EVERY closing reference, not the first: work.sh refuses to
@@ -144,38 +163,28 @@ done
 # `-F body=@<path>` hands gh the file: the body never becomes an
 # argument, a shell variable or a log line. GH_TOKEN is read by gh from
 # the environment and is not referenced here at all.
-response=""
-response="$(gh api -X POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" \
-    -F "body=@$BODY_FILE")" \
-    || die "the comment on #$NUMBER was not posted"
+if [ -n "$BODY_FILE" ]; then
+    response=""
+    response="$(gh api -X POST "repos/$GITHUB_REPO/issues/$NUMBER/comments" \
+        -F "body=@$BODY_FILE")" \
+        || die "the comment on #$NUMBER was not posted"
 
-# --- Who actually posted (Argus R1-3) --------------------------------------------
-# `--as` names the persona; GH_TOKEN decides the author. Nothing in this
-# script can make the second follow the first, so the least it can do is
-# refuse to CLAIM the first when the second disagrees: a run log reading
-# "posted: #97 as argus" over a comment written by some other App is a
-# false attribution, and the review record is exactly the thing that
-# must not lie about who said what.
-#
-# The check is after the write, not before it, because there is no read
-# that answers "who am I?" for the credential this script runs on: an
-# App INSTALLATION token is not a user, `GET /user` answers 403 for it,
-# and `GET /app` answers about the App the JWT signed for, not about the
-# installation token in GH_TOKEN — a pre-write check would either be a
-# different question or a second minting path. The POST response's
-# `.user.login` is the authoritative answer, and it costs no extra call.
-#
-# A mismatch is a 1, not a refusal: the comment exists, under the wrong
-# name, and someone has to delete it. The URL is printed for exactly
-# that. When personas/<persona>.yaml names no identity the check is
-# skipped rather than guessed — the convention is not a fact.
-expected="$(sed -n '/^authority:/,/^[^[:space:]#]/p' "$PERSONA_DIR/$AS.yaml" \
-    | sed -n 's/^[[:space:]][[:space:]]*identity:[[:space:]]*//p' \
-    | head -1 | tr -d '"' | sed 's/[[:space:]]*$//')"
-actual="$(jq -r '.user.login // ""' <<<"$response")"
-url="$(jq -r '.html_url // ""' <<<"$response")"
-echo "$url"
-if [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
-    die "the comment on #$NUMBER was posted by '$actual', but --as says '$AS', whose personas/$AS.yaml names '$expected'; GH_TOKEN does not belong to that persona. Delete $url and re-run with the right credential"
+    # --- Who actually posted (Argus R1-3) --------------------------------------------
+    expected="$(sed -n '/^authority:/,/^[^[:space:]#]/p' "$PERSONA_DIR/$AS.yaml" \
+        | sed -n 's/^[[:space:]][[:space:]]*identity:[[:space:]]*//p' \
+        | head -1 | tr -d '"' | sed 's/[[:space:]]*$//')"
+    actual="$(jq -r '.user.login // ""' <<<"$response")"
+    url="$(jq -r '.html_url // ""' <<<"$response")"
+    echo "$url"
+    if [ -n "$expected" ] && [ -n "$actual" ] && [ "$expected" != "$actual" ]; then
+        die "the comment on #$NUMBER was posted by '$actual', but --as says '$AS', whose personas/$AS.yaml names '$expected'; GH_TOKEN does not belong to that persona. Delete $url and re-run with the right credential"
+    fi
+    echo "posted: #$NUMBER as $AS${actual:+ ($actual)}"
 fi
-echo "posted: #$NUMBER as $AS${actual:+ ($actual)}"
+
+if [ -n "$ADD_LABEL" ]; then
+    gh api -X POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" \
+        -f "labels[]=deep-review" >/dev/null \
+        || die "the label on #$NUMBER was not applied"
+    echo "labelled: #$NUMBER with $ADD_LABEL as $AS"
+fi
