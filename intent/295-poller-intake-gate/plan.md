@@ -406,3 +406,15 @@ The following files are strictly prohibited from modification:
 Note: At the build rung, AT-20, AT-21, and AT-22 in `e2e_chain_test.sh` fail
 cleanly because the implementation code in `poll.sh` and `execution.py` has not
 yet been introduced. No errors or broken test setups occur.
+
+---
+
+## Implementation Sync
+
+Implemented by Odyssey under issue #295 without deviations:
+- Tasks T1–T8 executed exactly as specified.
+- Master autonomy gate idles queues when `loop.autonomous_merge` is false (D2).
+- First-hop intake gated on `intake:auto` and capped by `max_concurrent_first_hops` (D3, D4).
+- Lock and consumption key paths relocated to `POLL_STATE_DIR` without `/tmp` access (D5).
+- Fix-round triggers strictly isolate suffixed reviewer App logins `evekhm-argus-app[bot]` and `evekhm-atlas-app[bot]` (D6).
+- All 18 contract scenarios in `e2e_chain_test.sh` pass.

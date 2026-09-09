@@ -35,6 +35,7 @@ loop:
   autonomous_merge: true
   max_rung_dispatches_per_issue: 12
   max_cost_usd_per_issue: 50.00
+  max_concurrent_first_hops: 1
 
 personas:
   # 2.00 while the number was decorative; 8.00 now that it stops a run.

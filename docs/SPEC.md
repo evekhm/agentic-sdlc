@@ -35,6 +35,7 @@ launching the autonomy flip pull request (#251, D6):
    `scripts/placement/vm-local/poll.service` to
    `~/.config/systemd/user/poll.service` and run `systemctl --user daemon-reload && systemctl --user enable --now poll.service`.
    When the checkout lives elsewhere, set `SDLC_REPO_ROOT` in the sidecar's `env` block and `WorkingDirectory` in `poll.service` to its absolute path.
+   Early supervisor startup is safe: the poller idles its queues when `loop.autonomous_merge` is false, and first-hop intake requires explicit opt-in via `intake:auto` capped by `loop.max_concurrent_first_hops` (#295, D1, D3, D4).
 3. Verify branch protection on `main`:
    Run `gh api repos/evekhm/agentic-sdlc/branches/main/protection` and
    verify required status checks with strict false and enforce_admins false.
@@ -81,10 +82,10 @@ Checklist state at the flip: steps 1, 3, 4 and 5 ran green on the
 operator VM on 2026-09-09 at 14:35 UTC (`execution.py --check` PASS
 with five bindings; `mint_app_token.py --require-repo --quiet` exit 0
 for athena, daedalus and odyssey). Step 2, the VM supervisor, is
-started after this merge and only once the amendment on #295 gates the
-poller's intake on `loop.autonomous_merge`, because the poller as
-merged in PR #294 launches athena on every open unclaimed `intent:new`
-issue and the backlog held thirty on 2026-09-09. Live proofs before
+started after this merge and is safe to run early because the amendment
+on #295 gates the poller's intake on `loop.autonomous_merge`, requires
+`intake:auto` for first-hop intake, and caps active claims to
+`loop.max_concurrent_first_hops` (PR #295, D1, D2, D3, D4). Live proofs before
 the flip: lifecycle run 34315501873 minted as Themis and wrote the #64
 loop-ledger comment as `evekhm-themis-app[bot]`; merge-gate run
 34315613103 evaluated all eleven conjuncts and declined on (3)(4)(5)(11)
@@ -372,7 +373,8 @@ grants only `contents: read`.
 
 ### lifecycle.labels
 Lifecycle state lives in GitHub issue labels (#4,
-`intent/4-labels/`, #267). Five labels are human-facing — `intent:new`,
+`intent/4-labels/`, #267). Six labels are human-facing — `intent:new`,
+`intake:auto` (opt-in for automated first-hop poller intake; PR #295, D4),
 `in-progress`, `hold`, `blocked`, `bootstrap` — and the stage is a
 single `status:*` label on the ladder `status:planning` →
 `status:spec` → `status:build` → `status:implementing` →
@@ -387,10 +389,14 @@ security findings, `consensus:disputed` for disputed findings),
 `review:merge-ready` (agreed consensus at the current head with no open blocking
 findings), and `review:verifying` (pull request head newer than reviewed head with
 open blocking findings). Unmanaged labels such as `bootstrap` are strictly
-preserved during label synchronization. All 21 labels are provisioned
+preserved during label synchronization. All 22 labels are provisioned
 idempotently by `scripts/setup/bootstrap_tracker.sh`, whose
 `--labels-only` mode runs the label section and exits before anything
-reads or files an issue. `.github/workflows/lifecycle.yml` writes the
+reads or files an issue. Claim author identification in `scripts/ops/work.sh`
+and `scripts/placement/vm-local/poll.sh` normalizes both GraphQL payload shapes
+(`.author.login` without bot suffix) and REST API shapes (`.user.login` with
+`[bot]` suffix) by stripping any trailing `[bot]` suffix when matching persona
+logins against the persona identity table (PR #295, D3). `.github/workflows/lifecycle.yml` writes the
 ladder on every push to `main` by running
 `scripts/ci/lifecycle_advance.sh <before-sha> <after-sha>`, which is
 deterministic bash + `gh` + `jq` with no model call and is runnable
@@ -1073,11 +1079,16 @@ through `scripts/ops/execution.py --loop <key>`:
 
 - `autonomous_merge` (bool): `true` arms the merge and the next-rung
   dispatch; `false` leaves every guard evaluated and every ledger row
-  written while nothing is merged or dispatched (D18).
+  written while nothing is merged or dispatched (D18). The VM poller
+  checks this setting at the start of each tick and idles all queues
+  when not `true` (PR #295, D2).
 - `max_rung_dispatches_per_issue` (int): the number of dispatch rows
   one issue may carry before the advancer refuses the next rung (D13).
 - `max_cost_usd_per_issue` (number): the summed cost of those rows at
   which the same refusal fires.
+- `max_concurrent_first_hops` (int): the positive integer fleet ceiling
+  governing simultaneous active Athena claims across the repository for
+  automated first-hop intake (PR #295, D3). Defaults to 1 if omitted.
 
 `scripts/ci/merge_gate.sh <pr>` is the one merger. Mutating jobs (record,
 gate) run from `.github/workflows/merge-gate.yml` on main-ref events under
@@ -1169,23 +1180,30 @@ deployment-branch policy admits `main` only (D23); that policy is
 unverifiable from inside the loop and is precondition P1, not a
 runtime check (Amendment r2).
 
-Continuous poller and VM supervisor architecture (#251, D2, D4, D5):
+Continuous poller and VM supervisor architecture (#251, D2, D4, D5; PR #295):
 The continuous poller (`scripts/placement/vm-local/poll.sh`), running under
 an Antigravity sidecar (`poll.sidecar.json`) or a systemd user unit
 (`poll.service`), polls the GitHub repository on a configurable interval
-(default 30s) to drive unattended autonomous rungs. When unconsumed
-`dispatch` ledger rows appear on ladder rungs (`status:planning`,
+(default 30s) to drive unattended autonomous rungs. At the beginning of each
+tick, the poller checks `loop.autonomous_merge`; if not `true`, it logs an
+idling notice and returns 0 without querying work queues (PR #295, D2).
+When unconsumed `dispatch` ledger rows appear on ladder rungs (`status:planning`,
 `status:spec`, `status:build`, `status:implementing`), the poller
 preflights builder credentials, claims the issue under persona identity
 (`CLAIM_ACTOR=<persona> CLAIM_SESSION=poll-<pid> scripts/ops/claim.sh <issue>`),
 and dispatches through `scripts/placement/vm-local/run.sh <issue> --as <persona>`.
-First-hop intake discovers unclaimed `intent:new` issues, claiming and
-dispatching them to Athena without writing loop-ledger rows prior to intent
-merge (D5). Fix rounds on pull requests at `status:in-review` with blocking
-review findings bypass `claim.sh` entirely and acquire a per-PR lock
-(`${TMPDIR:-/tmp}/poll-pr-<pr>.lock`) to serialize executions (D2). If VM
-credentials for a persona are missing during preflight, the poller logs a
-notice and skips that persona's rows without failing or terminating (D4).
+First-hop intake discovers unclaimed `intent:new` issues carrying `intake:auto`,
+capped by the `max_concurrent_first_hops` fleet ceiling measured across active
+Athena claims, claiming and dispatching them to Athena without writing loop-ledger
+rows prior to intent merge (D5; PR #295, D3, D4). Fix rounds on pull requests at
+`status:in-review` with blocking review comments from suffixed App reviewer logins
+(`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`) bypass `claim.sh` entirely and
+acquire a per-PR lock (`${poll_state_dir}/poll-pr-<pr>.lock`) and write consumed
+key files (`${poll_state_dir}/pr-<pr>-<repo_hash>-<key>`) inside `POLL_STATE_DIR`
+(defaulting to `${XDG_STATE_HOME:-~/.local/state}/sdlc-poller`), leaving zero lock
+files in `/tmp` (D2; PR #295, D5, D6). If VM credentials for a persona are missing
+during preflight, the poller logs a notice and skips that persona's rows without
+failing or terminating (D4).
 
 ## Agreed, not yet built
 

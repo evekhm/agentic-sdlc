@@ -9,8 +9,8 @@ verbatim (with its `review:N` iteration counter and
 `argus:*` / `review:*` labels, or define a merged set.
 
 Whatever wins must cover: lifecycle stage per issue, the session
-claim (`in-progress`), the `hold` circuit breaker, `blocked`, and
-`intent:new` intake.
+claim (`in-progress`), the `hold` circuit breaker, `blocked`,
+`intent:new` intake, and `intake:auto` (opt-in for automated first-hop poller intake).
 
 **Done when:** the decision is recorded as a comment here, INTENT.md's
 open question 4 is closed by PR, and the labels exist in the repo

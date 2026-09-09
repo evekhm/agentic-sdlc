@@ -284,5 +284,71 @@ has "no loop block" "D20: the failure names the missing block"
 run 1 "D20: --loop fails the same way" -- "$CHECK" --loop autonomous_merge
 has "no loop block" "D20: --loop names the missing block"
 
+banner "D3 (#295) max_concurrent_first_hops validation"
+OUT="$(python3 "$EXEC_PY" --loop max_concurrent_first_hops)"
+[ "$OUT" = "1" ] || fail "D3: --loop max_concurrent_first_hops did not print 1 (got: $OUT)"
+pass "D3: --loop max_concurrent_first_hops prints 1 on committed config"
+
+write_config "$T" <<'YAML'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 10
+  max_cost_usd_per_issue: 100.0
+  max_concurrent_first_hops: 0
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D3: max_concurrent_first_hops: 0 fails" -- "$CHECK" --check
+has "loop.max_concurrent_first_hops must be positive integer" "D3: error caught zero"
+
+write_config "$T" <<'YAML'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 10
+  max_cost_usd_per_issue: 100.0
+  max_concurrent_first_hops: -1
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D3: max_concurrent_first_hops: -1 fails" -- "$CHECK" --check
+has "loop.max_concurrent_first_hops must be positive integer" "D3: error caught negative int"
+
+write_config "$T" <<'YAML'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 10
+  max_cost_usd_per_issue: 100.0
+  max_concurrent_first_hops: "non-int"
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D3: max_concurrent_first_hops: 'non-int' fails" -- "$CHECK" --check
+has "loop.max_concurrent_first_hops must be positive integer" "D3: error caught non-int string"
+
+write_config "$T" <<'YAML'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 10
+  max_cost_usd_per_issue: 100.0
+  max_concurrent_first_hops: true
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D3: max_concurrent_first_hops: true fails" -- "$CHECK" --check
+has "loop.max_concurrent_first_hops must be positive integer" "D3: error caught boolean"
+
 echo
 echo "execution_test.sh: all scenarios passed"
+
