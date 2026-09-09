@@ -229,6 +229,7 @@ fixture_tree() {
   cp -r "$REPO/personas" "$REPO/config" "$REPO/scripts" "$REPO/.agents" "$t/"
   mkdir -p "$t/.claude"
   cp -r "$REPO/.claude/agents" "$t/.claude/"
+  touch "$t/.claude/agents/odyssey.md"
   ln -s "$REPO/intent" "$t/intent"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -302,7 +303,7 @@ run() {
   local want="$1" name="$2" rc=0
   shift 3  # drop want, name and the literal --
   set +e
-  OUT="$(DRY_RUN="${DRY:-1}" HEADLESS="${HL:-0}" WORK_COST_FILE="${WORK_COST_FILE:-}" \
+  OUT="$(DEPLOYMENTS="${DEPLOYMENTS:-}" DRY_RUN="${DRY:-1}" HEADLESS="${HL:-0}" WORK_COST_FILE="${WORK_COST_FILE:-}" \
     WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:-}" \
     WORK_PERMISSION_MODE="${WPM:-}" \
     "${TREE:-$REPO}/scripts/ops/work.sh" "$@" 2>&1)"
@@ -326,7 +327,7 @@ run() {
 run_tty() {
   local want="$1" name="$2" rc=0 cmd a
   shift 3  # drop want, name and the literal --
-  cmd="DRY_RUN=${DRY:-1} HEADLESS=${HL:-0} WORK_DISPATCHED_ISSUE=${WORK_DISPATCHED_ISSUE:-} $(printf '%q' "${TREE:-$REPO}/scripts/ops/work.sh")"
+  cmd="DEPLOYMENTS=${DEPLOYMENTS:-} DRY_RUN=${DRY:-1} HEADLESS=${HL:-0} WORK_DISPATCHED_ISSUE=${WORK_DISPATCHED_ISSUE:-} $(printf '%q' "${TREE:-$REPO}/scripts/ops/work.sh")"
   for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
   set +e
   OUT="$(script -qec "$cmd" /dev/null 2>&1)"
@@ -483,9 +484,9 @@ has "label:    status:implementing" "D8: the label is printed"
 has "owner:    odyssey" "D8: the owner is printed"
 has "folder:   intent/108-deterministic-" "D8: the folder is printed"
 has "branch:   odyssey/108-deterministic-" "D8: the branch is printed"
-has "harness:  claude-code" "D8: the harness is printed"
-has ".claude/agents/odyssey.md" "D8: the compiled target is printed"
-has "command:  timeout --foreground 5460 claude --agent odyssey" \
+has "harness:  antigravity" "D8: the harness is printed"
+has ".agents/agents/odyssey/agent.md" "D8: the compiled target is printed"
+has "command:  timeout 5460 agy -p " \
   "D8: the exact command line is printed, wrapped at the persona's cap"
 has "nothing was launched, nothing was written, and no token was minted" \
   "D8: the dry run says so"
@@ -682,8 +683,18 @@ WPM=acceptEdits run 0 "#167: acceptEdits reaches agy" -- 113
 has " --mode accept-edits" "#167: acceptEdits becomes --mode accept-edits"
 WPM=plan run 0 "#167: plan reaches agy" -- 113
 has " --mode plan" "#167: plan becomes --mode plan"
+fixture_dep_cc="$WORK/dep-odyssey-cc.yaml"
+cat > "$fixture_dep_cc" <<'EOF'
+personas:
+  athena:    { harness: antigravity }
+  daedalus:  { harness: antigravity }
+  odyssey:   { harness: claude-code }
+  argus:     { harness: claude-code }
+  atlas:     { harness: antigravity }
+  cassandra: { harness: claude-code }
+EOF
 issue 131 open "status:implementing" "Implement the thing, on the other harness"
-HL=1 WPM=bypassPermissions run 0 "#167: claude-code still takes the value verbatim" -- 131
+DEPLOYMENTS="$fixture_dep_cc" HL=1 WPM=bypassPermissions run 0 "#167: claude-code still takes the value verbatim" -- 131
 has " --permission-mode bypassPermissions" "#167: the claude-code branch is unchanged"
 # D20's split, on a value rather than a target. A print-only run
 # launches nothing, so nothing can be broken by a mode nothing will
@@ -698,10 +709,10 @@ has "refused: WORK_PERMISSION_MODE=frobnicate has no agy flag" "#167: the refusa
 
 banner "#43 D5 claude-code is interactive by default and headless on demand"
 issue 130 open "status:implementing" "Implement the thing"
-run 0 "D5: no HEADLESS resolves the interactive row" -- 130
+DEPLOYMENTS="$fixture_dep_cc" run 0 "D5: no HEADLESS resolves the interactive row" -- 130
 has "command:  timeout --foreground 5460 claude --agent odyssey " "D5: the interactive form"
 hasnt " -p " "D5: the interactive row does not use print mode"
-HL=1 run 0 "D5: HEADLESS=1 resolves the print row" -- 130
+DEPLOYMENTS="$fixture_dep_cc" HL=1 run 0 "D5: HEADLESS=1 resolves the print row" -- 130
 has "command:  timeout 5460 claude -p " "D5: the headless form"
 hasnt "timeout --foreground" \
   "R2-1: the headless row does NOT get --foreground — it touches no terminal"
@@ -878,6 +889,8 @@ pass "#165: preflight failures exit 1 and attempt zero writes, launches, or mint
 # take a compiled target away or pin a persona to a harness with no row.
 # =============================================================================
 T="$(fixture_tree)"
+sed -i 's/^  odyssey:   { harness: antigravity }/  odyssey:   { harness: claude-code }/' \
+  "$T/config/deployments.yaml"
 
 banner "#43 T4/D10 a harness with no launch row still prints and exits 0"
 # Every pinned harness has a row now, so the *) arm of launch_argv would
@@ -1108,9 +1121,9 @@ cost_file="$WORK/cost.txt"
 # — read from the sidecar below, same reason as D9). The cost figure
 # survives a re-pin within the tier: session_spend.sh's gemini table
 # matches on family and version, not on the effort suffix.
-# Pro rates: input: 1.25, cache_read: 0.3125, output: 5.00
-# cost = (100000 * 1.25 + 20000 * 0.3125 + (10000 + 5000) * 5.00) / 1000000
-# cost = (125000 + 6250 + 75000) / 1000000 = 206250 / 1000000 = 0.206250
+# Flash rates (#271 repin): input: 0.15, cache_read: 0.0375, output: 0.60
+# cost = (100000 * 0.15 + 20000 * 0.0375 + (10000 + 5000) * 0.60) / 1000000
+# cost = (15000 + 750 + 9000) / 1000000 = 24750 / 1000000 = 0.024750
 printf '%s\n' '{"status":"SUCCESS","response":"done\nWORK-RESULT: ok #113 plan committed","usage":{"input_tokens":100000,"output_tokens":10000,"thinking_tokens":5000,"cache_read_tokens":20000,"total_tokens":135000}}' \
   > "$WORK/agy_cost.json"
 TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost.json" \
@@ -1118,7 +1131,7 @@ TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost.json" \
   run 0 "#150: Antigravity dispatch writes cost and model to WORK_COST_FILE" -- 113
 cost_line1="$(sed -n '1p' "$cost_file")"
 cost_line2="$(sed -n '2p' "$cost_file")"
-[ "$cost_line1" = "0.206250" ] || fail "#150: expected cost 0.206250, got '$cost_line1'"
+[ "$cost_line1" = "0.024750" ] || fail "#150: expected cost 0.024750, got '$cost_line1'"
 pass "#150: Antigravity dispatch calculates list-rate cost from .usage"
 pinned_model="$(sed -n 's/.*"model": "\([^"]*\)".*/\1/p' \
                 "$REPO/.agents/agents/daedalus/agent.json")"
@@ -1395,6 +1408,50 @@ banner "#184 WORK_MAX_USD string fallback"
 TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost_1.25.json" WORK_MAX_USD="abc" \
   run 1 "#184: non-numeric WORK_MAX_USD fails" -- 113
 has "must be numeric" "#184: string fallback prevented"
+
+banner "AT-12 (D2) Re-pin property from antigravity to claude-code and back"
+fixture_dep="$WORK/dep-repin.yaml"
+cat > "$fixture_dep" <<'EOF'
+personas:
+  odyssey:
+    harness: antigravity
+EOF
+: > "$LAUNCHES"; : > "$WRITES"
+DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 run 0 "AT-12: odyssey antigravity launch" -- 108 --as odyssey
+[ -s "$LAUNCHES" ] || fail "AT-12: nothing was launched for antigravity"
+grep -q "agy" "$LAUNCHES" || fail "AT-12: expected agy in launches"
+pass "AT-12: antigravity launch uses agy"
+
+cat > "$fixture_dep" <<'EOF'
+personas:
+  odyssey:
+    harness: claude-code
+EOF
+: > "$LAUNCHES"; : > "$WRITES"
+DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 run 0 "AT-12: odyssey claude-code launch" -- 108 --as odyssey
+[ -s "$LAUNCHES" ] || fail "AT-12: nothing was launched for claude-code"
+grep -q "claude" "$LAUNCHES" || fail "AT-12: expected claude in launches"
+pass "AT-12: claude-code launch uses claude"
+
+cat > "$fixture_dep" <<'EOF'
+personas:
+  odyssey:
+    harness: antigravity
+EOF
+: > "$LAUNCHES"; : > "$WRITES"
+DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 run 0 "AT-12: restored odyssey antigravity launch" -- 108 --as odyssey
+[ -s "$LAUNCHES" ] || fail "AT-12: nothing was launched for restored antigravity"
+grep -q "agy" "$LAUNCHES" || fail "AT-12: expected agy in restored launches"
+pass "AT-12: restored antigravity launch uses agy"
+pass "AT-12 (D2): re-pin property verified"
+
+banner "AT-13 (D2, D8) Hermetic fix-round dispatch on PR at status:in-review"
+issue 107 open "status:in-review" "Issue 107"
+pr 108 "Fixes #107" "odyssey/107-fix" "status:in-review"
+run 0 "AT-13: PR authored by odyssey at status:in-review proceeds" -- 108 --as odyssey
+has "--> odyssey" "AT-13: dispatches odyssey"
+has "branch:   odyssey/107-fix" "AT-13: retains PR head branch"
+pass "AT-13 (D2, D8): work.sh fix-round dispatch succeeds"
 
 echo
 echo "work_test.sh: all scenarios passed"
