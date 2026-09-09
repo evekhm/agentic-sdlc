@@ -2,7 +2,7 @@
   "command": "bash",
   "args": [
     "-c",
-    "exec scripts/placement/vm-local/poll.sh"
+    "cd \"$HOME/projects/agentic-sdlc\" && exec scripts/placement/vm-local/poll.sh"
   ],
   "restart_policy": "always",
   "display_name": "VM-Local SDLC Poller",

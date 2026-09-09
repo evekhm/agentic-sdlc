@@ -10,6 +10,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$REPO_ROOT"
 RUN_SH="${RUN_SH:-$REPO_ROOT/scripts/placement/vm-local/run.sh}"
 CLAIM_SH="${CLAIM_SH:-$REPO_ROOT/scripts/ops/claim.sh}"
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
@@ -58,8 +59,44 @@ resolve_claim_cmd() {
 
 claim_cmd="$(resolve_claim_cmd)"
 
+stage_for_rung() { # <rung> -> stage name, or empty
+    local r="$1"
+    [ "$r" -ge 1 ] 2>/dev/null || return 0
+    jq -r --argjson idx "$((r - 1))" '.stages[$idx].stage // empty' "$REPO_ROOT/personas/lifecycle.json" 2>/dev/null || true
+}
+
+owner_for_stage() { # <stage> -> persona name, or empty
+    local stg="$1" p_file
+    for p_file in "$REPO_ROOT/personas"/*.yaml; do
+        [ -f "$p_file" ] || continue
+        grep -q '^kind: persona$' "$p_file" 2>/dev/null || continue
+        if grep -qE "^stage: \[( *[a-z]+,)* *$stg( *, *[a-z]+)* *\]" "$p_file"; then
+            basename "$p_file" .yaml
+            return 0
+        fi
+    done
+    return 0
+}
+
 poll_tick() {
     local processed_issues=" "
+    declare -A TICK_TOKENS=()
+
+    mint_cached_token() {
+        local p="$1"
+        if [ -n "${TICK_TOKENS[$p]:-}" ]; then
+            echo "${TICK_TOKENS[$p]}"
+            return 0
+        fi
+        local tok
+        tok="$(python3 "$REPO_ROOT/scripts/auth/mint_app_token.py" "$p" 2>/dev/null || true)"
+        if [ -n "$tok" ]; then
+            TICK_TOKENS["$p"]="$tok"
+            echo "$tok"
+            return 0
+        fi
+        return 1
+    }
 
     # 1. Credential preflight for vm-local personas (D4, AT-14)
     local vm_personas=("athena" "daedalus" "odyssey")
@@ -81,7 +118,7 @@ poll_tick() {
 
     # 2. Fix rounds on open pull requests at status:in-review (D2, AT-20)
     local prs_json="[]"
-    prs_json="$(gh pr list --state open --json number,title,labels,headRefName 2>/dev/null || echo '[]')"
+    prs_json="$(gh pr list --state open --label status:in-review --json number,title,labels,headRefName,isCrossRepository 2>/dev/null || echo '[]')"
     if [ -n "$prs_json" ] && [ "$prs_json" != "[]" ]; then
         local pr_count
         pr_count="$(jq '. | length' <<<"$prs_json" 2>/dev/null || echo 0)"
@@ -91,6 +128,11 @@ poll_tick() {
             local pr_num
             pr_num="$(jq -r '.number // empty' <<<"$pr_obj")"
             [ -n "$pr_num" ] || continue
+
+            # C1: Skip cross-repository (fork) PRs; missing field defaults to false
+            local is_cross
+            is_cross="$(jq -r '.isCrossRepository // false' <<<"$pr_obj")"
+            [ "$is_cross" = "true" ] && continue
 
             local has_in_review
             has_in_review="$(jq -r '[.labels[]? | (.name // .)] | if index("status:in-review") != null then "yes" else "no" end' <<<"$pr_obj")"
@@ -106,22 +148,90 @@ poll_tick() {
 
             is_skipped "$author_persona" && continue
 
+            local pr_comments="[]"
+            pr_comments="$(gh api "repos/$GITHUB_REPO/issues/$pr_num/comments" 2>/dev/null || echo '[]')"
+
+            # C2: Trigger predicate
+            local trigger_body
+            trigger_body="$(jq -r '
+              ([.[]? | select((.body // "") | contains("review findings: blocking"))] | last) as $frozen |
+              if $frozen != null then
+                $frozen.body
+              else
+                [
+                  .[]? |
+                  select(
+                    ((.user.login // "") == "evekhm-argus-app[bot]" or (.user.login // "") == "evekhm-atlas-app[bot]") and
+                    ((.body // "") | contains("<!-- review-verdict:"))
+                  )
+                ] as $reviewer_comments |
+                [
+                  $reviewer_comments | group_by(.user.login)[] | last |
+                  select(
+                    ((.body // "") | test("<!-- review-verdict:[^:]+:findings -->")) and
+                    ((.body // "") | test("<!-- finding:[^:]+:(security|high):open:"))
+                  )
+                ] | last | .body // empty
+              end
+            ' <<<"$pr_comments" 2>/dev/null || echo '')"
+
+            [ -n "$trigger_body" ] || continue
+
+            # C3: Compute trigger key per PR
+            local key=""
+            if grep -qE '<!-- reviewed-head:[a-f0-9]+ -->' <<<"$trigger_body"; then
+                key="$(grep -oE '<!-- reviewed-head:[a-f0-9]+ -->' <<<"$trigger_body" | head -1 | sed -E 's/.*<!-- reviewed-head:([a-f0-9]+) -->.*/\1/')"
+            else
+                key="$(printf '%s' "$trigger_body" | sha256sum | awk '{print $1}')"
+            fi
+
+            local poll_state_dir="${POLL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sdlc-poller}"
+            mkdir -p "$poll_state_dir" 2>/dev/null || true
+            local repo_hash
+            repo_hash="$(printf '%s' "$REPO_ROOT" | sha256sum | head -c 8)"
+            local key_file="${poll_state_dir}/pr-${pr_num}-${repo_hash}-${key}"
+
+            # C4: Lock handling with staleness
             local lock_file="${TMPDIR}/poll-pr-${pr_num}.lock"
             if [ -f "$lock_file" ]; then
+                local lock_age=0 mtime now max_age="${POLL_LOCK_MAX_AGE:-7200}"
+                mtime="$(stat -c %Y "$lock_file" 2>/dev/null || echo 0)"
+                now="$(date +%s)"
+                lock_age=$(( now - mtime ))
+                if [ "$lock_age" -ge "$max_age" ]; then
+                    local lock_pid=""
+                    lock_pid="$(cat "$lock_file" 2>/dev/null | tr -d '[:space:]' || true)"
+                    if [ -n "$lock_pid" ]; then
+                        if ! kill -0 "$lock_pid" 2>/dev/null; then
+                            echo "poll.sh: removing stale lock for PR #$pr_num (pid $lock_pid dead, age ${lock_age}s)"
+                            rm -f "$lock_file"
+                        else
+                            continue
+                        fi
+                    else
+                        echo "poll.sh: removing stale empty lock for PR #$pr_num (age ${lock_age}s)"
+                        rm -f "$lock_file"
+                    fi
+                else
+                    continue
+                fi
+            fi
+
+            # Check consumed keys (C3)
+            if [ -f "$key_file" ]; then
+                echo "#$pr_num: review at $key already dispatched"
                 continue
             fi
 
-            local pr_comments="[]"
-            pr_comments="$(gh api "repos/$GITHUB_REPO/issues/$pr_num/comments" 2>/dev/null || echo '[]')"
-            local pr_bodies
-            pr_bodies="$(jq -r '.[].body // empty' <<<"$pr_comments" 2>/dev/null || echo '')"
-            if grep -iqE 'review findings: blocking|<!-- review-verdict:[^:]*:(blocking|blocked|changes_requested) -->|\bblocking\b' <<<"$pr_bodies"; then
-                touch "$lock_file"
-                (
-                    trap 'rm -f "$lock_file"' EXIT INT TERM
-                    "$RUN_SH" "$pr_num" --as "$author_persona"
-                ) || true
-            fi
+            # Write key file before calling run.sh
+            touch "$key_file"
+
+            # Create lock in parent shell, run, remove in parent shell
+            echo "$$" > "$lock_file"
+            (
+                "$RUN_SH" "$pr_num" --as "$author_persona"
+            ) || true
+            rm -f "$lock_file"
         done
     fi
 
@@ -145,7 +255,7 @@ poll_tick() {
             is_skipped "athena" && continue
 
             local token
-            token="$(python3 "$REPO_ROOT/scripts/auth/mint_app_token.py" athena 2>/dev/null || true)"
+            token="$(mint_cached_token athena)"
             if [ -z "$token" ]; then
                 echo "missing key for athena, skipping its rows"
                 continue
@@ -211,20 +321,22 @@ poll_tick() {
             rung="$(grep -oE 'rung:[0-9]+' <<<"$last_row" | cut -d: -f2 || true)"
             [ -n "$rung" ] || continue
 
-            local persona=""
-            case "$rung" in
-                1|2) persona="athena" ;;
-                3)   persona="daedalus" ;;
-                4)   persona="odyssey" ;;
-                *)   continue ;;
-            esac
+            local stage_name persona=""
+            stage_name="$(stage_for_rung "$rung")"
+            if [ -n "$stage_name" ]; then
+                persona="$(owner_for_stage "$stage_name")"
+            fi
+            if [ -z "$persona" ]; then
+                echo "rung $rung has no owner"
+                continue
+            fi
 
             if is_skipped "$persona"; then
                 continue
             fi
 
             local token
-            token="$(python3 "$REPO_ROOT/scripts/auth/mint_app_token.py" "$persona" 2>/dev/null || true)"
+            token="$(mint_cached_token "$persona")"
             if [ -z "$token" ]; then
                 echo "missing key for $persona, skipping its rows"
                 continue
