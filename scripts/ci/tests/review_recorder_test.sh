@@ -7,7 +7,7 @@
 # under $FX and records writes in $WRITES; a stub `python3` answers
 # helper checks. No network, no live tokens.
 #
-# Each test asserts behaviors derived from numbered Decisions (D1-D12)
+# Each test asserts behaviors derived from numbered Decisions (D1-D10)
 # and Acceptance criteria (AT-1..AT-18). Contract tests fail (RED)
 # when scripts/ci/review_recorder.sh has not yet been implemented.
 
@@ -59,6 +59,7 @@ ATLAS="evekhm-atlas-app[bot]"
 ACTIONS="github-actions[bot]"
 H="$(printf 'a%.0s' {1..40})"
 H0="$(printf 'b%.0s' {1..40})"
+export THEMIS H
 
 # Stub tools that must never run live during hermetic tests
 for tool in claude gemini agy curl; do
@@ -596,6 +597,7 @@ EOF
     "$(comment_item "$ARGUS" "$rev_cancelled_run" 3016)"
   bash "$RECORDER" 102 || { fail "test_provenance_validation: withdrawal on cancelled failed"; return 1; }
   grep -q "reviewed-head:argus:$H0" "$WRITES" || { fail "test_provenance_validation: head marker did not revert to $H0 on cancelled (D3)"; return 1; }
+  grep -q "ledger-row:R1-1@D4:high:open:none" "$WRITES" || { fail "test_provenance_validation: row did not survive withdrawal on cancelled (D3)"; return 1; }
   grep -q "\[run 2016 ended cancelled; verdict withdrawn\]" "$WRITES" || { fail "test_provenance_validation: cancelled withdrawal note missing (D3)"; return 1; }
 
   pass "test_provenance_validation (D2, D3, AT-3)"
@@ -631,7 +633,7 @@ EOF
 
   # Pass 2a: Byte-identical re-derivation skips PATCH (D1 idempotency guard)
   local ledger_comment
-  ledger_comment="$(grep -A 20 "### Findings ledger for #103" "$WRITES" || true)"
+  ledger_comment="$(sed '1d' "$WRITES")"
   [ -n "$ledger_comment" ] || ledger_comment="$(cat <<EOF
 ### Findings ledger for #103
 <!-- consensus-ledger:103 -->
@@ -641,7 +643,7 @@ EOF
 <!-- consensus-ledger-end -->
 EOF
 )"
-  echo "$ledger_comment" > "$FX/comment-5001.json"
+  comment_item "$THEMIS" "$ledger_comment" 5001 > "$FX/comment-5001.json"
   comments_fixture 103 \
     "$(comment_item "$THEMIS" "$ledger_comment" 5001)" \
     "$(comment_item "$ARGUS" "$rev_body" 3003)"
@@ -660,7 +662,7 @@ EOF
 <!-- consensus-ledger-end -->
 EOF
 )"
-  echo "$stale_ledger_comment" > "$FX/comment-5001.json"
+  comment_item "$THEMIS" "$stale_ledger_comment" 5001 > "$FX/comment-5001.json"
   comments_fixture 103 \
     "$(comment_item "$THEMIS" "$stale_ledger_comment" 5001)" \
     "$(comment_item "$ARGUS" "$rev_body" 3003)"
@@ -757,7 +759,20 @@ test_round_funnel() {
     return 1
   fi
 
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #106
+<!-- consensus-ledger:106 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R1-1@D4:normal:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
   # Round 2: non-blocking observation recorded as normal row with peer none
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
   local rev_r2
   rev_r2="$(cat <<EOF
 ### Argus review
@@ -766,12 +781,17 @@ test_round_funnel() {
 <!-- run-id:2006 -->
 <!-- round:2 -->
 <!-- finding:R2-1:normal:open:none -->
+<!-- finding:R2-2:suggestion:open:none -->
 <!-- review-verdict-end -->
 EOF
 )"
-  comments_fixture 106 "$(comment_item "$ARGUS" "$rev_r2" 3006)"
+  comments_fixture 106 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$rev_r2" 3006)"
   bash "$RECORDER" 106 || { fail "test_round_funnel: round 2 recording failed"; return 1; }
+  grep -q "ledger-row:R1-1@D4:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 1 row missing from round 2 ledger (D6)"; return 1; }
   grep -q "ledger-row:R2-1:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 2 normal row missing (D6)"; return 1; }
+  grep -q "ledger-row:R2-2:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 2 suggestion row did not land as normal tracking row (D6)"; return 1; }
 
   # Round 3: new high row admitted, new normal observation recorded
   local rev_r3
@@ -789,12 +809,16 @@ Deadlock on termination signal
 EOF
 )"
   : > "$WRITES"
-  comments_fixture 106 "$(comment_item "$ARGUS" "$rev_r3" 3007)"
+  comments_fixture 106 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$rev_r3" 3007)"
   bash "$RECORDER" 106 || { fail "test_round_funnel: round 3 recording failed"; return 1; }
+  grep -q "ledger-row:R1-1@D4:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 1 row missing from round 3 ledger (D6)"; return 1; }
   grep -q "ledger-row:R3-1:high:open:none" "$WRITES" || { fail "test_round_funnel: round 3 high row refused (D6)"; return 1; }
   grep -q "ledger-row:R3-2:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 3 normal row missing (D6)"; return 1; }
 
   # Round 4: past round 3, high is demoted to normal; security is admitted
+  : > "$WRITES"
   local rev_r4
   rev_r4="$(cat <<EOF
 ### Argus review
@@ -810,9 +834,11 @@ Remote code execution vector
 <!-- review-verdict-end -->
 EOF
 )"
-  : > "$WRITES"
-  comments_fixture 106 "$(comment_item "$ARGUS" "$rev_r4" 3008)"
+  comments_fixture 106 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$rev_r4" 3008)"
   bash "$RECORDER" 106 || { fail "test_round_funnel: round 4 execution failed"; return 1; }
+  grep -q "ledger-row:R1-1@D4:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 1 row missing from round 4 ledger (D6)"; return 1; }
   grep -q "ledger-row:R4-1:normal:open:none" "$WRITES" || { fail "test_round_funnel: high finding past round 3 not demoted (D6)"; return 1; }
   grep -q "ledger-row:R4-2:security:open:pending" "$WRITES" || { fail "test_round_funnel: security finding past round 3 refused (D6)"; return 1; }
 
@@ -975,13 +1001,48 @@ EOF
   pass "test_owner_retier (D9, AT-9)"
 }
 
-# AT-10 (D5, D7, D8): Label synchronization via gh issue edit and hold preservation
+# AT-10 (D5, D7, D8): Label synchronization via gh issue edit and hold circuit breaker (#291)
 test_label_sync() {
   reset_state
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_label_sync: $RECORDER does not exist (D5, D7, D8, AT-10)"
+    return 1
+  fi
+
+  # Case (a): PR carrying hold produces zero writes and one log line naming held object (#291, REVIEW.md D13/D14)
   pr_fixture 109 "$H"
-  # PR fixture carries circuit breaker label hold and stale review:1
-  jq '.labels = [{"name":"hold"},{"name":"review:1"}]' "$FX/pr-109.json" > "$FX/pr-109.json.tmp"
+  jq '.labels = [{"name":"hold"}]' "$FX/pr-109.json" > "$FX/pr-109.json.tmp"
   mv "$FX/pr-109.json.tmp" "$FX/pr-109.json"
+  issue_fixture 109 "hold"
+
+  run_fixture 2010 "$ARGUS" "$H" "pull_request" "completed" "success"
+  local rev_body_hold
+  rev_body_hold="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2010 -->
+<!-- round:2 -->
+<!-- finding:R2-1:high:open:none -->
+<!-- failure-scenario:R2-1 -->
+Crash on invalid utf8 input
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 109 "$(comment_item "$ARGUS" "$rev_body_hold" 3011)"
+
+  local out_a
+  out_a="$(bash "$RECORDER" 109 2>&1)" || { fail "test_label_sync: recorder execution failed on held PR (D8, #291)"; return 1; }
+  [ ! -s "$WRITES" ] || { fail "test_label_sync: writes attempted when hold label is present (#291)"; return 1; }
+  echo "$out_a" | grep -Eq "109.*hold|hold.*109" || { fail "test_label_sync: log missing held object 109 (#291)"; return 1; }
+
+  # Case (b): PR carrying bootstrap and stale review:1 updates labels and preserves bootstrap
+  reset_state
+  pr_fixture 109 "$H"
+  jq '.labels = [{"name":"bootstrap"},{"name":"review:1"}]' "$FX/pr-109.json" > "$FX/pr-109.json.tmp"
+  mv "$FX/pr-109.json.tmp" "$FX/pr-109.json"
+  issue_fixture 109 "bootstrap" "review:1"
 
   run_fixture 2010 "$ARGUS" "$H" "pull_request" "completed" "success"
 
@@ -1003,20 +1064,16 @@ EOF
 )"
   comments_fixture 109 "$(comment_item "$ARGUS" "$rev_body" 3011)"
 
-  if [ ! -f "$RECORDER" ]; then
-    fail "test_label_sync: $RECORDER does not exist (D5, D7, D8, AT-10)"
-    return 1
-  fi
-
   bash "$RECORDER" 109 || { fail "test_label_sync: recorder execution failed"; return 1; }
 
   # Assert labels updated and stale review:1 removed
   grep -q "gh issue edit 109.*--add-label.*argus:findings" "$WRITES" || { fail "test_label_sync: argus:findings label not added (D8)"; return 1; }
+  grep -q "gh issue edit 109.*--add-label.*argus:suggestions" "$WRITES" || { fail "test_label_sync: argus:suggestions label not added (D8)"; return 1; }
   grep -q "gh issue edit 109.*--add-label.*review:2" "$WRITES" || { fail "test_label_sync: review:2 round label not added (D8)"; return 1; }
   grep -q "gh issue edit 109.*--remove-label.*review:1" "$WRITES" || { fail "test_label_sync: stale review:1 not removed (D8)"; return 1; }
 
-  # Assert preservation of unrelated labels such as hold
-  grep -E "gh issue edit 109.*--remove-label.*hold" "$WRITES" && { fail "test_label_sync: hold label was removed by recorder (D8)"; return 1; }
+  # Assert preservation of unrelated labels such as bootstrap
+  grep -E "gh issue edit 109.*--remove-label.*bootstrap" "$WRITES" && { fail "test_label_sync: bootstrap label was removed by recorder (D8)"; return 1; }
 
   # Assert D5 suggestion, dispute, and withdrawn rows present
   grep -q "ledger-row:R1-5@D5:suggestion:open:none" "$WRITES" || { fail "test_label_sync: suggestion row missing (D5)"; return 1; }
@@ -1026,6 +1083,11 @@ EOF
   # Assert dispute blocks consensus:agreed and sets consensus:disputed
   grep -q "gh issue edit 109.*--add-label.*consensus:disputed" "$WRITES" || { fail "test_label_sync: consensus:disputed label missing on dispute (D8)"; return 1; }
   grep -q "gh issue edit 109.*--add-label.*consensus:agreed" "$WRITES" && { fail "test_label_sync: consensus:agreed added despite dispute (D8)"; return 1; }
+
+  # review:verifying is absent because the PR head ($H) matches the reviewed head ($H); it only triggers when PR head is newer.
+  # review:merge-ready is absent because open blocking findings exist and consensus is disputed.
+  grep -q "gh issue edit 109.*--add-label.*review:merge-ready" "$WRITES" && { fail "test_label_sync: review:merge-ready added despite open blocking findings and dispute (D8)"; return 1; }
+  grep -q "gh issue edit 109.*--add-label.*review:verifying" "$WRITES" && { fail "test_label_sync: review:verifying added when PR head equals reviewed head (D8)"; return 1; }
 
   pass "test_label_sync (D5, D7, D8, AT-10)"
 }
@@ -1166,6 +1228,26 @@ EOF
 
   bash "$RECORDER" 112 || { fail "test_provenance_workflow_dispatch: recorder execution failed"; return 1; }
   grep -q "ledger-row:R1-1@D4:normal:open:none" "$WRITES" || { fail "test_provenance_workflow_dispatch: workflow_dispatch review was refused (D3)"; return 1; }
+
+  # Negative Case: Refusal when workflow_dispatch head_sha does not match PR head
+  : > "$WRITES"
+  run_fixture 2014 "$ARGUS" "$H0" "workflow_dispatch" "completed" "success"
+  local rev_mismatch_sha
+  rev_mismatch_sha="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2014 -->
+<!-- round:1 -->
+<!-- finding:R1-2@D4:normal:open:none -->
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 112 "$(comment_item "$ARGUS" "$rev_mismatch_sha" 3015)"
+  bash "$RECORDER" 112 || { fail "test_provenance_workflow_dispatch: recorder execution failed on mismatched head_sha (D3)"; return 1; }
+  grep -q "ledger-row:R1-2@D4" "$WRITES" && { fail "test_provenance_workflow_dispatch: mismatched head_sha row accepted for workflow_dispatch (D3)"; return 1; }
+  grep -q "\[refused:.*\]" "$WRITES" || { fail "test_provenance_workflow_dispatch: head_sha mismatch audit note missing for workflow_dispatch (D3)"; return 1; }
+
   pass "test_provenance_workflow_dispatch (D3, AT-17)"
 }
 

@@ -47,7 +47,7 @@ Touch: `scripts/ci/tests/review_recorder_test.sh`
    - `test_wire_format_assigned` (AT-18, D4)
 5. Contract tests execute against `scripts/ci/review_recorder.sh`. Tests are committed RED at base because `scripts/ci/review_recorder.sh` does not exist yet. Other acceptance criteria are checked separately: AT-11 via the regex one-liner and `merge_gate_test.sh`, AT-12 during provisioning, AT-14 during live execution (NOT RUN), and AT-15 via `spec_check.sh` and `sanitize_check.sh`.
 
-**Decisions:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12.
+**Decisions:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10.
 **Acceptance:** AT-1, AT-2, AT-3, AT-4, AT-5, AT-6, AT-7, AT-8, AT-9, AT-10, AT-13, AT-16, AT-17, AT-18.
 **Done when:** Test suite runs locally via `bash scripts/ci/tests/review_recorder_test.sh` and reports 13 failed tests out of 13 run due to missing implementation script.
 
@@ -169,8 +169,9 @@ Concurrency between multiple webhook events requires careful state ordering and 
     - If ledger comment exists, update via `gh api -X PATCH repos/<repo>/issues/comments/<id> -F body=@<file>`.
     - If absent, create via `gh api -X POST repos/<repo>/issues/<pr>/comments -F body=@<file>`.
 11. Synchronize labels:
+    - Read current labels via `gh issue view <pr> --json labels`.
     - Calculate derived labels (`argus:findings`, `argus:suggestions`, `consensus:*`, `review:merge-ready`, `review:verifying`, `review:1..3`).
-    - Reconcile derived labels on each execution, adding required labels and removing stale labels while preserving unrelated issue labels such as `hold` or `bootstrap`.
+    - Reconcile derived labels on each execution, adding required labels and removing stale labels while preserving unrelated issue labels such as `bootstrap` (spec.md:163-164).
     - Apply updates via `gh issue edit <pr> --add-label ... --remove-label ...`.
 
 **Decisions:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12.
@@ -195,6 +196,7 @@ Workflow modifications must avoid unintended trigger amplification across concur
    - Condition: `if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)`
    - TARGET resolution: resolve TARGET using the identical per-event logic as `gate` (`merge-gate.yml:123-135`). If TARGET is empty, log an informative message and exit 0.
    - Mint Themis App installation token via `actions/create-github-app-token`.
+   - Re-read `hold` on the pull request and on every issue the pull request closes immediately before the first write; with `hold` present anywhere in that set, write nothing, log one line naming the held object, and exit 0 (#291, REVIEW.md D13/D14).
    - Run `bash scripts/ci/review_recorder.sh "$TARGET"`.
 3. Update `gate` job dependencies:
    - Set `needs: [record]` only.
@@ -272,7 +274,7 @@ Done when: All seven verification commands exit 0.
 
 Round 1 review and smoke review findings addressed in Round 2:
 
-- **R1-1 / AT-R1-1 (D2 comment format):** Standardized review verdict structured blocks to use `<!-- review-verdict:<reviewer>:<verdict> -->` and `<!-- reviewed-head:<oid> -->`, eliminating obsolete `<!-- reviewer:argus -->` markers.
+- **R1-1 / AT-R1-1 (D2 comment format):** Standardized review verdict structured blocks to use `<!-- review-verdict:<reviewer>:<verdict> -->` and `<!-- reviewed-head:<oid> -->`, eliminating the obsolete `reviewer:` opener.
 - **R1-2 / AT-R1-3 (D3 Actions run provenance):** Added workflow path and head repository verification to test fixtures; split provenance validation into an accepting case and four specific refusal checks; added marker withdrawal scenarios on failed or cancelled workflow runs.
 - **R1-3 / AT-R1-5 (D4 merge gate round-trip):** Invoked `scripts/ci/merge_gate.sh` directly within the test suite under hermetic stubs, asserting conjuncts 3, 4, 5, 11 and WHY[3] carry-forward text.
 - **R1-4 / AT-R1-6.2 (D7 security dual agreement):** Added negative tests ensuring author cannot self-agree on security findings, and unauthenticated comments claiming fixes are ignored.
