@@ -411,10 +411,11 @@ yet been introduced. No errors or broken test setups occur.
 
 ## Implementation Sync
 
-Implemented by Odyssey under issue #295 without deviations:
-- Tasks T1–T8 executed exactly as specified.
+Implemented by Odyssey under issue #295 with two deviations:
+- Task T1 was delivered at the build rung by Daedalus rather than during the implementation phase.
+- Task T7 diverged from SA-11 in the initial push by attributing dual-shape normalization to work.sh instead of citing lifecycle_advance.sh:1076.
 - Master autonomy gate idles queues when `loop.autonomous_merge` is false (D2).
 - First-hop intake gated on `intake:auto` and capped by `max_concurrent_first_hops` (D3, D4).
 - Lock and consumption key paths relocated to `POLL_STATE_DIR` without `/tmp` access (D5).
 - Fix-round triggers strictly isolate suffixed reviewer App logins `evekhm-argus-app[bot]` and `evekhm-atlas-app[bot]` (D6).
-- All 18 contract scenarios in `e2e_chain_test.sh` pass.
+- All 19 contract scenarios in `e2e_chain_test.sh` pass.

@@ -162,15 +162,16 @@ poll_tick() {
             local trigger_body
             trigger_body="$(jq -r '
               [
-                .[]? |
+                [
+                  .[]? |
+                  select((.user.login // "") == "evekhm-argus-app[bot]" or (.user.login // "") == "evekhm-atlas-app[bot]")
+                ] |
+                group_by(.user.login)[]? | last |
                 select(
-                  ((.user.login // "") == "evekhm-argus-app[bot]" or (.user.login // "") == "evekhm-atlas-app[bot]") and
+                  ((.body // "") | contains("review findings: blocking")) or
                   (
-                    ((.body // "") | contains("review findings: blocking")) or
-                    (
-                      ((.body // "") | test("<!-- review-verdict:[^:]+:findings -->")) and
-                      ((.body // "") | test("<!-- finding:[^:]+:(security|high):open:"))
-                    )
+                    ((.body // "") | test("<!-- review-verdict:[^:]+:findings -->")) and
+                    ((.body // "") | test("<!-- finding:[^:]+:(security|high):open:"))
                   )
                 )
               ] | last | .body // empty
@@ -239,60 +240,66 @@ poll_tick() {
     fi
 
     # 3. First-hop intake: open unclaimed intent:new issues with intake:auto (D3, D4, D5, AT-15, AT-22)
-    local limit active_count in_progress_json="[]"
+    local limit active_count in_progress_raw in_progress_json="[]"
     limit="$(python3 "$REPO_ROOT/scripts/ops/execution.py" --loop max_concurrent_first_hops 2>/dev/null || echo 1)"
     [ -n "$limit" ] || limit=1
-    in_progress_json="$(gh issue list --repo "$GITHUB_REPO" --state open --label "in-progress" --json number,comments 2>/dev/null || echo '[]')"
-    active_count="$(jq '
-      [
-        .[]? |
-        [ .comments[]? | select((.body // "") | test("^[[:space:]]*[Cc]laim:")) ] | last |
-        select(. != null) |
-        ((.author.login // .user.login // "") | sub("\\[bot\\]$"; "")) |
-        select(. == "evekhm-athena-app")
-      ] | length
-    ' <<<"$in_progress_json" 2>/dev/null || echo 0)"
-
-    if [ "$active_count" -ge "$limit" ]; then
-        echo "poll.sh: first-hop intake concurrency limit reached ($active_count/$limit), skipping intake"
+    # Query limit 300 exceeds active in-progress issues across the fleet by an order of magnitude (typically <20), preventing truncation to gh default 30 (R1-2).
+    if ! in_progress_raw="$(gh issue list --repo "$GITHUB_REPO" --state open --label "in-progress" --limit 300 --json number,comments 2>/dev/null)"; then
+        echo "poll.sh: measuring query failed (gh issue list --label in-progress); skipping intake"
     else
-        local intake_json="[]"
-        intake_json="$(gh issue list --repo "$GITHUB_REPO" --state open --label "intent:new" --label "intake:auto" --json number,title,labels 2>/dev/null || echo '[]')"
-        if [ -n "$intake_json" ] && [ "$intake_json" != "[]" ]; then
-            local intake_count
-            intake_count="$(jq '. | length' <<<"$intake_json" 2>/dev/null || echo 0)"
-            for (( idx=0; idx<intake_count; idx++ )); do
-                if [ "$active_count" -ge "$limit" ]; then
-                    break
-                fi
+        in_progress_json="${in_progress_raw:-[]}"
+        active_count="$(jq '
+          [
+            .[]? |
+            [ .comments[]? | select((.body // "") | test("^[[:space:]]*[Cc]laim:")) ] | last |
+            select(. != null) |
+            ((.author.login // .user.login // "") | sub("\\[bot\\]$"; "")) |
+            select(. == "evekhm-athena-app")
+          ] | length
+        ' <<<"$in_progress_json" 2>/dev/null || echo 0)"
 
-                local issue_obj
-                issue_obj="$(jq -c ".[$idx]" <<<"$intake_json")"
-                local issue_num
-                issue_num="$(jq -r '.number // empty' <<<"$issue_obj")"
-                [ -n "$issue_num" ] || continue
+        if [ "$active_count" -ge "$limit" ]; then
+            echo "poll.sh: first-hop intake concurrency limit reached ($active_count/$limit), skipping intake"
+        else
+            local intake_json="[]"
+            # Query limit 300 covers the entire repository backlog (~40 issues total) in a single page, preventing truncation to gh default 30 (R1-2).
+            intake_json="$(gh issue list --repo "$GITHUB_REPO" --state open --label "intent:new" --label "intake:auto" --limit 300 --json number,title,labels 2>/dev/null || echo '[]')"
+            if [ -n "$intake_json" ] && [ "$intake_json" != "[]" ]; then
+                local intake_count
+                intake_count="$(jq '. | length' <<<"$intake_json" 2>/dev/null || echo 0)"
+                for (( idx=0; idx<intake_count; idx++ )); do
+                    if [ "$active_count" -ge "$limit" ]; then
+                        break
+                    fi
 
-                local is_claimed
-                is_claimed="$(jq -r '[.labels[]? | (.name // .)] | if index("in-progress") != null then "yes" else "no" end' <<<"$issue_obj")"
-                [ "$is_claimed" = "no" ] || continue
+                    local issue_obj
+                    issue_obj="$(jq -c ".[$idx]" <<<"$intake_json")"
+                    local issue_num
+                    issue_num="$(jq -r '.number // empty' <<<"$issue_obj")"
+                    [ -n "$issue_num" ] || continue
 
-                is_skipped "athena" && continue
+                    local is_claimed
+                    is_claimed="$(jq -r '[.labels[]? | (.name // .)] | if index("in-progress") != null then "yes" else "no" end' <<<"$issue_obj")"
+                    [ "$is_claimed" = "no" ] || continue
 
-                local token
-                token="$(mint_cached_token athena)"
-                if [ -z "$token" ]; then
-                    echo "missing key for athena, skipping its rows"
-                    continue
-                fi
+                    is_skipped "athena" && continue
 
-                if ! GH_TOKEN="$token" CLAIM_ACTOR="athena" CLAIM_SESSION="poll-$$" "$claim_cmd" "$issue_num"; then
-                    continue
-                fi
+                    local token
+                    token="$(mint_cached_token athena)"
+                    if [ -z "$token" ]; then
+                        echo "missing key for athena, skipping its rows"
+                        continue
+                    fi
 
-                active_count=$((active_count + 1))
-                processed_issues="$processed_issues $issue_num "
-                "$RUN_SH" "$issue_num" --as athena || true
-            done
+                    if ! GH_TOKEN="$token" CLAIM_ACTOR="athena" CLAIM_SESSION="poll-$$" "$claim_cmd" "$issue_num"; then
+                        continue
+                    fi
+
+                    active_count=$((active_count + 1))
+                    processed_issues="$processed_issues $issue_num "
+                    "$RUN_SH" "$issue_num" --as athena || true
+                done
+            fi
         fi
     fi
 
