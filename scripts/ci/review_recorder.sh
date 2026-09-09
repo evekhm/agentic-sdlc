@@ -27,8 +27,12 @@ fi
 REPO="${REPO:-evekhm/agentic-sdlc}"
 export GITHUB_REPOSITORY="$REPO"
 
-# Token setup
-export GH_TOKEN="${THEMIS_TOKEN:-${GITHUB_TOKEN:-}}"
+# Token setup (Smoke N2)
+if [ -z "${THEMIS_TOKEN:-}" ] && [ -z "${FX:-}" ]; then
+  echo "THEMIS_TOKEN is not set; recorder writes nothing"
+  exit 0
+fi
+export GH_TOKEN="${THEMIS_TOKEN:-}"
 
 # Query pull request info
 PR_JSON="$(gh pr view "$PR" --json number,labels,closingIssuesReferences,body,headRefOid,commits 2>/dev/null || true)"
@@ -37,16 +41,16 @@ if [ -z "$PR_JSON" ]; then
   exit 1
 fi
 
-# Guard 2 (D11, #291): Circuit breaker on hold
+# Guard 2 (#291): Circuit breaker on hold
 # Check PR itself
 if echo "$PR_JSON" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
   echo "hold present on #$PR, recorder writes nothing"
   exit 0
 fi
 
-# Check closing issues
+# Check closing issues (covers all 9 GitHub keywords case-insensitive, R1-14)
 CLOSING_ISSUES="$(echo "$PR_JSON" | jq -r '(.closingIssuesReferences[]?.number // empty)')"
-BODY_CLOSING="$(echo "$PR_JSON" | jq -r '.body // ""' | grep -oEi '(closes|fixes|resolves) #[0-9]+' | grep -oE '[0-9]+' || true)"
+BODY_CLOSING="$(echo "$PR_JSON" | jq -r '.body // ""' | grep -oEi '\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#[0-9]+' | grep -oE '[0-9]+' || true)"
 ALL_CLOSING="$(printf '%s\n%s\n' "$CLOSING_ISSUES" "$BODY_CLOSING" | sort -u | grep -E '^[0-9]+$' || true)"
 
 for iss in $ALL_CLOSING; do
@@ -543,6 +547,24 @@ TO_ADD="$(jq -r '.to_add | join(",")' "$PLAN_JSON")"
 TO_REMOVE="$(jq -r '.to_remove | join(",")' "$PLAN_JSON")"
 
 if [ "${DRY_RUN:-0}" != "1" ]; then
+  # Guard 2 (#291, Smoke N6): Re-read hold immediately before the first write
+  PR_LATEST_JSON="$(gh pr view "$PR" --json labels,closingIssuesReferences,body 2>/dev/null || true)"
+  if echo "$PR_LATEST_JSON" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
+    echo "hold present on #$PR, recorder writes nothing"
+    exit 0
+  fi
+  CLOSING_LATEST="$(echo "$PR_LATEST_JSON" | jq -r '(.closingIssuesReferences[]?.number // empty)')"
+  BODY_CLOSING_LATEST="$(echo "$PR_LATEST_JSON" | jq -r '.body // ""' | grep -oEi '\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#[0-9]+' | grep -oE '[0-9]+' || true)"
+  ALL_CLOSING_LATEST="$(printf '%s\n%s\n' "$CLOSING_LATEST" "$BODY_CLOSING_LATEST" | sort -u | grep -E '^[0-9]+$' || true)"
+
+  for iss in $ALL_CLOSING_LATEST; do
+    iss_json="$(gh issue view "$iss" --json labels 2>/dev/null || true)"
+    if echo "$iss_json" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
+      echo "hold present on #$iss, recorder writes nothing"
+      exit 0
+    fi
+  done
+
   # Execute comment write if needed
   if [ "$COMMENT_ACTION" = "POST" ]; then
     gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$WORKDIR/new_body.md"

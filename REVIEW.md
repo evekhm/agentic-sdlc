@@ -16,20 +16,17 @@ agent regardless of role is in [AGENTS.md](AGENTS.md); why the system
 exists and who the personas are is in [INTENT.md](INTENT.md); what
 the system does today is in [docs/SPEC.md](docs/SPEC.md).
 
-**Automation status.** The enforcement points below name a
-*recorder*: the trusted posting step that validates reviewer output
-against a schema and performs every GitHub write itself. No recorder
-exists in this repository yet — it ports with issues #8 and #9 — so
-every rule here is currently prompt-enforced with a human as the
-backstop. The rules are stated normatively anyway, so the ported code
-has exactly one target.
+**Automation status.** The enforcement points below name the
+recorder (`scripts/ci/review_recorder.sh`), running in the `record` job
+of `.github/workflows/merge-gate.yml`. The recorder is the trusted
+step that validates reviewer output against schema and performs every
+GitHub write directly.
 
 ## The two reviewers
 
 - **Argus** (`evekhm-argus-app[bot]`) — the event-driven reviewer. Reviews on
   PR open, on pushes to a PR branch, and on mention. Owns the
-  findings ledger and, once the automation lands, the recorder that
-  writes it.
+  findings ledger and emits the review blocks that the recorder writes.
 - **Atlas** (`evekhm-atlas-app[bot]`) — the independent second opinion,
   the reviewer that makes consensus mean something. Runs round 1 in
   full and afterwards only where the protocol requires it.
@@ -115,7 +112,7 @@ including every class that stretches rounds: doc-number drift, prose
 precision, same-class-elsewhere instances outside the diff, missing
 polish on error paths that gate neither money nor security.
 
-Enforcement (recorder, not prompt — ports with #8/#9):
+Enforcement (recorder execution via scripts/ci/review_recorder.sh):
 
 - Severity must be one of the four enum values; anything else fails
   validation.
@@ -424,7 +421,7 @@ the unbounded loop.
 
 ## Dispatch policy
 
-Automation ports with #8/#9; the rules bind it when it lands.
+Automation runs in the record job via scripts/ci/review_recorder.sh; the rules bind it directly.
 
 - Reviews are dispatched by: PR opened, push to a PR branch (through
   the budget gate), an explicit reviewer mention, or manual dispatch.
@@ -463,11 +460,10 @@ funnel exists.
 ## Enforcement map
 
 Prompts state the rules so the reviewers aim correctly; the recorder
-enforces them so a drifting model cannot break the budget. **Every
-rule must exist in code before a prompt may describe it in the
-present tense** — a prompt that describes unbuilt behavior sends the
-agent's output into a void. Until the recorder lands (#8/#9), the
-rows marked *recorder* are prompt-enforced with a human backstop.
+(`scripts/ci/review_recorder.sh`) enforces them in the `record` job so
+a drifting model cannot break the budget. Every rule exists in code
+before a prompt describes it in the present tense. The rows marked
+*recorder* are enforced by `scripts/ci/review_recorder.sh`.
 
 - Severity enum, the `high` failure-scenario requirement, and loud
   demotion — *recorder*, through schema validation.
