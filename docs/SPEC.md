@@ -534,11 +534,12 @@ The ladder is written end to end here; `review:1..3` and
 
 ### review.policy
 `REVIEW.md` is the review protocol the reviewer personas compile
-against (PR #14, #267). It defines: four authoritative severity tiers
+against (PR #14, #267, #291). It defines: four authoritative severity tiers
 (`security`/`high`/`normal`/`suggestion`) with a closed `high` list
 and a mandatory sibling failure-scenario requirement (`<!-- failure-scenario:<id> -->`);
 high findings lacking a concrete failure scenario are mechanically demoted
-by the recorder to `normal` with table note `[demoted from high: missing failure_scenario marker]`.
+by the recorder to `normal` with table note `[demoted from high: missing failure_scenario marker] on <id>` (#291 D4),
+while findings with status `withdrawn` or peer state `dispute` are exempt (#291 D5).
 Findings with non-enum severities fail validation loudly: the recorder logs the
 refusal, appends `[refused: <id>: invalid severity <x>]`, creates no row, and
 exits 0. Review verdicts are posted as structured blocks
@@ -547,7 +548,8 @@ carrying `<!-- reviewed-head:<sha> -->`, `<!-- run-id:<id> -->`, `<!-- round:<n>
 and finding lines `<!-- finding:<id>:<severity>:<status>:<peer> -->` (admitting Decision-ID
 tags `@<Dn>` matching `[A-Za-z0-9@-]`). The three-round funnel admits all findings in
 round 1; rounds 2–3 admit `security` and `high`, while new `suggestion` findings are recorded
-as non-blocking `normal` tracking rows; past round 3, only `security` findings are admitted,
+as non-blocking `normal` tracking rows; historical findings carried forward from round 1 (such as
+suggestions) retain their recorded tier (#291 D6); past round 3, only `security` findings are admitted,
 and any other new filing is demoted to `normal`. Dual agreement is enforced on `security`:
 starts `pending`, discoverer cannot self-agree, and peer must explicitly agree on finding
 and fix verification. Only the discovering reviewer transitions row status to `fixed`; a peer
@@ -558,8 +560,11 @@ findings via `@(argus|atlas) retier <id> <severity>`, updating severity with not
 `[refused: retier by @<user>: unauthorized]`. The two reviewers are deployment-pinned to
 different model families; which family backs which reviewer is a
 `config/` fact and appears nowhere in the policy. The consensus ledger
-is maintained by Themis via `scripts/ci/review_recorder.sh`, deriving
-labels (`lifecycle.labels`) and gate readiness (`loop.autonomous`).
+is maintained by Themis via `scripts/ci/review_recorder.sh` (invoking `scripts/ci/review_recorder.py`),
+deriving labels (`lifecycle.labels`) and gate readiness (`loop.autonomous`). Before any write,
+the recorder re-reads `hold` on the PR and all linked issues; probe failures fail closed (exit 1),
+non-issue references are treated as not held with a logged note, and if `hold` is present
+the recorder exits 0 without writing (#25 D13/D14, #291 D1, D2).
 
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
@@ -1092,7 +1097,9 @@ flag off the same evaluation runs and nothing is written.
 Before merge evaluation executes, `.github/workflows/merge-gate.yml` runs
 a dedicated `record` job (`scripts/ci/review_recorder.sh <pr>`) ahead of `gate`
 (`gate` declares `needs: [record]`). Both jobs run under `environment: themis`
-and share `concurrency: group: merge-gate` (#267). The recorder maintains a single
+and share `concurrency: group: merge-gate` (#267). The shell entrypoint `scripts/ci/review_recorder.sh`
+delegates review parsing, ledger derivation, and action plan generation to the standalone engine
+`scripts/ci/review_recorder.py` (#291 D8). The recorder maintains a single
 in-place consensus ledger comment (`<!-- consensus-ledger:<pr> -->`) per pull request:
 initial `POST` on first review, byte-for-byte skip if the rendered body matches
 the existing comment, and in-place `PATCH` on subsequent reviews preserving comment ID.
@@ -1103,7 +1110,9 @@ run `head_sha` must match `reviewed-head`, workflow path must be `.github/workfl
 the reviewer's accepted head marker (reverting to previous accepted head or unset), while
 existing findings rows survive. The circuit breaker re-reads `hold` across the pull request
 and all linked issues (closing references, body closing and reference mentions, and branch name)
-before writing; if present, the recorder logs the held object and exits 0 without writing.
+at preflight and immediately before writing (#291 D1, D2); probe failures fail closed (exit 1),
+while non-issue numbers are logged and treated as not held; if `hold` is present, the recorder
+logs the held object and exits 0 without writing.
 
 CI (conjunct 2) is read from the pull request's own `mergeStateStatus`
 rather than reconstructed from a required-checks list: `CLEAN` or
