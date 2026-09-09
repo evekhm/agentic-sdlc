@@ -1073,11 +1073,18 @@ $marker"
     if grep -Fxq "in-progress" <<<"$labels"; then
         claim_re='^[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
         claim_login="$(jq -r --arg re "$claim_re" \
-            '[.comments[]? | select((.body // "") | test($re; "i"))] | last | .user.login // ""' \
+            '[.comments[]? | select((.body // "") | test($re; "i"))] | last | (.author.login // .user.login // "")' \
             <<<"$view" 2>/dev/null || true)"
         claim_holder=""
         if [ -n "$claim_login" ]; then
             claim_holder="$(persona_for_login "$claim_login")"
+            if [ -z "$claim_holder" ]; then
+                if [[ "$claim_login" == *"[bot]" ]]; then
+                    claim_holder="$(persona_for_login "${claim_login%\[bot\]}")"
+                else
+                    claim_holder="$(persona_for_login "${claim_login}[bot]")"
+                fi
+            fi
         fi
 
         if [ -z "$claim_login" ]; then

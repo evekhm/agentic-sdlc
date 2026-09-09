@@ -1632,7 +1632,7 @@ cat > "$FIXTURES/issue-999.json" <<'EOF'
   "labels": [{"name": "status:implementing"}, {"name": "in-progress"}],
   "comments": [
     {
-      "user": {"login": "evekhm-odyssey-app[bot]"},
+      "author": {"login": "evekhm-odyssey-app"},
       "body": "Claim: odyssey (session-1) stage:implement path:.claude/worktrees/odyssey-999-test"
     }
   ]
