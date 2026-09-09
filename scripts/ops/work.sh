@@ -1279,8 +1279,8 @@ if [ -n "$WORK_COST_FILE" ] || { [ "$launch_harness" = "antigravity" ] && [ -n "
         models="$(printf '%s' "$raw" \
             | jq -r '(.modelUsage // {}) | keys | join(",")' 2>/dev/null)" || models=""
     elif [ "$launch_harness" = "antigravity" ]; then
-        models="${launch_model:-$(model_of "$launch_persona" 2>/dev/null)}" || models=""
-        models="${models:-$(printf '%s' "$raw" | jq -r '.model // empty' 2>/dev/null)}"
+        raw_model="$(printf '%s' "$raw" | jq -r '.model // empty' 2>/dev/null)" || raw_model=""
+        models="${raw_model:-${launch_model:-$(model_of "$launch_persona" 2>/dev/null)}}" || models=""
         inp="$(printf '%s' "$raw" | jq -r '.usage.input_tokens // empty' 2>/dev/null)" || inp=""
         out="$(printf '%s' "$raw" | jq -r '((.usage.output_tokens // 0) + (.usage.thinking_tokens // 0))' 2>/dev/null)" || out=""
         cr="$(printf '%s' "$raw" | jq -r '.usage.cache_read_tokens // 0' 2>/dev/null)" || cr="0"
