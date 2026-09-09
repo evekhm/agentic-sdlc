@@ -255,21 +255,24 @@ loop_limits() { # <autonomous> <max-dispatch> <max-cost>
   printf '%s\n' "$3" > "$FX/loop-max_cost_usd_per_issue"
 }
 
-pr_fixture() { # <number> <head_sha> [author] [commits_json]
+pr_fixture() { # <number> <head_sha> [author] [commits_json] [closing_issues_json]
   local num="$1" head="${2:-$H}" author="${3:-evekhm-odyssey-app[bot]}"
   local commits_json
-  if [ "$#" -ge 4 ]; then
+  if [ "$#" -ge 4 ] && [ -n "${4:-}" ]; then
     commits_json="$4"
   else
     commits_json="$(jq -nc --arg h "$head" '[{sha: $h}]')"
   fi
+  local closing_json="${5:-[]}"
   jq -nc --argjson n "$num" --arg head "$head" --arg author "$author" \
     --arg hr "$GITHUB_REPOSITORY" --argjson commits "$commits_json" \
+    --argjson closing "$closing_json" \
     '{number: $n, state: "OPEN", body: "Refs #267", author: {login: $author},
       headRefName: "odyssey/267-feature", headRefOid: $head,
       headRepository: {nameWithOwner: $hr}, baseRefName: "main",
       commits: $commits,
-      labels: []}' > "$FX/pr-$num.json"
+      labels: [],
+      closingIssuesReferences: ($closing | map({number: .}))}' > "$FX/pr-$num.json"
   echo "$commits_json" > "$FX/commits-$num.json"
 }
 
@@ -575,6 +578,7 @@ EOF
   grep -q "reviewed-head:argus:$H0" "$WRITES" || { fail "test_provenance_validation: head marker did not revert to $H0 on failure (D3)"; return 1; }
   grep -q "ledger-row:R1-1@D4:high:open:none" "$WRITES" || { fail "test_provenance_validation: row did not survive withdrawal (D3)"; return 1; }
   grep -q "\[run 2015 ended failure; verdict withdrawn\]" "$WRITES" || { fail "test_provenance_validation: failure withdrawal note missing (D3)"; return 1; }
+  grep -q "gh issue edit 102.*--add-label.*review:verifying" "$WRITES" || { fail "test_provenance_validation: review:verifying label not added when PR head is newer than reviewed head (D8)"; return 1; }
 
   # Withdrawal on cancelled
   run_fixture 2016 "$ARGUS" "$H" "pull_request" "completed" "cancelled"
@@ -631,9 +635,9 @@ EOF
   bash "$RECORDER" 103 || { fail "test_ledger_comment_lifecycle: pass 1 failed"; return 1; }
   grep -q "gh api.*POST.*repos/.*/issues/103/comments" "$WRITES" || { fail "test_ledger_comment_lifecycle: POST not called on initial creation (D4)"; return 1; }
 
-  # Pass 2a: Byte-identical re-derivation skips PATCH (D1 idempotency guard)
+  # Pass 2a: Byte-identical re-derivation skips PATCH on the ledger comment (D1 idempotency guard). Comment writes and label writes are separate streams; label synchronization may execute while comment PATCH is skipped.
   local ledger_comment
-  ledger_comment="$(sed '1d' "$WRITES")"
+  ledger_comment="$(awk '/### Findings ledger for #103/ {f = 1} f; /<!-- consensus-ledger-end -->/ {f = 0; exit}' "$WRITES")"
   [ -n "$ledger_comment" ] || ledger_comment="$(cat <<EOF
 ### Findings ledger for #103
 <!-- consensus-ledger:103 -->
@@ -650,7 +654,7 @@ EOF
 
   : > "$WRITES"
   bash "$RECORDER" 103 || { fail "test_ledger_comment_lifecycle: pass 2a failed"; return 1; }
-  grep -q "gh api.*PATCH.*repos/.*/issues/comments/5001" "$WRITES" && { fail "test_ledger_comment_lifecycle: PATCH must not be called when body is byte-identical (D1)"; return 1; }
+  grep -q "^gh api.*PATCH.*repos/.*/issues/comments/5001" "$WRITES" && { fail "test_ledger_comment_lifecycle: PATCH must not be called when body is byte-identical (D1)"; return 1; }
 
   # Pass 2b: Differing render executes exactly one PATCH call (D4)
   local stale_ledger_comment
@@ -670,7 +674,7 @@ EOF
   : > "$WRITES"
   bash "$RECORDER" 103 || { fail "test_ledger_comment_lifecycle: pass 2b failed"; return 1; }
   local patch_count
-  patch_count="$(grep -c "gh api.*PATCH.*repos/.*/issues/comments/5001" "$WRITES" || true)"
+  patch_count="$(grep -c "^gh api.*PATCH.*repos/.*/issues/comments/5001" "$WRITES" || true)"
   [ "$patch_count" -eq 1 ] || { fail "test_ledger_comment_lifecycle: expected exactly 1 PATCH call on differing render, got $patch_count (D4)"; return 1; }
 
   # Guard 3: Sender is Themis App login -> skip execution entirely (D1)
@@ -1035,7 +1039,7 @@ EOF
   local out_a
   out_a="$(bash "$RECORDER" 109 2>&1)" || { fail "test_label_sync: recorder execution failed on held PR (D8, #291)"; return 1; }
   [ ! -s "$WRITES" ] || { fail "test_label_sync: writes attempted when hold label is present (#291)"; return 1; }
-  echo "$out_a" | grep -Eq "109.*hold|hold.*109" || { fail "test_label_sync: log missing held object 109 (#291)"; return 1; }
+  echo "$out_a" | grep -Fq "hold present on #109, recorder writes nothing" || { fail "test_label_sync: log missing held object line for #109 (#291)"; return 1; }
 
   # Case (b): PR carrying bootstrap and stale review:1 updates labels and preserves bootstrap
   reset_state
@@ -1089,6 +1093,22 @@ EOF
   grep -q "gh issue edit 109.*--add-label.*review:merge-ready" "$WRITES" && { fail "test_label_sync: review:merge-ready added despite open blocking findings and dispute (D8)"; return 1; }
   grep -q "gh issue edit 109.*--add-label.*review:verifying" "$WRITES" && { fail "test_label_sync: review:verifying added when PR head equals reviewed head (D8)"; return 1; }
 
+  # Case (c): PR without hold closing an issue that carries hold produces zero writes and logs held issue (#291, REVIEW.md D13/D14)
+  reset_state
+  pr_fixture 109 "$H" "" "" '[209]'
+  jq '.body = "Closes #209"' "$FX/pr-109.json" > "$FX/pr-109.json.tmp"
+  mv "$FX/pr-109.json.tmp" "$FX/pr-109.json"
+  issue_fixture 109 "bootstrap"
+  issue_fixture 209 "hold"
+
+  run_fixture 2010 "$ARGUS" "$H" "pull_request" "completed" "success"
+  comments_fixture 109 "$(comment_item "$ARGUS" "$rev_body_hold" 3011)"
+
+  local out_c
+  out_c="$(bash "$RECORDER" 109 2>&1)" || { fail "test_label_sync: recorder execution failed on PR closing held issue (D8, #291)"; return 1; }
+  [ ! -s "$WRITES" ] || { fail "test_label_sync: writes attempted when closed issue carries hold (#291)"; return 1; }
+  echo "$out_c" | grep -Fq "hold present on #209, recorder writes nothing" || { fail "test_label_sync: log missing held object line for #209 (#291)"; return 1; }
+
   pass "test_label_sync (D5, D7, D8, AT-10)"
 }
 
@@ -1135,6 +1155,7 @@ EOF
   local emitted_ledger
   emitted_ledger="$(awk '/### Findings ledger for #110/ {f = 1} f; /<!-- consensus-ledger-end -->/ {f = 0; exit}' "$WRITES")"
   [ -n "$emitted_ledger" ] || { fail "test_merge_gate_round_trip: emitted ledger not captured in writes (D4)"; return 1; }
+  grep -q "gh issue edit 110.*--add-label.*review:merge-ready" "$WRITES" || { fail "test_merge_gate_round_trip: review:merge-ready label not added on clean consensus at current head (D8)"; return 1; }
 
   # Seed emitted ledger comment and evaluate merge gate hermetically
   comments_fixture 110 "$(comment_item "$THEMIS" "$emitted_ledger" 5001 "COLLABORATOR" "Bot")"

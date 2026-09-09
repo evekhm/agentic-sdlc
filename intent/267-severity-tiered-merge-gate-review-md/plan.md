@@ -48,7 +48,7 @@ Touch: `scripts/ci/tests/review_recorder_test.sh`
 5. Contract tests execute against `scripts/ci/review_recorder.sh`. Tests are committed RED at base because `scripts/ci/review_recorder.sh` does not exist yet. Other acceptance criteria are checked separately: AT-11 via the regex one-liner and `merge_gate_test.sh`, AT-12 during provisioning, AT-14 during live execution (NOT RUN), and AT-15 via `spec_check.sh` and `sanitize_check.sh`.
 
 **Decisions:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10.
-**Acceptance:** AT-1, AT-2, AT-3, AT-4, AT-5, AT-6, AT-7, AT-8, AT-9, AT-10, AT-13, AT-16, AT-17, AT-18.
+**Acceptance:** AT-2, AT-3, AT-4, AT-5, AT-6, AT-7, AT-8, AT-9, AT-10, AT-13, AT-16, AT-17, AT-18.
 **Done when:** Test suite runs locally via `bash scripts/ci/tests/review_recorder_test.sh` and reports 13 failed tests out of 13 run due to missing implementation script.
 
 ## T2 · Review protocol and compiled persona updates
@@ -147,6 +147,7 @@ Concurrency between multiple webhook events requires careful state ordering and 
    - Loud refusal for invalid severities: log error, append table note `[refused: <id>: invalid severity <x>]`, create no ledger row, exit 0.
    - High findings without sibling `<!-- failure-scenario:<id> -->` are demoted to `normal` with table note `[demoted from high: missing failure_scenario marker]`.
    - Round funnel enforcement: Round 1 admits all tiers. Rounds 2-3 admit new findings at security or high; new non-blocking observations create `normal` tracking rows owing no verdict. Past round 3, admit only security findings; demote any other filing to `normal`.
+   - Round membership and newness derive from the finding ID prefix `R<n>-` and the review block `<!-- round:n -->` marker. When the ID prefix and the review block round marker disagree, such as an earlier finding `R1-5` carried forward inside a round 2 review block, the `R<n>-` prefix takes precedence so carried-forward findings keep their recorded tier.
 7. Implement security dual agreement and status transitions:
    - Security rows require peer concurrence on finding existence (`agree`) and on fix verification (`fixed:agree`) before leaving the blocking set.
    - Atlas carry-forward: preserve Atlas last accepted head marker across newer commits.
@@ -164,11 +165,15 @@ Concurrency between multiple webhook events requires careful state ordering and 
      `<!-- ledger-row:<id>:<severity>:<status>:<peer> -->`
      `<!-- consensus-ledger-end -->`
      followed by markdown table and notes.
-10. Update ledger comment:
-    - If comment unchanged byte for byte, skip API write.
-    - If ledger comment exists, update via `gh api -X PATCH repos/<repo>/issues/comments/<id> -F body=@<file>`.
+10. Check `hold` status before writes:
+    - Inspect the pull request and every issue the pull request closes for the `hold` label (querying closing issues via `gh pr view`).
+    - With `hold` present on the pull request or on any issue it closes, perform zero writes, log `hold present on #<object>, recorder writes nothing` naming the held object, and exit 0 (#291, REVIEW.md D13/D14).
+11. Update ledger comment:
+    - Comment writes and label writes are separate streams.
+    - Under the D1 idempotency guard, skip PATCH on the ledger comment when its rendered body is byte-identical to the existing comment; this suppresses comment updates without preventing label synchronization.
+    - If ledger comment exists and body differs, update via `gh api -X PATCH repos/<repo>/issues/comments/<id> -F body=@<file>`.
     - If absent, create via `gh api -X POST repos/<repo>/issues/<pr>/comments -F body=@<file>`.
-11. Synchronize labels:
+12. Synchronize labels:
     - Read current labels via `gh issue view <pr> --json labels`.
     - Calculate derived labels (`argus:findings`, `argus:suggestions`, `consensus:*`, `review:merge-ready`, `review:verifying`, `review:1..3`).
     - Reconcile derived labels on each execution, adding required labels and removing stale labels while preserving unrelated issue labels such as `bootstrap` (spec.md:163-164).
@@ -196,8 +201,7 @@ Workflow modifications must avoid unintended trigger amplification across concur
    - Condition: `if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)`
    - TARGET resolution: resolve TARGET using the identical per-event logic as `gate` (`merge-gate.yml:123-135`). If TARGET is empty, log an informative message and exit 0.
    - Mint Themis App installation token via `actions/create-github-app-token`.
-   - Re-read `hold` on the pull request and on every issue the pull request closes immediately before the first write; with `hold` present anywhere in that set, write nothing, log one line naming the held object, and exit 0 (#291, REVIEW.md D13/D14).
-   - Run `bash scripts/ci/review_recorder.sh "$TARGET"`.
+   - Run `bash scripts/ci/review_recorder.sh "$TARGET"`. The script enforces the `hold` re-read across the pull request and all closed issues before writing, so the workflow job adds no check of its own.
 3. Update `gate` job dependencies:
    - Set `needs: [record]` only.
    - Ensure `gate` executes evaluation against updated ledger state.
@@ -278,7 +282,7 @@ Round 1 review and smoke review findings addressed in Round 2:
 - **R1-2 / AT-R1-3 (D3 Actions run provenance):** Added workflow path and head repository verification to test fixtures; split provenance validation into an accepting case and four specific refusal checks; added marker withdrawal scenarios on failed or cancelled workflow runs.
 - **R1-3 / AT-R1-5 (D4 merge gate round-trip):** Invoked `scripts/ci/merge_gate.sh` directly within the test suite under hermetic stubs, asserting conjuncts 3, 4, 5, 11 and WHY[3] carry-forward text.
 - **R1-4 / AT-R1-6.2 (D7 security dual agreement):** Added negative tests ensuring author cannot self-agree on security findings, and unauthenticated comments claiming fixes are ignored.
-- **R1-5 (D8 label synchronization):** Added assertions that label synchronization preserves unrelated labels such as `hold` while updating `review:1..3`. Restored label preservation clause in plan T5.11 verbatim from `spec.md:160-164`.
+- **R1-5 (D8 label synchronization):** Added assertions that label synchronization preserves unrelated labels such as `bootstrap` (spec.md:163-164) while updating `review:1..3`. Under #291, `hold` is handled by the script re-read before writes. Restored label preservation clause in plan T5 verbatim from `spec.md:160-164`.
 - **R1-6 / AT-R1-6.1 (D6 round funnel):** Added test fixtures for rounds 2, 3, and 4 verifying non-blocking normal tracking rows, high finding admission in round 3, and demotion beyond round 3.
 - **R1-7 / Smoke blocking 2 (D12 CI gates workflow):** Dropped `.github/workflows/ci-gates.yml` from T8; documented that contract tests run in no CI workflow at this rung, tracked under issue #246.
 - **R1-8 / Smoke blocking 3 (D8 label provisioning):** Scoped T3 label provisioning to the seven labels named in AT-12; noted that `review:1..3` exist in `bootstrap_tracker.sh` and are untouched; moved AT-12 to NOT RUN.
