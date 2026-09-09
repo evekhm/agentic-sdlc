@@ -233,9 +233,15 @@ comments_fixture() { # <number> <comment-json>...
   local n="$1"; shift
   printf '%s\n' "$@" | jq -sc . > "$FX/comments-$n.json"
 }
-consensus_ledger() { # <pr> <argus-oid|-> <atlas-oid|-> [row ...]   row = id:severity:status:peer
+consensus_ledger() { # <pr> <argus-oid|-> <atlas-oid|-> [assigned-set] [row ...]   row = id:severity:status:peer
   local pr="$1" a="$2" b="$3"; shift 3
-  local out="### Findings ledger for #$pr"$'\n'"<!-- consensus-ledger:$pr -->"$'\n'"<!-- assigned:argus,atlas -->"
+  local assigned="argus,atlas"
+  if [ $# -gt 0 ] && [[ "$1" != *:* ]]; then
+    assigned="$1"
+    shift
+  fi
+  local out="### Findings ledger for #$pr"$'\n'"<!-- consensus-ledger:$pr -->"
+  [ "$assigned" = - ] || [ -z "$assigned" ] || out="$out"$'\n'"<!-- assigned:$assigned -->"
   [ "$a" = - ] || out="$out"$'\n'"<!-- reviewed-head:argus:$a -->"
   [ "$b" = - ] || out="$out"$'\n'"<!-- reviewed-head:atlas:$b -->"
   local r; for r in "$@"; do out="$out"$'\n'"<!-- ledger-row:$r -->"; done

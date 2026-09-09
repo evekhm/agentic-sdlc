@@ -158,14 +158,21 @@ else
     fail "D1 / AT-4: Code PR assigned to Argus and Atlas (got: $out, expected: $expected)"
 fi
 
-# AT-5: Trust-bearing path assignment: status:spec on workflow -> argus and atlas
-out="$(python3 "$EXEC_PY" --subscribers pull_request --status-label status:spec --paths .github/workflows/unattended.yml 2>&1)" || true
-expected="$(printf 'argus\tgh-actions\natlas\tgh-actions')"
-if [ "$out" = "$expected" ]; then
-    pass "D1 / AT-5: Trust-bearing path assigned to Argus and Atlas"
-else
-    fail "D1 / AT-5: Trust-bearing path assigned to Argus and Atlas (got: $out, expected: $expected)"
-fi
+# AT-5: Trust-bearing path assignment: status:spec on trust-bearing paths assigns Argus and Atlas
+for tb_path in \
+    ".github/workflows/unattended.yml" \
+    "REVIEW.md" \
+    "scripts/sync_agents.py" \
+    "scripts/setup/foo.sh" \
+    "AGENTS.md"; do
+    out="$(python3 "$EXEC_PY" --subscribers pull_request --status-label status:spec --paths "$tb_path" 2>&1)" || true
+    expected="$(printf 'argus\tgh-actions\natlas\tgh-actions')"
+    if [ "$out" = "$expected" ]; then
+        pass "D1 / AT-5: Trust-bearing path $tb_path assigned to Argus and Atlas"
+    else
+        fail "D1 / AT-5: Trust-bearing path $tb_path assigned to Argus and Atlas (got: $out, expected: $expected)"
+    fi
+done
 
 # AT-6: Label assignment via deep-review: status:planning with deep-review -> argus and atlas
 out="$(python3 "$EXEC_PY" --subscribers pull_request --status-label status:planning --paths intent/100-test/intent.md --labels deep-review 2>&1)" || true
@@ -197,13 +204,22 @@ fi
 # --- D2 / AT-8..AT-10: Action and draft flags in execution.py --subscribers --------
 banner "D2 / AT-8..AT-10: Action and draft flags in execution.py --subscribers"
 
-# AT-8: Synchronize pre-recorder assignment
+# AT-8: Action synchronize dispatches only assigned reviewers
+# On doc PR (Argus not assigned under D1): dispatches only Atlas
+out="$(python3 "$EXEC_PY" --subscribers pull_request --action synchronize --status-label status:spec --paths docs/foo.md 2>&1)" || true
+expected="$(printf 'atlas\tgh-actions')"
+if [ "$out" = "$expected" ]; then
+    pass "D2 / AT-8: action synchronize on doc PR dispatches only Atlas"
+else
+    fail "D2 / AT-8: action synchronize on doc PR dispatches only Atlas (got: $out, expected: $expected)"
+fi
+# On code PR (Argus assigned under D1): dispatches both Argus and Atlas
 out="$(python3 "$EXEC_PY" --subscribers pull_request --action synchronize --status-label status:implementing --paths src/code.py 2>&1)" || true
 expected="$(printf 'argus\tgh-actions\natlas\tgh-actions')"
 if [ "$out" = "$expected" ]; then
-    pass "D2 / AT-8: action synchronize dispatches assigned reviewers"
+    pass "D2 / AT-8: action synchronize on code PR dispatches both Argus and Atlas"
 else
-    fail "D2 / AT-8: action synchronize dispatches assigned reviewers (got: $out, expected: $expected)"
+    fail "D2 / AT-8: action synchronize on code PR dispatches both Argus and Atlas (got: $out, expected: $expected)"
 fi
 
 # AT-9: Draft PR skip
@@ -214,13 +230,22 @@ else
     fail "D2 / AT-9: draft PR should output nothing (got: $out)"
 fi
 
-# AT-10: Ready for review dispatch
+# AT-10: Action ready_for_review dispatches only assigned reviewers
+# On doc PR (Argus not assigned under D1): dispatches only Atlas
+out="$(python3 "$EXEC_PY" --subscribers pull_request --action ready_for_review --status-label status:spec --paths docs/foo.md 2>&1)" || true
+expected="$(printf 'atlas\tgh-actions')"
+if [ "$out" = "$expected" ]; then
+    pass "D2 / AT-10: action ready_for_review on doc PR dispatches only Atlas"
+else
+    fail "D2 / AT-10: action ready_for_review on doc PR dispatches only Atlas (got: $out, expected: $expected)"
+fi
+# On code PR (Argus assigned under D1): dispatches both Argus and Atlas
 out="$(python3 "$EXEC_PY" --subscribers pull_request --action ready_for_review --status-label status:implementing --paths src/code.py 2>&1)" || true
 expected="$(printf 'argus\tgh-actions\natlas\tgh-actions')"
 if [ "$out" = "$expected" ]; then
-    pass "D2 / AT-10: action ready_for_review dispatches assigned reviewers"
+    pass "D2 / AT-10: action ready_for_review on code PR dispatches both Argus and Atlas"
 else
-    fail "D2 / AT-10: action ready_for_review dispatches assigned reviewers (got: $out, expected: $expected)"
+    fail "D2 / AT-10: action ready_for_review on code PR dispatches both Argus and Atlas (got: $out, expected: $expected)"
 fi
 
 # --- D3 / AT-14: Duplicate deep-review grant refusal in execution.py -----------------
@@ -239,19 +264,26 @@ banner "D4 / AT-15: execution.py --diff-rules evaluation"
 
 out1="$(python3 "$EXEC_PY" --diff-rules --lines 401 --paths src/code.py 2>&1)" || true
 if [ "$out1" = "deep-review" ]; then
-    pass "D4 / AT-15: lines > 400 triggers deep-review (DEEP-1)"
+    pass "D4 / AT-15: lines > 400 triggers deep-review (DEEP-2)"
 else
     fail "D4 / AT-15: lines > 400 triggers deep-review (got: $out1)"
 fi
 
-out2="$(python3 "$EXEC_PY" --diff-rules --lines 50 --paths scripts/auth/mint_app_token.py 2>&1)" || true
-if [ "$out2" = "deep-review" ]; then
-    pass "D4 / AT-15: auth/security path triggers deep-review (DEEP-3)"
+out1b="$(python3 "$EXEC_PY" --diff-rules --files 13 --paths src/code.py 2>&1)" || true
+if [ "$out1b" = "deep-review" ]; then
+    pass "D4 / AT-15: files > 12 triggers deep-review (DEEP-2)"
 else
-    fail "D4 / AT-15: auth/security path triggers deep-review (got: $out2)"
+    fail "D4 / AT-15: files > 12 triggers deep-review (got: $out1b)"
 fi
 
-out3="$(python3 "$EXEC_PY" --diff-rules --lines 50 --paths intent/265-review-split/spec.md 2>&1)" || true
+out2="$(python3 "$EXEC_PY" --diff-rules --lines 50 --paths scripts/auth/mint_app_token.py 2>&1)" || true
+if [ "$out2" = "deep-review" ]; then
+    pass "D4 / AT-15: trust-bearing path triggers deep-review (DEEP-1)"
+else
+    fail "D4 / AT-15: trust-bearing path triggers deep-review (got: $out2)"
+fi
+
+out3="$(python3 "$EXEC_PY" --diff-rules --lines 50 --files 5 --paths intent/265-review-split/spec.md 2>&1)" || true
 if [ -z "$out3" ]; then
     pass "D4 / AT-15: doc path under threshold emits empty"
 else

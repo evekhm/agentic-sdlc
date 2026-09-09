@@ -98,71 +98,53 @@ fi
 # --- D5 / AT-21, AT-22, R3-1: merge_gate.sh consensus evaluation ------------------
 banner "D5 / AT-21, AT-22, R3-1: merge_gate.sh consensus evaluation"
 
-# We test merge_gate.sh conjuncts 3 and 11 evaluation by checking if it parses
-# <!-- assigned:atlas --> and satisfies consensus when only Atlas was assigned.
-HEAD_OID="1111111111111111111111111111111111111111"
+# Source the hermetic test harness from merge_gate_test.sh
+source <(sed -e "s|^REPO=.*|REPO=\"$REPO\"|" -e '/^# ---*$/q' "$REPO/scripts/ci/tests/merge_gate_test.sh")
 
-eval_gate_consensus() {
-    local ledger_content="$1"
-
-    # Run subshell extracting merge_gate consensus evaluation logic against canned ledger
-    python3 -c "
-import subprocess, sys
-
-# Emulate conjunct (3) and (11) evaluation from merge_gate.sh
-# Under D5:
-# If <!-- assigned:atlas --> is present in consensus ledger:
-#   - ARGUS_HEAD check is skipped or C[11]=1
-#   - If ATLAS_HEAD == HEAD, C[3]=1
-# If <!-- assigned:argus,atlas --> or unassigned:
-#   - Both ARGUS_HEAD == HEAD and ATLAS_HEAD == HEAD required
-cl = '''$ledger_content'''
-
-# Parse merge_gate.sh source directly to check if assigned: marker is handled
-with open('$MERGE_GATE') as f:
-    gate_src = f.read()
-
-if 'assigned:' not in gate_src:
-    # merge_gate.sh does not yet support assigned: marker
-    sys.exit(1)
-
-# Check if Atlas-only assignment logic exists in conjunct (3) and (11)
-if 'assigned:atlas' in gate_src or 'ASSIGNED' in gate_src:
-    sys.exit(0)
-sys.exit(1)
-" 2>/dev/null
+# Ensure fail increments the suite-level failure counter without exiting immediately
+fail() {
+    echo "FAIL: $*" >&2
+    FAILURES=$((FAILURES + 1))
+}
+pass() {
+    echo "PASS: $*"
 }
 
-# AT-21: Atlas-only PR with <!-- assigned:atlas --> and Atlas verdict at head
-LEDGER_ATLAS_ONLY="<!-- consensus-ledger:100 -->
-<!-- assigned:atlas -->
-<!-- reviewed-head:atlas:$HEAD_OID -->
-<!-- consensus-ledger-end -->"
-
-if eval_gate_consensus "$LEDGER_ATLAS_ONLY"; then
-    pass "D5 / AT-21: merge_gate.sh supports Atlas-only consensus when assigned:atlas is present"
-else
-    fail "D5 / AT-21: merge_gate.sh does not support Atlas-only consensus (requires Argus unconditionally)"
+# Wrap python3 stub to record invocations into $INVOKES so R3-1 can observe subscriber dispatch
+cat > "$WORK/bin/python3" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "python3 \$*" >> "\$INVOKES"
+if [ "\${2:-}" = "--loop" ]; then
+  [ -f "\$FX/loop-\$3" ] || exit 1
+  cat "\$FX/loop-\$3"; exit 0
 fi
+exec /usr/bin/python3 "\$@"
+STUB
+chmod +x "$WORK/bin/python3"
 
-# AT-22: Dual-assigned PR with <!-- assigned:argus,atlas --> requires Argus
-LEDGER_DUAL="<!-- consensus-ledger:100 -->
-<!-- assigned:argus,atlas -->
-<!-- reviewed-head:atlas:$HEAD_OID -->
-<!-- consensus-ledger-end -->"
+# AT-21: Atlas-only PR with assigned:atlas and Atlas verdict at head
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" atlas)")"
+run "D5 / AT-21: Atlas-only PR with assigned:atlas exits 0" 123
+has "conjunct (3): true" "D5 / AT-21: conjunct (3) reports true for Atlas-only assignment"
+has "conjunct (11): true" "D5 / AT-21: conjunct (11) reports true for Atlas-only assignment"
+merged "D5 / AT-21: single-reviewer Atlas consensus merges"
 
-# At base, merge_gate.sh doesn't know about assigned: marker at all
-if grep -E 'sed .*assigned:|ASSIGNED=.*assigned:' "$MERGE_GATE" >/dev/null 2>&1; then
-    pass "D5 / AT-22: merge_gate.sh recognizes assigned: marker"
+# AT-22: Dual-assigned PR with assigned:argus,atlas must NOT regress when AT-21 lands
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" argus,atlas)")"
+run "D5 / AT-22: dual-assigned PR with only Atlas verdict exits 0" 123
+has "conjunct (3): false" "D5 / AT-22 (must not regress): conjunct (3) reports false when Argus verdict missing"
+not_merged "D5 / AT-22 (must not regress): dual-assigned PR does not merge without Argus"
+
+# R3-1: Absent assigned marker fallback to execution.py --subscribers
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" -)")"
+run "D5 / R3-1: absent assigned marker exits 0" 123
+if grep -Eq -- 'execution\.py.*--subscribers' "$INVOKES" 2>/dev/null; then
+    pass "D5 / R3-1: merge_gate.sh resolves assigned set through execution.py --subscribers"
 else
-    fail "D5 / AT-22: merge_gate.sh has no handling for assigned: marker"
-fi
-
-# R3-1: Absent marker fallback
-if grep -q 'execution.py --subscribers' "$MERGE_GATE" 2>/dev/null; then
-    pass "D5 / R3-1: merge_gate.sh falls back to execution.py --subscribers when assigned marker absent"
-else
-    fail "D5 / R3-1: merge_gate.sh missing execution.py --subscribers fallback for absent assigned marker"
+    fail "D5 / R3-1: merge_gate.sh does not resolve assigned set through execution.py --subscribers"
 fi
 
 banner "Merge Gate Contract Test Summary"

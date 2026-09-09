@@ -135,8 +135,8 @@ flowchart TD
   - Baseline checks pass: `python3 scripts/ops/execution.py --check`, `bash scripts/ops/tests/execution_test.sh`, `bash scripts/ci/tests/merge_gate_test.sh`.
 - **Done when**:
   - Both new contract test files exist, have executable permissions (`chmod +x`), run cleanly without bash syntax or python import errors, and exit with failure status (red) asserting unimplemented behaviors.
-  - `bash scripts/ops/tests/review_split_contract_test.sh` reports 32 failures.
-  - `bash scripts/ci/tests/review_split_gate_contract_test.sh` reports 7 failures.
+  - `bash scripts/ops/tests/review_split_contract_test.sh` reports 39 failures.
+  - `bash scripts/ci/tests/review_split_gate_contract_test.sh` reports 8 failures.
 
 ---
 
@@ -150,7 +150,7 @@ flowchart TD
 - **Description**:
   1. Update `config/execution.yaml` to add `assigned_when` to the `argus` binding with four sub-keys:
      - `status_labels: [status:implementing]`
-     - `paths: [.github/workflows/**, scripts/ci/**, scripts/ops/**, scripts/auth/**, personas/**, config/**]`
+     - `paths: [.github/workflows/**, scripts/auth/**, scripts/ops/**, scripts/ci/**, scripts/sync_agents.py, scripts/setup/**, personas/**, config/**, REVIEW.md, AGENTS.md]`
      - `labels: [deep-review]`
      - `open_ledger_tiers: [security]`
      - `atlas` binding remains unconditional (omits `assigned_when`).
@@ -165,21 +165,24 @@ flowchart TD
        ```bash
        --subscribers pull_request [--status-label <label>] [--paths <p1> ... | --paths-file <file>] [--labels <l1> ...] [--open-ledger <t1> ...] [--action <action>] [--draft]
        ```
-       - Filtering logic for `argus`:
-         - If `--draft` is present, emit empty (AT-9).
-         - Atlas is always emitted (unconditional).
-         - Argus is emitted if ANY of the following match:
+       - Assignment derivation for `argus` (D1):
+         - Atlas is always assigned (unconditional).
+         - Argus is assigned if ANY of the following match:
            1. Missing or unresolvable status label (fails closed to dual assignment, AT-11).
            2. `--status-label` matches `assigned_when.status_labels`.
-           3. Any path matches `assigned_when.paths` glob patterns.
-           4. Any label matches `assigned_when.labels` (`deep-review`).
-           5. Any open ledger tier matches `assigned_when.open_ledger_tiers` (`security`).
-           6. `--action` is `synchronize` (AT-8) or `ready_for_review` (AT-10).
+           3. Any path matches `assigned_when.paths` glob patterns (AT-5).
+           4. Any label matches `assigned_when.labels` (`deep-review`, AT-6).
+           5. Any open ledger tier matches `assigned_when.open_ledger_tiers` (`security`, AT-7).
+       - Action and draft dispatch filtering (D2):
+         - If `--draft` is present, emit empty (AT-9).
+         - If `--action opened`, dispatch all assigned reviewers.
+         - If `--action synchronize`, dispatch assigned reviewers (OQ2 deferral: until #291 loop recorder lands, pushes dispatch assigned reviewers; does not pull in unassigned reviewers, AT-8).
+         - If `--action ready_for_review`, dispatch all assigned reviewers (AT-10).
      - Add `--check-grant --pr <n> --rung <rung> [--existing-grants ...]`:
        - If `<rung>` is found in `--existing-grants`, exit 1 and print:
          `Refused: PR #<n> already received a deep-review grant on the '<rung>' rung. Policy allows at most one deep-review grant per PR per rung (REVIEW.md, #265). Escalating to human.` (AT-14).
      - Add `--diff-rules [--lines <n>] [--files <count>] [--paths <p1> ... | --paths-file <file>]`:
-       - Emits `deep-review` if `--lines > 400` (DEEP-1), `--files > 15` (DEEP-2), or any path touches trust-bearing paths (DEEP-3). Otherwise emits empty (AT-15).
+       - Emits `deep-review` if any path touches trust-bearing paths (DEEP-1), `--lines > 400` outside tests or `--files > 12` (DEEP-2), or privileged operations (DEEP-3). Otherwise emits empty (AT-15).
   3. Update `scripts/ops/tests/execution_test.sh` to include unit test coverage for the new parser options and schema rejections.
 - **Check before edit**:
   - `python3 scripts/ops/execution.py --check` passes against current config.
@@ -205,7 +208,7 @@ flowchart TD
      - Any other label (e.g. `hold`, `bootstrap`) or any issue target exits with status 2 and error message:
        `post.sh: --add-label accepts only deep-review on a pull request` (AT-19).
   3. Pre-write checks:
-     - Must pass the hold check on target PR and linked issues (D13/D14).
+     - Must pass the existing hold check on target PR and linked issues (#4/labels, AGENTS.md "The labels are the state machine").
      - Uses caller's authenticated token (Argus/Atlas persona App token).
   4. Execution:
      - Applies label via `gh api -X POST repos/$GITHUB_REPO/issues/$NUMBER/labels -f "labels[]=deep-review"`.
@@ -419,8 +422,8 @@ flowchart TD
 | `bash scripts/ci/tests/merge_gate_test.sh` | PASS | PASS | PASS | `merge_gate_test.sh: all scenarios passed` |
 | `bash scripts/ci/tests/lifecycle_advance_test.sh` | PASS | PASS | PASS | `lifecycle_advance_test.sh: all scenarios passed` |
 | `bash scripts/ops/tests/work_test.sh` | PASS | PASS | PASS | `work_test.sh: all scenarios passed` |
-| `bash scripts/ops/tests/review_split_contract_test.sh` | **FAIL (32 failures)** | PASS | PASS | `ALL TESTS PASSED` |
-| `bash scripts/ci/tests/review_split_gate_contract_test.sh` | **FAIL (7 failures)** | PASS | PASS | `ALL TESTS PASSED` |
+| `bash scripts/ops/tests/review_split_contract_test.sh` | **FAIL (39 failures)** | PASS | PASS | `ALL TESTS PASSED` |
+| `bash scripts/ci/tests/review_split_gate_contract_test.sh` | **FAIL (8 failures)** | PASS | PASS | `ALL TESTS PASSED` |
 
 ---
 
@@ -461,15 +464,15 @@ flowchart TD
   ```
 - `bash scripts/ci/sanitize_check.sh`:
   ```
-  PASS: sanitize gate green (198 text files scanned, 0 findings).
+  PASS: sanitize gate green (201 text files scanned, 0 findings).
   ```
 
 ### New Contract Tests (Red Baseline)
 - `bash scripts/ops/tests/review_split_contract_test.sh`:
   ```
-  Total failures: 32 (EXPECTED RED at build rung)
+  Total failures: 39 (EXPECTED RED at build rung)
   ```
 - `bash scripts/ci/tests/review_split_gate_contract_test.sh`:
   ```
-  Total failures: 7 (EXPECTED RED at build rung)
+  Total failures: 8 (EXPECTED RED at build rung)
   ```
