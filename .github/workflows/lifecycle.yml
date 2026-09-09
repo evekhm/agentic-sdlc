@@ -17,8 +17,12 @@
 # why it stays on that token even though the job below also holds the
 # merge actor's credential for a narrower purpose.
 #
-# The job DOES hold one secret (#64, D23): the merge-actor App's private
-# key, minted under the `merge-actor` Environment (deployment-branch
+# Themis (`<owner>-themis-app`) holds the merge-actor role; it is a
+# system actor with no prompt, harness or goals, and the six personas in
+# INTENT.md are unchanged.
+#
+# The job DOES hold one secret (#64, D23): the Themis App's private
+# key, minted under the `themis` Environment (deployment-branch
 # policy: `main` only) into `MERGE_ACTOR_TOKEN`, reaching only the one
 # step below that runs lifecycle_advance.sh and, on a D14 refusal, calls
 # scripts/ci/escalate.sh in that same step. Both writes state-carrying
@@ -57,7 +61,7 @@ jobs:
     # #64 D23: the merge actor's token is minted under this Environment,
     # whose deployment-branch policy admits only `main` — the same
     # binding merge-gate.yml's `gate` job uses.
-    environment: merge-actor
+    environment: themis
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -70,8 +74,8 @@ jobs:
         id: merge-actor
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
-          app-id: ${{ secrets.MERGE_ACTOR_APP_ID }}
-          private-key: ${{ secrets.MERGE_ACTOR_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.THEMIS_APP_ID }}
+          private-key: ${{ secrets.THEMIS_APP_PRIVATE_KEY }}
 
       - name: Advance the stage labels for this push
         env:

@@ -22,6 +22,12 @@
 # persona registered with `issues: read` gets 403 on all three and is
 # invisible to the mutex. `contents` and `pull_requests` still vary per
 # persona: reviewers stay comment-only and never push.
+#
+# An entry with no `kind` is a persona, and its credentials land in
+# personas/<name>.yaml. An entry with `kind: system` is a system actor
+# with no persona file: its `environment` and `secrets` name the GitHub
+# Environment and the two environment secrets create_all_apps.py
+# provisions for it. Entries are processed in file order.
 
 athena:
   slug_suffix: athena-app
@@ -97,10 +103,18 @@ atlas:
     contents: read
     metadata: read
 
-merge-actor:
-  slug_suffix: merge-actor-app
+themis:
+  kind: system
+  slug_suffix: themis-app
+  environment: themis
+  secrets:
+    app_id: THEMIS_APP_ID
+    private_key: THEMIS_APP_PRIVATE_KEY
   description: >-
-    System actor that merges pull requests when consensus is reached.
+    Themis, the merge actor of the autonomous loop (#64): the one trusted
+    writer of the loop's state (loop ledger, escalation marker, consensus
+    ledger) and the identity that merges a pull request when consensus is
+    reached. A system actor with no prompt, harness or goals.
   default_permissions:
     contents: write
     pull_requests: write

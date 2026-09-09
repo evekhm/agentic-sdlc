@@ -952,6 +952,10 @@ ignore the signal. Tests: `scripts/ops/tests/execution_test.sh`,
 
 ### loop.autonomous
 
+Themis (`<owner>-themis-app`) holds the merge-actor role; it is a system
+actor with no prompt, harness or goals, and the six personas in
+INTENT.md are unchanged.
+
 The ladder runs itself between the two human gates (#64, PR #257). One
 `loop:` block in `config/execution.yaml` is required (D20) and is read
 through `scripts/ops/execution.py --loop <key>`:
@@ -1019,7 +1023,7 @@ unparseable ledger fails closed and is never read as absent.
 App's manifest in `scripts/auth/app_manifests.yaml` requests the same
 five plus the `metadata: read` every App carries. Both
 `merge-gate.yml`'s mutating job and `lifecycle.yml` mint that App's
-token under one job-level `environment: merge-actor`, whose
+token under one job-level `environment: themis`, whose
 deployment-branch policy admits `main` only (D23); that policy is
 unverifiable from inside the loop and is precondition P1, not a
 runtime check (Amendment r2).

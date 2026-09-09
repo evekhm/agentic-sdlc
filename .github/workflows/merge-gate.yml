@@ -10,9 +10,13 @@
 # trigger. `gate` runs on the other four triggers, which execute the
 # workflow file from the default branch, and it alone holds the five
 # permissions (acceptance 19) and the App credential. The credential is
-# scoped to the `merge-actor` Environment whose deployment-branch policy
+# scoped to the `themis` Environment whose deployment-branch policy
 # admits `main` only — an operator step named in PR #257 — so a workflow
 # file on any other branch cannot mint it.
+#
+# Themis (`<owner>-themis-app`) holds the merge-actor role; it is a
+# system actor with no prompt, harness or goals, and the six personas in
+# INTENT.md are unchanged.
 #
 # Every checkout is the literal default branch. No ref an event supplied
 # is ever checked out, and a pull_request whose base is another branch
@@ -80,7 +84,7 @@ jobs:
     if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: merge-actor
+    environment: themis
     concurrency:
       group: merge-gate
       cancel-in-progress: false
@@ -101,8 +105,8 @@ jobs:
         id: merge-actor
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
-          app-id: ${{ secrets.MERGE_ACTOR_APP_ID }}
-          private-key: ${{ secrets.MERGE_ACTOR_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.THEMIS_APP_ID }}
+          private-key: ${{ secrets.THEMIS_APP_PRIVATE_KEY }}
 
       - name: Resolve the pull request and run the gate
         env:

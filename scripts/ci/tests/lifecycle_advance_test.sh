@@ -68,7 +68,7 @@ banner() { printf '\n--- %s\n' "$*"; }
 
 # #64 D23/D30: the merge actor's login, the one trusted ledger writer.
 # The gh stub answers the advancer's viewer read with it.
-export MERGER='evekhm-merge-actor-app[bot]'
+export MERGER='evekhm-themis-app[bot]'
 
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash

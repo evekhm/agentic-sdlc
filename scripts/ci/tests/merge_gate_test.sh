@@ -49,7 +49,7 @@ export GITHUB_RUN_ID=999
 # slow the suite down.
 export MERGE_STATE_RETRY_SLEEP=0
 
-MERGER='evekhm-merge-actor-app[bot]'
+MERGER='evekhm-themis-app[bot]'
 ACTIONS='github-actions[bot]'
 ATLAS='evekhm-atlas-app[bot]'
 H="$(printf 'a%.0s' {1..40})"
