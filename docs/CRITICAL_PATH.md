@@ -93,7 +93,8 @@ order:
    with actions: write), lifecycle.yml stays secret-free; (c) #251 gap
    3, the operator's one-time checklist: loop.autonomous_merge true,
    placement gh-actions for the three personas, the Themis App
-   installed with its key as a repository secret,
+   installed with its key in the `themis` Environment (D23, P1;
+   `create_all_apps.py --only themis` provisions it),
    ATHENA/DAEDALUS/ODYSSEY_APP_PRIVATE_KEY secrets loaded (names
    only), first hop stays a human dispatch of athena. Delivery: one PR
    after the #64 implementation merges, `ops/waves/launch.sh 251`
