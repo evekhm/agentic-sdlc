@@ -541,19 +541,35 @@ edit_labels() { # issue-number add-csv remove-csv (either may be empty)
 # row that will not parse makes the whole ledger unreadable, and
 # unreadable is never absent. The same reader lives in
 # scripts/ci/merge_gate.sh; D19 permits no new shared file.
-MERGE_ACTOR="${MERGE_ACTOR_LOGIN:-evekhm-merge-actor-app[bot]}"
-TRUSTED_WRITERS="$(jq -nc --arg a "$MERGE_ACTOR" '[$a]')"
 # D25: MERGE_ACTOR_TOKEN reaches this script as env of the one step that
-# runs it, and only the ledger-row write (below) and the escalate.sh
-# call the workflow makes in that same step read it; every other gh
-# call in this script keeps GH_TOKEN as github.token.
+# runs it, and only the ledger-row write (below), the login read that
+# names the trusted writer (D30) and the escalate.sh call the workflow
+# makes in that same step read it; every other gh call in this script
+# keeps GH_TOKEN as github.token.
 MERGE_ACTOR_TOKEN="${MERGE_ACTOR_TOKEN:-${GH_TOKEN:-}}"
+# D30: the trusted writer is whoever holds MERGE_ACTOR_TOKEN, read from
+# that credential once, the first time a ledger is read — GraphQL
+# `viewer { login }`, never GET /user (403 for an installation token),
+# never an env var, never a constant. The same read on github.token
+# would name the one login D23 excludes, so that answer, an empty one
+# and a failed read all leave the set empty: no writer is trusted and
+# every ledger is unreadable, and unreadable is never absent.
+MERGE_ACTOR=""; TRUSTED_WRITERS=""
+resolve_merge_actor() {
+    [ -z "$TRUSTED_WRITERS" ] || return 0
+    MERGE_ACTOR="$(GH_TOKEN="$MERGE_ACTOR_TOKEN" gh api graphql -f query='query { viewer { login } }' 2>/dev/null | jq -r '.data.viewer.login // empty')" || MERGE_ACTOR=""
+    if [ -z "$MERGE_ACTOR" ] || [ "$MERGE_ACTOR" = "github-actions[bot]" ]; then
+        MERGE_ACTOR=""; return 1
+    fi
+    TRUSTED_WRITERS="$(jq -nc --arg a "$MERGE_ACTOR" '[$a]')"
+}
 LEDGER_ROW_RE='^<!-- loop-ledger-row: (dispatch|terminal|refusal:[a-z-]+) rung:[0-9]+ head-oid:[0-9a-f]{40}( [a-z-]+:[^ ]+)* -->$'
 LEDGER_ID=""; LEDGER_BODY=""; LEDGER_ROWS=""
 
-read_ledger() { # <issue> — sets LEDGER_*; returns 1 unreadable thread, 2 unparseable row
+read_ledger() { # <issue> — sets LEDGER_*; returns 1 unreadable thread, 2 unparseable row, 3 no trusted writer
     local n="$1" all mark any ok
     LEDGER_ID=""; LEDGER_BODY=""; LEDGER_ROWS=""
+    resolve_merge_actor || return 3
     all="$(gh api --paginate "repos/$GITHUB_REPO/issues/$n/comments?per_page=100" 2>/dev/null | jq -s 'add // []')" || return 1
     jq -e 'type == "array"' <<<"$all" >/dev/null 2>&1 || return 1
     mark="<!-- loop-ledger:$n -->"
@@ -897,6 +913,9 @@ $marker"
             continue
         elif [ "$ledger_rc" -eq 2 ]; then
             fail_issue "the loop ledger on #$issue carries a row this advancer cannot parse — unreadable is not absent (D13)"
+            continue
+        elif [ "$ledger_rc" -eq 3 ]; then
+            fail_issue "cannot resolve the merge actor's login from MERGE_ACTOR_TOKEN (GraphQL viewer) — no trusted writer, so the loop ledger on #$issue is unreadable, and unreadable is not absent (D13, D30)"
             continue
         fi
         highest_entered="$(ledger_rows '(dispatch|terminal)' | sed -nE 's/.* rung:([0-9]+) .*/\1/p' | sort -n | tail -1)"

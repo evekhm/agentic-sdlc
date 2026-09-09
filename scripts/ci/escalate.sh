@@ -6,8 +6,8 @@
 # carrying <!-- escalation:<displaced-label>:<reason-code>:<head-oid> -->.
 # Idempotent on (reason-code, head-oid), judged only against markers
 # posted by a trusted writer (D23): the merge actor alone, resolved from
-# the token in scope via `gh api user` and never guessed;
-# `github-actions[bot]` is not trusted. Re-reads hold/blocked on the
+# the token in scope via GraphQL `viewer { login }` (D30) and never
+# guessed; `github-actions[bot]` is not trusted. Re-reads hold/blocked on the
 # issue and the pull request before writing (D15) and writes nothing
 # when either is set. An unreadable thread refuses the escalation; it
 # never duplicates one.
@@ -46,9 +46,16 @@ MERGE_ACTOR_TOKEN="${MERGE_ACTOR_TOKEN:-${GH_TOKEN:-}}"
 log() { printf '%s\n' "$*" >&2; }
 gh_write() { if [ "$DRY_RUN" = "1" ]; then log "DRY-RUN gh $*"; else gh "$@" >/dev/null; fi; }
 
-# --- the merge actor's own login (S3, D23): derived from the token in scope -------
-if ! MERGE_ACTOR="$(GH_TOKEN="$MERGE_ACTOR_TOKEN" gh api user 2>/dev/null | jq -r '.login // empty')" || [ -z "$MERGE_ACTOR" ]; then
-    log "escalate: cannot resolve the merge actor's login via 'gh api user' — refused, nothing written (S3)"
+# --- the merge actor's own login (S3, D23, D30): read from the token it writes with.
+# `GET /user` is 403 for an App installation token; GraphQL `viewer`
+# answers with the `<slug>[bot]` login the marker's author carries.
+VIEWER_QUERY='query { viewer { login } }'
+if ! MERGE_ACTOR="$(GH_TOKEN="$MERGE_ACTOR_TOKEN" gh api graphql -f query="$VIEWER_QUERY" 2>/dev/null | jq -r '.data.viewer.login // empty')" || [ -z "$MERGE_ACTOR" ]; then
+    log "escalate: cannot resolve the merge actor's login via GraphQL viewer — refused, nothing written (S3, D30)"
+    exit 1
+fi
+if [ "$MERGE_ACTOR" = "github-actions[bot]" ]; then
+    log "escalate: MERGE_ACTOR_TOKEN resolves to github-actions[bot], which D23 never trusts — refused, nothing written (D30)"
     exit 1
 fi
 TRUSTED="$(jq -nc --arg a "$MERGE_ACTOR" '[$a]')"

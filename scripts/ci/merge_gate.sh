@@ -56,13 +56,19 @@ finish() { log "verdict: $*"; exit 0; }
 decline() { log "Decline: $*"; finish "no merge for #$TARGET"; }
 norm_login() { sed -E 's#^app/##; s/\[bot\]$//' <<<"$1"; }
 
-# --- the merge actor's own login (S3, D23): derived from the token in
-# scope via `gh api user`, never guessed. A stale or absent env-var
-# guess proved nothing and could name nobody, or worse, match by
-# coincidence; an unresolved identity fails closed rather than trusting
-# one.
-if ! MERGE_ACTOR="$(gh api user 2>/dev/null | jq -r '.login // empty')" || [ -z "$MERGE_ACTOR" ]; then
-    decline "cannot resolve the merge actor's login via 'gh api user' — failing closed rather than trusting a guessed identity (S3)"
+# --- the merge actor's own login (S3, D23, D30): read from the credential
+# in scope through GraphQL `viewer { login }`, never guessed. `GET /user`
+# answers 403 for an App installation token (scripts/ops/post.sh says
+# why); `viewer` answers with the `<slug>[bot]` login a comment author
+# carries. A failed read trusts nobody and declines. An answer of
+# github-actions[bot] is the default token, which D23 never trusts — the
+# `pull_request` evaluate job lands here on every run, green under D29.
+VIEWER_QUERY='query { viewer { login } }'
+if ! MERGE_ACTOR="$(gh api graphql -f query="$VIEWER_QUERY" 2>/dev/null | jq -r '.data.viewer.login // empty')" || [ -z "$MERGE_ACTOR" ]; then
+    decline "cannot resolve the merge actor's login via GraphQL viewer — failing closed rather than trusting a guessed identity (S3, D30)"
+fi
+if [ "$MERGE_ACTOR" = "github-actions[bot]" ]; then
+    decline "the token in scope is github-actions[bot], which D23 never trusts — this run does not hold the merge actor's credential (D30)"
 fi
 TRUSTED="$(jq -nc --arg a "$MERGE_ACTOR" '[$a]')"
 

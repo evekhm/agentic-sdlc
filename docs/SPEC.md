@@ -998,8 +998,10 @@ The loop ledger is one container comment per issue,
 `<!-- loop-ledger:<n> -->` … `<!-- loop-ledger-end -->`, with three row
 kinds: `dispatch` (rung entered, merged head-oid, event, pr, at, cost),
 `terminal` (the review rung, D17) and `refusal:<reason>`. Only rows a
-trusted writer posted count — the merge actor App alone, resolved
-dynamically via `gh api user` rather than trusted by name (D23);
+trusted writer posted count — the merge actor App alone, its login read
+from its own token through GraphQL `viewer { login }` (D23, D30; `GET
+/user` is 403 for an App installation token, and a read that fails or
+answers `github-actions[bot]` trusts nobody and fails closed);
 `github-actions[bot]`, trusted under the superseded D22, is not — a
 comment it posted carrying a ledger or escalation marker is logged and
 ignored, never state and never a decline. Every write of such a comment
