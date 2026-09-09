@@ -134,7 +134,7 @@ Concurrency between multiple webhook events requires careful state ordering and 
 3. Validate sender and event triggers:
    - Skip execution when `github.event.sender.login` equals `evekhm-themis-app[bot]` to prevent self-trigger cycles.
 4. Implement comment pagination and extraction:
-   - Fetch comments via `gh api repos/<repo>/issues/<pr>/comments`.
+   - Fetch comments via `gh api repos/<repo>/issues/<pr>/comments`. The recorder reads through `gh api ... --jq` and the suite stub answers read routes with the full JSON object regardless of `-q` or `--jq`, so the recorder must tolerate both shapes by parsing with `jq` on its side.
    - Identify existing consensus ledger comment authored by Themis.
    - Ignore unformatted human comments and bot comments lacking structured blocks without error (D10).
    - Filter and parse structured review verdict blocks from authorized reviewer logins (`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`).

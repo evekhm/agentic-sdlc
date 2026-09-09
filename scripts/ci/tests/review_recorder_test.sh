@@ -8,7 +8,7 @@
 # helper checks. No network, no live tokens.
 #
 # Each test asserts behaviors derived from numbered Decisions (D1-D10)
-# and Acceptance criteria (AT-1..AT-18). Contract tests fail (RED)
+# and Acceptance criteria (AT-2..AT-18). Contract tests fail (RED)
 # when scripts/ci/review_recorder.sh has not yet been implemented.
 
 set -euo pipefail
@@ -637,7 +637,7 @@ EOF
 
   # Pass 2a: Byte-identical re-derivation skips PATCH on the ledger comment (D1 idempotency guard). Comment writes and label writes are separate streams; label synchronization may execute while comment PATCH is skipped.
   local ledger_comment
-  ledger_comment="$(awk '/### Findings ledger for #103/ {f = 1} f; /<!-- consensus-ledger-end -->/ {f = 0; exit}' "$WRITES")"
+  ledger_comment="$(awk '/^### Findings ledger for #103/ {f = 1} /^gh / {if (f) exit} f' "$WRITES")"
   [ -n "$ledger_comment" ] || ledger_comment="$(cat <<EOF
 ### Findings ledger for #103
 <!-- consensus-ledger:103 -->
@@ -797,7 +797,7 @@ EOF
   grep -q "ledger-row:R2-1:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 2 normal row missing (D6)"; return 1; }
   grep -q "ledger-row:R2-2:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 2 suggestion row did not land as normal tracking row (D6)"; return 1; }
 
-  # Round 3: new high row admitted, new normal observation recorded
+  # Round 3: new high row admitted, new normal observation recorded, suggestion lands normal
   local rev_r3
   rev_r3="$(cat <<EOF
 ### Argus review
@@ -809,6 +809,7 @@ EOF
 <!-- failure-scenario:R3-1 -->
 Deadlock on termination signal
 <!-- finding:R3-2:normal:open:none -->
+<!-- finding:R3-3:suggestion:open:none -->
 <!-- review-verdict-end -->
 EOF
 )"
@@ -820,6 +821,7 @@ EOF
   grep -q "ledger-row:R1-1@D4:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 1 row missing from round 3 ledger (D6)"; return 1; }
   grep -q "ledger-row:R3-1:high:open:none" "$WRITES" || { fail "test_round_funnel: round 3 high row refused (D6)"; return 1; }
   grep -q "ledger-row:R3-2:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 3 normal row missing (D6)"; return 1; }
+  grep -q "ledger-row:R3-3:normal:open:none" "$WRITES" || { fail "test_round_funnel: round 3 suggestion row did not land as normal tracking row (D6)"; return 1; }
 
   # Round 4: past round 3, high is demoted to normal; security is admitted
   : > "$WRITES"
