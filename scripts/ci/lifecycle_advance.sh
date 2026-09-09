@@ -532,6 +532,31 @@ edit_labels() { # issue-number add-csv remove-csv (either may be empty)
     log "    labels on #$n: +[${add:-}] -[${remove:-}]"
 }
 
+persona_for_login() { # <login> -> persona name, or empty
+    local login="$1" file id
+    for file in "$REPO_ROOT/personas"/*.yaml; do
+        [ -f "$file" ] || continue
+        id="$(sed -n 's/^[[:space:]]*identity:[[:space:]]*"\(.*\)".*/\1/p' "$file" | head -1)"
+        if [ -n "$id" ] && [ "$id" = "$login" ]; then
+            basename "$file" .yaml
+            return 0
+        fi
+    done
+    return 0
+}
+
+owner_for_stage() { # <stage> -> persona name, or empty
+    local stg="$1" p_file
+    for p_file in "$REPO_ROOT/personas"/*.yaml; do
+        grep -q '^kind: persona$' "$p_file" 2>/dev/null || continue
+        if grep -qE "^stage: \[( *[a-z]+,)* *$stg( *, *[a-z]+)* *\]" "$p_file"; then
+            basename "$p_file" .yaml
+            return 0
+        fi
+    done
+    return 0
+}
+
 # --- loop ledger (#64 D13, D22) ------------------------------------------------
 # One container comment per issue, `<!-- loop-ledger:<n> -->` ...
 # `<!-- loop-ledger-end -->`, read only when a trusted writer posted it
@@ -1021,26 +1046,77 @@ $marker"
 
     # --- the rung after the label (#64 D16, D17, D18) --------------------------
     [ "${target_rank:-0}" -gt 0 ] || continue
+
+    is_terminal=0
     if [ -z "$(jq -r --arg t "$target" '.stages[] | select(.label == $t) | .advances_to // empty' "$LIFECYCLE_JSON")" ]; then
-        # D17: the last rung is terminal — one terminal row, no dispatch.
+        is_terminal=1
+    fi
+
+    # D17: the last rung is terminal — one terminal row, no dispatch.
+    if [ "$is_terminal" -eq 1 ]; then
         ledger_append "$issue" terminal "$target_rank" "$AFTER" "${MERGE_PR[$issue]:-none}" \
             || fail_issue "could not record the terminal row on #$issue"
+    fi
+
+    if [ "$AUTONOMOUS_MERGE" != "true" ]; then
+        if [ "$is_terminal" -eq 1 ]; then
+            log "    #$issue is at the last rung ($target) — terminal, no dispatch"
+        else
+            log "    autonomous_merge is false — no dispatch for #$issue (D18)"
+        fi
+        continue
+    fi
+
+    # D1: Claim release on ladder advance (#251)
+    completed_stage="$(jq -r '.stage // empty' <<<"$row")"
+    completing_persona="$(owner_for_stage "$completed_stage")"
+    if grep -Fxq "in-progress" <<<"$labels"; then
+        claim_re='^[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
+        claim_login="$(jq -r --arg re "$claim_re" \
+            '[.comments[]? | select((.body // "") | test($re; "i"))] | last | .user.login // ""' \
+            <<<"$view" 2>/dev/null || true)"
+        claim_holder=""
+        if [ -n "$claim_login" ]; then
+            claim_holder="$(persona_for_login "$claim_login")"
+        fi
+
+        if [ -z "$claim_login" ]; then
+            log "    withholding dispatch: in-progress held without a readable claim on #$issue"
+            if [ "$is_terminal" -eq 1 ]; then
+                log "    #$issue is at the last rung ($target) — terminal, no dispatch"
+            fi
+            continue
+        elif [ -z "$claim_holder" ]; then
+            log "    withholding dispatch: in-progress held by foreign login ($claim_login) on #$issue"
+            if [ "$is_terminal" -eq 1 ]; then
+                log "    #$issue is at the last rung ($target) — terminal, no dispatch"
+            fi
+            continue
+        elif [ "$claim_holder" != "$completing_persona" ]; then
+            log "    withholding dispatch: in-progress held by $claim_holder on #$issue"
+            if [ "$is_terminal" -eq 1 ]; then
+                log "    #$issue is at the last rung ($target) — terminal, no dispatch"
+            fi
+            continue
+        else
+            if [ "$DRY_RUN" = "1" ]; then
+                log "    DRY-RUN gh api -X DELETE /repos/$GITHUB_REPO/issues/$issue/labels/in-progress"
+                log "    released claim of $claim_holder on #$issue (rung $completed_stage merged)"
+            else
+                gh api -X DELETE "/repos/$GITHUB_REPO/issues/$issue/labels/in-progress" >/dev/null \
+                    || { fail_issue "could not remove in-progress label on #$issue"; continue; }
+                log "    released claim of $claim_holder on #$issue (rung $completed_stage merged)"
+            fi
+        fi
+    fi
+
+    if [ "$is_terminal" -eq 1 ]; then
         log "    #$issue is at the last rung ($target) — terminal, no dispatch"
         continue
     fi
-    if [ "$AUTONOMOUS_MERGE" != "true" ]; then
-        log "    autonomous_merge is false — no dispatch for #$issue (D18)"
-        continue
-    fi
+
     new_stage="$(jq -r --arg t "$target" '.stages[] | select(.label == $t) | .stage // empty' "$LIFECYCLE_JSON")"
-    persona=""
-    for p_file in "$REPO_ROOT"/personas/*.yaml; do
-        grep -q '^kind: persona$' "$p_file" 2>/dev/null || continue
-        if grep -qE "^stage: \[( *[a-z]+,)* *$new_stage( *, *[a-z]+)* *\]" "$p_file"; then
-            persona="$(basename "$p_file" .yaml)"
-            break
-        fi
-    done
+    persona="$(owner_for_stage "$new_stage")"
     if [ -z "$persona" ]; then
         log "    no persona declares stage '$new_stage' — no dispatch for #$issue"
         continue
