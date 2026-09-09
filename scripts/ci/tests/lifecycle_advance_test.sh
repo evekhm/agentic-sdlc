@@ -184,27 +184,39 @@ chmod +x "$WORK/bin/gh"
 # advancer's own `git cat-file -e` preflight rejects every bad sha a
 # fixture could supply, so the walk cannot be made to fail through its
 # inputs. $REAL_GIT is resolved above, before $WORK/bin joined PATH.
+SANDBOX="$WORK/repo"
+export SANDBOX
+mkdir -p "$SANDBOX/personas" "$SANDBOX/intent/999-test" "$SANDBOX/intent/998-draft"
+cp "$LADDER" "$SANDBOX/personas/lifecycle.json"
+
 cat > "$WORK/bin/git" <<GITSTUB
 #!/usr/bin/env bash
 if [ "\${1:-}" = "rev-list" ] && [ "\${LIFECYCLE_TEST_GIT_REV_LIST_FAIL:-0}" = "1" ]; then
   echo "simulated rev-list failure (LIFECYCLE_TEST_GIT_REV_LIST_FAIL=1)" >&2
   exit 1
 fi
+case "\${1:-}" in
+  add|commit|config)
+    if [ ! -d "\$SANDBOX/.git" ] || [ "\$(pwd)" != "\$SANDBOX" ]; then
+      echo "FATAL: git \$1 called outside \$SANDBOX: pwd=\$(pwd), SANDBOX=\$SANDBOX" >&2
+      exit 1
+    fi
+    ;;
+esac
 exec "$REAL_GIT" "\$@"
 GITSTUB
 chmod +x "$WORK/bin/git"
 
 # --- the synthetic range (the #4 fixture) --------------------------------------
-SANDBOX="$WORK/repo"
-mkdir -p "$SANDBOX/personas" "$SANDBOX/intent/999-test" "$SANDBOX/intent/998-draft"
-cp "$LADDER" "$SANDBOX/personas/lifecycle.json"
 cd "$SANDBOX"
-git init -q .
+"$REAL_GIT" init -q .
+[ -d "$SANDBOX/.git" ] || { echo "FATAL: $SANDBOX/.git does not exist before git operations" >&2; exit 1; }
 git config user.email test@example.com
 git config user.name test
 
 echo seed > seed.txt
 git add -A
+[ -d "$SANDBOX/.git" ] || { echo "FATAL: $SANDBOX/.git does not exist before commit" >&2; exit 1; }
 git commit -qm seed
 C0="$(git rev-parse HEAD)"
 MAIN="$(git rev-parse --abbrev-ref HEAD)"
@@ -1504,6 +1516,142 @@ issue_fixture 999 OPEN status:implementing
 run "$C4" "$C5" "S36: AT-13 a range extending past the merge commit exits 0"
 has "<!-- lifecycle:in-review:$CM -->" "S36: AT-13 the marker is keyed on the pull request's own merge commit"
 hasnt "<!-- lifecycle:in-review:$C5 -->" "S36: AT-13 the marker is not keyed on the range end"
+
+reset_fixtures
+
+banner "AT-1 · #251 D1 · Claim release on ladder advance"
+reset_fixtures
+cat > "$FIXTURES/issue-999.json" <<'EOF'
+{
+  "number": 999,
+  "state": "OPEN",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-athena-app[bot]"},
+      "body": "Claim: athena (session-1) stage:plan path:.claude/worktrees/athena-999-test"
+    }
+  ]
+}
+EOF
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'ladder vm-local 5.0\n' > "$FIXTURES/binding-athena"
+run "$C0" "$C1" "AT-1: intent.md landing releases claim and dispatches"
+has "released claim of athena on #999 (rung plan merged)" "AT-1: claim of athena released"
+has "DRY-RUN gh api -X DELETE /repos/$TESTREPO/issues/999/labels/in-progress" "AT-1: in-progress deleted"
+has "DRY-RUN scripts/placement/vm-local/run.sh 999 --as athena" "AT-1: successor dispatched with --as athena"
+
+banner "AT-2 · #251 D1 · Withhold dispatch when claim held by different persona"
+reset_fixtures
+cat > "$FIXTURES/issue-999.json" <<'EOF'
+{
+  "number": 999,
+  "state": "OPEN",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-odyssey-app[bot]"},
+      "body": "Claim: odyssey (session-1) stage:implement path:.claude/worktrees/odyssey-999-test"
+    }
+  ]
+}
+EOF
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'ladder vm-local 5.0\n' > "$FIXTURES/binding-athena"
+run "$C0" "$C1" "AT-2: exits 0 withholding dispatch"
+has "withholding dispatch: in-progress held by odyssey on #999" "AT-2: dispatch withheld"
+hasnt "released claim" "AT-2: claim not released"
+hasnt "run.sh" "AT-2: nothing dispatched"
+
+banner "AT-3 · #251 D1 · Withhold dispatch when claim held by foreign login or unparseable"
+reset_fixtures
+cat > "$FIXTURES/issue-999.json" <<'EOF'
+{
+  "number": 999,
+  "state": "OPEN",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+  "comments": [
+    {
+      "user": {"login": "foreign-user"},
+      "body": "Claim: foreign (session-1) stage:plan path:.claude/worktrees/foreign-999-test"
+    }
+  ]
+}
+EOF
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'ladder vm-local 5.0\n' > "$FIXTURES/binding-athena"
+run "$C0" "$C1" "AT-3: foreign login exits 0"
+has "withholding dispatch: in-progress held by foreign login (foreign-user) on #999" "AT-3: foreign login withheld"
+hasnt "released claim" "AT-3: claim not released"
+hasnt "run.sh" "AT-3: nothing dispatched"
+
+reset_fixtures
+cat > "$FIXTURES/issue-999.json" <<'EOF'
+{
+  "number": 999,
+  "state": "OPEN",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+  "comments": []
+}
+EOF
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'ladder vm-local 5.0\n' > "$FIXTURES/binding-athena"
+run "$C0" "$C1" "AT-3: missing claim exits 0"
+has "withholding dispatch: in-progress held without a readable claim on #999" "AT-3: unparseable claim withheld"
+hasnt "released claim" "AT-3: claim not released"
+hasnt "run.sh" "AT-3: nothing dispatched"
+
+banner "AT-4 · #251 D1 · Skip claim release when autonomous_merge is false"
+reset_fixtures
+cat > "$FIXTURES/issue-999.json" <<'EOF'
+{
+  "number": 999,
+  "state": "OPEN",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-athena-app[bot]"},
+      "body": "Claim: athena (session-1) stage:plan path:.claude/worktrees/athena-999-test"
+    }
+  ]
+}
+EOF
+printf 'false\n' > "$FIXTURES/loop-autonomous_merge"
+run "$C0" "$C1" "AT-4: autonomous_merge false exits 0"
+has "autonomous_merge is false — no dispatch for #999 (D18)" "AT-4: autonomous_merge is false"
+hasnt "released claim" "AT-4: claim release skipped"
+hasnt "run.sh" "AT-4: nothing dispatched"
+
+banner "AT-5 · #251 D1 · Advance to terminal review rung releases claim of odyssey"
+reset_fixtures
+pulls_fixture "$CM" 4242 odyssey/999-test "Implements the plan. See #999."
+cat > "$FIXTURES/issue-999.json" <<'EOF'
+{
+  "number": 999,
+  "state": "OPEN",
+  "labels": [{"name": "status:implementing"}, {"name": "in-progress"}],
+  "comments": [
+    {
+      "author": {"login": "evekhm-odyssey-app"},
+      "body": "Claim: odyssey (session-1) stage:implement path:.claude/worktrees/odyssey-999-test"
+    }
+  ]
+}
+EOF
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+run "$C4" "$CM" "AT-5: terminal review rung advance exits 0"
+has "released claim of odyssey on #999 (rung implement merged)" "AT-5: claim of odyssey released"
+has "DRY-RUN gh api -X DELETE /repos/$TESTREPO/issues/999/labels/in-progress" "AT-5: in-progress deleted"
+has "loop-ledger-row: terminal rung:5 head-oid:$CM pr:4242" "AT-5: terminal row written"
+hasnt "run.sh" "AT-5: nothing dispatched at terminal review rung"
+
+banner "AT-6 · #251 D2 #284 · Placement adapter invocation passes <issue> --as <persona>"
+reset_fixtures
+issue_fixture 999 OPEN status:spec
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'ladder vm-local 5.0\n' > "$FIXTURES/binding-daedalus"
+run "$C1" "$C2" "AT-6: spec.md advance exits 0"
+has "DRY-RUN scripts/placement/vm-local/run.sh 999 --as daedalus" "AT-6: adapter invoked with 999 --as daedalus"
 
 reset_fixtures
 

@@ -1,0 +1,15 @@
+[Unit]
+Description=VM-Local SDLC Poller
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+WorkingDirectory=%h/projects/agentic-sdlc
+ExecStart=/bin/bash scripts/placement/vm-local/poll.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

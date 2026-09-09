@@ -104,7 +104,7 @@ WORK_DISPATCHED_ISSUE="${WORK_DISPATCHED_ISSUE:-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GITHUB_LIB="$REPO_ROOT/scripts/ops/lib/github.sh"
 LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
-DEPLOYMENTS="$REPO_ROOT/config/deployments.yaml"
+DEPLOYMENTS="${DEPLOYMENTS:-$REPO_ROOT/config/deployments.yaml}"
 PERSONA_DIR="$REPO_ROOT/personas"
 
 usage() {
@@ -381,6 +381,28 @@ review_dispatch() {
     grep -Fxq "$AS" <<<"$(owners_of review)" || return 1
     [ -n "$PR_HEAD_REPO" ] && [ "$PR_HEAD_REPO" = "$GITHUB_REPO" ]
 }
+
+pr_head_ref="${BRANCH_REF:-}"
+if [ "$IS_PR" = "1" ] && [ -z "$pr_head_ref" ]; then
+    pr_head_ref="$(jq -r '.head.ref // empty' <<<"$(gh_json "repos/$GITHUB_REPO/pulls/$NUMBER" 2>/dev/null || true)")"
+fi
+pr_head_author=""
+pr_head_slug=""
+if [ "$IS_PR" = "1" ] && [ -n "$pr_head_ref" ]; then
+    if [[ "$pr_head_ref" =~ ^([a-z][a-z-]*)/([0-9]+)-(.*)$ ]]; then
+        pr_head_author="${BASH_REMATCH[1]}"
+        pr_head_slug="${BASH_REMATCH[3]}"
+    fi
+fi
+
+is_fix_round=0
+if [ "$IS_PR" = "1" ] && [ "$status_labels" = "status:in-review" ] && [ -n "$AS" ] && [ -n "$pr_head_author" ] && [ "$AS" = "$pr_head_author" ] && [ -n "$PR_HEAD_REPO" ] && [ "$PR_HEAD_REPO" = "$GITHUB_REPO" ]; then
+    is_fix_round=1
+    author_stage="$(jq -r '.stages[] | select(.advances_to == "status:in-review") | .stage // empty' "$LIFECYCLE_JSON")"
+    [ -n "$author_stage" ] || author_stage="$(sed -n 's/^stage:[[:space:]]*\[\(.*\)\].*/\1/p' "$PERSONA_DIR/$AS.yaml" 2>/dev/null | tr -d ' ')"
+    stage="${author_stage:-implement}"
+fi
+
 RUNG_STAGE="$stage"
 RUNG_LABEL="$status_labels"
 REVIEW_DISPATCH=0
@@ -531,6 +553,9 @@ case "${#existing[@]}" in
             for d in "${existing[@]}"; do printf '%s ' "$(basename "$d")"; done)"
         ;;
 esac
+if [ "${is_fix_round:-0}" -eq 1 ] && [ -n "$pr_head_slug" ]; then
+    slug="$pr_head_slug"
+fi
 folder="intent/$ISSUE-$slug/"
 
 # --- Harness and the launch table (D10) ----------------------------------------
@@ -862,7 +887,7 @@ while read -r persona; do
     # stop `--as argus` (D20). It becomes fatal below, for the one
     # persona actually about to be launched.
     missing=0
-    if [ -n "$target" ] && [ ! -f "$REPO_ROOT/$target" ]; then
+    if [ "$DEPLOYMENTS" = "$REPO_ROOT/config/deployments.yaml" ] && [ -n "$target" ] && [ ! -f "$REPO_ROOT/$target" ]; then
         missing=1
     fi
     LAUNCH_ARGV=()
