@@ -1070,10 +1070,10 @@ $marker"
         "event:${GITHUB_RUN_ID:-local}" "cost:$cap" \
         || { fail_issue "could not record the dispatch row on #$issue — no dispatch"; continue; }
     if [ "$DRY_RUN" = "1" ]; then
-        log "    DRY-RUN scripts/placement/$placement/run.sh $issue"
+        log "    DRY-RUN scripts/placement/$placement/run.sh $issue --as $persona"
     else
         log "    dispatching $persona via $placement for #$issue"
-        bash "$REPO_ROOT/scripts/placement/$placement/run.sh" "$issue" \
+        bash "$REPO_ROOT/scripts/placement/$placement/run.sh" "$issue" --as "$persona" \
             || fail_issue "placement $placement could not dispatch $persona for #$issue"
     fi
 done
