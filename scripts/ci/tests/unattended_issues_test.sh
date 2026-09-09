@@ -93,9 +93,8 @@ try:
     if origin_d:
         pr = d.get('on', d.get(True, {})).get('pull_request')
         origin_pr = origin_d.get('on', origin_d.get(True, {})).get('pull_request')
-        expected_types = {'opened', 'synchronize', 'reopened', 'ready_for_review', 'labeled'}
-        if pr and origin_pr and (pr == origin_pr or set(pr.get('types', [])) == expected_types):
-            pass_check('D8: pull_request trigger unchanged or extended for review-split (#265)')
+        if pr and origin_pr and pr == origin_pr:
+            pass_check('D8: pull_request trigger unchanged')
         else:
             fail('D8: pull_request trigger changed or missing')
     else:
