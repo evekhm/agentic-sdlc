@@ -5,9 +5,9 @@
 # that harness's column in model_tiers.yaml.
 
 personas:
-  athena:    { harness: claude-code }
+  athena:    { harness: antigravity }
   daedalus:  { harness: antigravity }
-  odyssey:   { harness: claude-code }
+  odyssey:   { harness: antigravity }
   argus:     { harness: claude-code }
   atlas:     { harness: antigravity }
   cassandra: { harness: claude-code }
