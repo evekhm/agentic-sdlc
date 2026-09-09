@@ -1,6 +1,6 @@
 # Intent: Amend #64 D16 for VM Poller Dispatch Consumption and Adapter --as Argument
 
-**Issue:** #288 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #288 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted (acceptance = merge of PR #306)
 
 ## Problem
 
