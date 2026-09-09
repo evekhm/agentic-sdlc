@@ -924,4 +924,146 @@ has "conjunct (2): false" "MG-37: foreign atlas check failing fails conjunct (2)
 has "atlas via gh-actions=FAILURE" "MG-37: names the failing atlas check"
 not_merged "MG-37"
 
+echo
+banner "MG-38 · D1 D2 D4 · workflow-level concurrency scoped per pull request with cancel-in-progress: false (AT-1, AT-2)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+c = wf.get("concurrency")
+if not c:
+    print("FAIL: MG-38: workflow-level concurrency block missing (D1, AT-1)", file=sys.stderr)
+    sys.exit(1)
+expected_group = "merge-gate-${{ github.event.issue.number || github.event.check_suite.pull_requests[0].number || github.event.inputs.pull_request || github.run_id }}"
+actual_group = c.get("group", "")
+if actual_group != expected_group:
+    print(f"FAIL: MG-38: expected group {expected_group!r}, got {actual_group!r} (D1, D4, AT-1)", file=sys.stderr)
+    sys.exit(1)
+cancel = c.get("cancel-in-progress")
+if cancel is not False:
+    print(f"FAIL: MG-38: expected cancel-in-progress: false, got {cancel!r} (D2, AT-2)", file=sys.stderr)
+    sys.exit(1)
+print("PASS: MG-38: workflow-level concurrency group and cancel-in-progress: false")
+' "$REPO" || fail "MG-38 failed"
+
+echo
+banner "MG-39 · D1 · job-level concurrency blocks removed from record and gate jobs (AT-3)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+jobs = wf.get("jobs", {})
+for job_name in ["record", "gate"]:
+    job = jobs.get(job_name, {})
+    if "concurrency" in job:
+        print(f"FAIL: MG-39: job {job_name} still declares concurrency (D1, AT-3)", file=sys.stderr)
+        sys.exit(1)
+print("PASS: MG-39: job-level concurrency blocks removed from record and gate")
+' "$REPO" || fail "MG-39 failed"
+
+echo
+banner "MG-40 · D3 D5 · status trigger removed, check_suite, issue_comment, workflow_dispatch retained (AT-4, AT-5)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+on_b = wf.get("on", wf.get(True, {}))
+if "status" in on_b:
+    print("FAIL: MG-40: status trigger still present under on: (D3, AT-4)", file=sys.stderr)
+    sys.exit(1)
+cs = on_b.get("check_suite", {})
+if cs.get("types") != ["completed"]:
+    print(f"FAIL: MG-40: check_suite types expected [completed], got {cs.get("types")} (AT-5)", file=sys.stderr)
+    sys.exit(1)
+ic = on_b.get("issue_comment", {})
+if ic.get("types") != ["created"]:
+    print(f"FAIL: MG-40: issue_comment types expected [created], got {ic.get("types")} (AT-5)", file=sys.stderr)
+    sys.exit(1)
+wd = on_b.get("workflow_dispatch", {})
+inputs = wd.get("inputs", {})
+if "pull_request" not in inputs:
+    print("FAIL: MG-40: workflow_dispatch missing input pull_request (AT-5)", file=sys.stderr)
+    sys.exit(1)
+print("PASS: MG-40: triggers clean, status removed, check_suite/issue_comment/workflow_dispatch verified")
+' "$REPO" || fail "MG-40 failed"
+
+echo
+banner "MG-41 · D5 D6 · pre-runner job guards skip non-PR events and admit all PR comments (AT-6, AT-7, AT-8)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+jobs = wf.get("jobs", {})
+rec_if = str(jobs.get("record", {}).get("if", ""))
+for term in ["workflow_dispatch", "github.event.issue.pull_request", "github.event.check_suite.pull_requests[0].number"]:
+    if term not in rec_if:
+        print(f"FAIL: MG-41: jobs.record.if missing guard term {term!r} (D5, AT-6)", file=sys.stderr)
+        sys.exit(1)
+gate_if = str(jobs.get("gate", {}).get("if", ""))
+for term in ["workflow_dispatch", "github.event.issue.pull_request", "github.event.check_suite.pull_requests[0].number", "!cancelled()"]:
+    if term not in gate_if:
+        print(f"FAIL: MG-41: jobs.gate.if missing guard term {term!r} (D5, AT-7)", file=sys.stderr)
+        sys.exit(1)
+for term in ["review-verdict:", "review:"]:
+    if term in rec_if or term in gate_if:
+        print(f"FAIL: MG-41: PR comment filtering must not filter on comment body (D6, AT-8)", file=sys.stderr)
+        sys.exit(1)
+print("PASS: MG-41: pre-runner job guards and permissive PR comments verified")
+' "$REPO" || fail "MG-41 failed"
+
+echo
+banner "MG-42 · D4 · orphan fallback resolves to run-isolated concurrency key (AT-9)"
+python3 -c '
+def eval_group(issue_num, cs_pr, dispatch_pr, run_id):
+    pr = issue_num or cs_pr or dispatch_pr or run_id
+    return f"merge-gate-{pr}"
+
+k_ic = eval_group(101, None, None, 12345)
+k_cs = eval_group(None, 202, None, 12345)
+k_wd = eval_group(None, None, 303, 12345)
+k_orphan = eval_group(None, None, None, 98765)
+
+assert k_ic == "merge-gate-101", f"unexpected ic key: {k_ic}"
+assert k_cs == "merge-gate-202", f"unexpected cs key: {k_cs}"
+assert k_wd == "merge-gate-303", f"unexpected wd key: {k_wd}"
+assert k_orphan == "merge-gate-98765", f"unexpected orphan key: {k_orphan}"
+assert len({k_ic, k_cs, k_wd, k_orphan}) == 4, "concurrency keys collided"
+print("PASS: MG-42: orphan fallback and PR key isolation verified (D4, AT-9)")
+' || fail "MG-42 failed"
+
+echo
+banner "MG-43 · D7 · deterministic target resolution in record and gate steps without commit api fallback (AT-10)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+jobs = wf.get("jobs", {})
+for job_name in ["record", "gate"]:
+    job = jobs.get(job_name, {})
+    step = next((s for s in job.get("steps", []) if "run" in s and "TARGET=" in s.get("run", "")), None)
+    if not step:
+        print(f"FAIL: MG-43: job {job_name} missing target resolution step (D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    env = step.get("env", {})
+    if "STATUS_SHA" in env or "CS_SHA" in env:
+        print(f"FAIL: MG-43: job {job_name} step env still defines STATUS_SHA/CS_SHA (D3, D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    run_script = step.get("run", "")
+    if "status)" in run_script:
+        print(f"FAIL: MG-43: job {job_name} step run still contains status) branch (D3, D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    if "commits/$CS_SHA/pulls" in run_script or "commits/$STATUS_SHA/pulls" in run_script:
+        print(f"FAIL: MG-43: job {job_name} step run still calls commit pulls API fallback (D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    if "TARGET=\"$CS_PR\"" not in run_script:
+        print(f"FAIL: MG-43: job {job_name} step run missing TARGET=\"$CS_PR\" assignment (D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+print("PASS: MG-43: deterministic target resolution verified across record and gate jobs")
+' "$REPO" || fail "MG-43 failed"
+
 echo "merge_gate_test.sh: all scenarios passed"
