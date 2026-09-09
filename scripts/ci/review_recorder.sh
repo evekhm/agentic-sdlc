@@ -87,6 +87,19 @@ recorder_login = sys.argv[5]
 
 pr_data = json.loads(pr_json_str)
 pr_head = pr_data.get("headRefOid", "")
+
+current_labels = set()
+for l in pr_data.get("labels", []):
+    if isinstance(l, dict) and "name" in l:
+        current_labels.add(l["name"])
+
+existing_round_from_labels = 0
+existing_round_label = None
+for l in current_labels:
+    if l in ("review:1", "review:2", "review:3"):
+        existing_round_label = l
+        existing_round_from_labels = max(existing_round_from_labels, int(l.split(":")[1]))
+
 valid_commits = set()
 for c in pr_data.get("commits", []):
     if isinstance(c, dict) and "sha" in c:
@@ -136,6 +149,7 @@ existing_comment_id = None
 existing_body = None
 prev_argus_head = None
 prev_atlas_head = None
+prev_ledger_round = 0
 initial_existing_row_ids = set()
 rows = {}  # fid -> {severity, status, peer}
 audit_notes = []
@@ -164,6 +178,9 @@ if existing_body:
                 prev_argus_head = m_head.group(2)
             elif m_head.group(1) == "atlas":
                 prev_atlas_head = m_head.group(2)
+        m_round = re.match(r'^<!-- round:([0-9]+) -->$', line)
+        if m_round:
+            prev_ledger_round = max(prev_ledger_round, int(m_round.group(1)))
         m_row = re.match(r'^<!-- ledger-row:([A-Za-z0-9@-]+):([A-Za-z0-9]+):([A-Za-z0-9]+):([A-Za-z0-9]+) -->$', line)
         if m_row:
             fid, sev, st, pr_val = m_row.groups()
@@ -179,31 +196,16 @@ if prev_atlas_head:
 accepted_heads = dict(prev_ledger_heads)
 last_accepted_heads = {}
 
-max_round = 0
-
-# Process comments in chronological order
+run_cache = {}
+accepted_blocks_by_comment = {}
+max_accepted_head_round = 0
 verdict_blocks_found = 0
-for c in comments:
+
+# Pass 1: validate verdict blocks, update accepted heads, and compute max accepted round at current head
+for c_idx, c in enumerate(comments):
     body = c.get("body", "")
     user_obj = c.get("user", {})
     author_login = user_obj.get("login", "")
-    author_assoc = c.get("author_association", "")
-    user_type = user_obj.get("type", "")
-
-    # Check for maintainer retier directives
-    retier_matches = list(re.finditer(r'@(?:argus|atlas)\s+retier\s+([A-Za-z0-9@-]+)\s+([a-zA-Z0-9]+)', body))
-    for rm in retier_matches:
-        rfid = rm.group(1)
-        rsev = rm.group(2)
-        is_authorized = (author_assoc in ("OWNER", "MEMBER", "COLLABORATOR") and user_type != "Bot")
-        if is_authorized:
-            if rsev not in ("security", "high", "normal", "suggestion"):
-                audit_notes.append(f"[refused: retier by @{author_login}: invalid severity {rsev}]")
-            elif rfid in rows:
-                rows[rfid]["severity"] = rsev
-                audit_notes.append(f"[retiered to {rsev} by @{author_login}]")
-        else:
-            audit_notes.append(f"[refused: retier by @{author_login}: unauthorized]")
 
     # Check for structured review verdict block (finditer for multiple blocks, Smoke N5)
     v_matches = list(re.finditer(r'<!-- review-verdict:(argus|atlas):(clean|findings) -->(.*?)<!-- review-verdict-end -->', body, re.DOTALL))
@@ -242,13 +244,16 @@ for c in comments:
         run_id = r_match.group(1)
 
         # Provenance check via GitHub Actions API
-        run_info = {}
-        try:
-            run_res = subprocess.run(["gh", "api", f"repos/{repo}/actions/runs/{run_id}"], capture_output=True, text=True)
-            if run_res.returncode == 0 and run_res.stdout.strip():
-                run_info = json.loads(run_res.stdout)
-        except Exception as e:
-            print(f"Error querying run {run_id}: {e}", file=sys.stderr)
+        if run_id not in run_cache:
+            run_info = {}
+            try:
+                run_res = subprocess.run(["gh", "api", f"repos/{repo}/actions/runs/{run_id}"], capture_output=True, text=True)
+                if run_res.returncode == 0 and run_res.stdout.strip():
+                    run_info = json.loads(run_res.stdout)
+            except Exception as e:
+                print(f"Error querying run {run_id}: {e}", file=sys.stderr)
+            run_cache[run_id] = run_info
+        run_info = run_cache[run_id]
 
         run_head_sha = run_info.get("head_sha", "")
         run_path = run_info.get("path", "")
@@ -292,8 +297,39 @@ for c in comments:
         round_match = re.search(r'<!-- round:([0-9]+) -->', block)
         block_round = int(round_match.group(1)) if round_match else 1
         if reviewed_head == pr_head:
-            max_round = max(max_round, block_round)
+            max_accepted_head_round = max(max_accepted_head_round, block_round)
 
+        if c_idx not in accepted_blocks_by_comment:
+            accepted_blocks_by_comment[c_idx] = []
+        accepted_blocks_by_comment[c_idx].append((reviewer, verdict, block, reviewed_head, block_round))
+
+effective_round = max(max_accepted_head_round, existing_round_from_labels, prev_ledger_round)
+
+# Pass 2: apply maintainer retiers and process findings in accepted blocks
+for c_idx, c in enumerate(comments):
+    body = c.get("body", "")
+    user_obj = c.get("user", {})
+    author_login = user_obj.get("login", "")
+    author_assoc = c.get("author_association", "")
+    user_type = user_obj.get("type", "")
+
+    # Check for maintainer retier directives
+    retier_matches = list(re.finditer(r'@(?:argus|atlas)\s+retier\s+([A-Za-z0-9@-]+)\s+([a-zA-Z0-9]+)', body))
+    for rm in retier_matches:
+        rfid = rm.group(1)
+        rsev = rm.group(2)
+        is_authorized = (author_assoc in ("OWNER", "MEMBER", "COLLABORATOR") and user_type != "Bot")
+        if is_authorized:
+            if rsev not in ("security", "high", "normal", "suggestion"):
+                audit_notes.append(f"[refused: retier by @{author_login}: invalid severity {rsev}]")
+            elif rfid in rows:
+                rows[rfid]["severity"] = rsev
+                audit_notes.append(f"[retiered to {rsev} by @{author_login}]")
+        else:
+            audit_notes.append(f"[refused: retier by @{author_login}: unauthorized]")
+
+    # Process accepted verdict blocks for this comment
+    for reviewer, verdict, block, reviewed_head, block_round in accepted_blocks_by_comment.get(c_idx, []):
         # Extract sibling failure scenarios
         failure_scenarios = set(re.findall(r'<!-- failure-scenario:([A-Za-z0-9@-]+) -->', block))
 
@@ -316,7 +352,7 @@ for c in comments:
             if m_r:
                 finding_round = int(m_r.group(1))
             else:
-                finding_round = block_round
+                finding_round = effective_round
 
             # Check high failure scenario marker (D5) keyed on block: any high finding without sibling marker is demoted
             if fsev == "high" and fpr != "dispute" and fst != "withdrawn":
@@ -328,13 +364,13 @@ for c in comments:
 
             if is_new:
                 # Post-cap funnel (D6): past round 3, admit only security findings
-                if block_round >= 4:
+                if effective_round >= 4:
                     if fsev != "security":
                         fsev = "normal"
-                elif block_round in (2, 3):
+                elif effective_round in (2, 3):
                     # In rounds 2-3, new observations land as normal (D6).
                     # Earlier findings carried forward (e.g. R1-5 in round 2 per plan.md:150 and test_label_sync) keep recorded tier.
-                    if finding_round == block_round:
+                    if finding_round >= effective_round:
                         if fsev == "suggestion":
                             fsev = "normal"
                             fpr = "none"
@@ -347,7 +383,14 @@ for c in comments:
 
             if fsev == "security":
                 if fid not in rows:
-                    rows[fid] = {"severity": fsev, "status": fst, "peer": "pending"}
+                    init_st = fst
+                    if reviewer != discoverer and fst == "fixed":
+                        init_st = "open"
+                        audit_notes.append(f"[peer {reviewer} reported fixed on {fid}; status stays open until the discovering reviewer verifies]")
+                    init_peer = "pending"
+                    if reviewer != discoverer and fpr in ("agree", "dispute"):
+                        init_peer = fpr
+                    rows[fid] = {"severity": fsev, "status": init_st, "peer": init_peer}
                 else:
                     if reviewer == discoverer:
                         if rows[fid]["status"] != "fixed" and fst == "fixed":
@@ -356,11 +399,10 @@ for c in comments:
                         else:
                             rows[fid]["status"] = fst
                     else:
+                        if fst == "fixed" and rows[fid]["status"] == "open":
+                            audit_notes.append(f"[peer {reviewer} reported fixed on {fid}; status stays open until the discovering reviewer verifies]")
                         if fpr == "agree":
-                            if fst == "fixed" or rows[fid]["status"] == "fixed":
-                                rows[fid]["status"] = "fixed"
-                                rows[fid]["peer"] = "agree"
-                            elif rows[fid]["status"] == "open":
+                            if rows[fid]["status"] in ("fixed", "open"):
                                 rows[fid]["peer"] = "agree"
                         elif fpr == "dispute":
                             rows[fid]["peer"] = "dispute"
@@ -427,12 +469,6 @@ if existing_comment_id:
 else:
     comment_action = "POST"
 
-# Fetch current labels on PR
-current_labels = set()
-for l in pr_data.get("labels", []):
-    if isinstance(l, dict) and "name" in l:
-        current_labels.add(l["name"])
-
 managed_labels = {
     "argus:findings", "argus:suggestions",
     "consensus:agreed", "consensus:pending", "consensus:disputed",
@@ -466,15 +502,21 @@ else:
 
 # Round labels
 existing_round_label = None
+existing_round_val = 0
 for l in current_labels:
     if l in ("review:1", "review:2", "review:3"):
         existing_round_label = l
+        existing_round_val = int(l.split(":")[1])
         break
 
-if max_round > 0:
-    round_label = f"review:{min(max_round, 3)}"
-    desired_labels.add(round_label)
-elif existing_comment_id is not None and existing_round_label:
+if effective_round > 0:
+    target_round = min(effective_round, 3)
+    if target_round >= existing_round_val:
+        round_label = f"review:{target_round}"
+        desired_labels.add(round_label)
+    else:
+        desired_labels.add(existing_round_label)
+elif existing_round_label:
     desired_labels.add(existing_round_label)
 
 # Head-pinned labels: review:verifying & review:merge-ready
