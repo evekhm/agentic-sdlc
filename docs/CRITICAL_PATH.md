@@ -65,6 +65,46 @@ at the stamp: #311 (#288 spec) at `8b4f17f` awaiting the gate, #307
 (#265 plan) fix round pushed `feea773`, and the #295 design rung
 running.
 
+Status line: 2026-09-09, revision nine (~22:00 UTC, main at
+`79f58f5`): eight autonomous merges landed today under the merge actor
+`evekhm-themis-app`: PR #309 (`e0f8666`) 19:03Z, PR #307 (`e6350f0`)
+19:07Z, PR #311 (`c8fa143`) 19:15Z, PR #313 (`03bee8c`) 19:49Z, PR #317
+(`f29067b`) 20:07Z, PR #323 (`a01c373`) 20:23Z (the #295 plan), PR #326
+(`c9a49e5`) 20:28Z (the #291 implement, the first implement PR merged
+autonomously), and PR #325 (`69f961a`) 20:40Z (an amendment of the
+#295 spec). Correction to revision eight: at `status:implementing` the
+merge gate's conjuncts 9 and 10 read true, so amendment PRs against an
+issue already at implementing merge autonomously. The structural gap
+is the intent stage only: nothing writes the `status:planning` label,
+tracked as #321 (intent merged, the design rung running). Operator
+by-hand merges today, through the bot: PR #327 (`b816675`) 21:46Z (the
+#295 implement, the poller intake gate), PR #322 (`34b7bfd`), PR #315
+(`668dfd0`), and PR #316 (`79f58f5`), the last three intent PRs for
+#321, #308 and #312. PR #327 was held by the gate on conjunct 5 alone:
+the consensus recorder never clears a round-1 dispute flag on a
+non-security row, and the gate reads the flag without checking status
+or severity, so two already-fixed rows kept blocking; tracked as #331.
+A hand edit of the ledger cannot fix this because the recorder replays
+every verdict block on every run. The poller
+(`scripts/placement/vm-local/poll.sh`) has been live since 21:50Z as
+the systemd user unit `poll.service`, checklist step 2 of #251; its
+first self-directed launch claimed #308 twelve seconds after start.
+Labels including `intake:auto` are provisioned; #269 carries
+`intake:auto` as the first-hop intake target, and the first-hop
+ceiling is one. PR #319 (the #265 implement, the review split) is
+stopped on an operator bundle: ESC-1 (test edits outside the plan's
+touch lists), F-4 (`unattended.yml` line 107 sets `GH_TOKEN` from the
+workflow token), and F-2 (which persona signs the deep-review refusal,
+and `post.sh` has no label-removal verb), landing dispatch-side only
+with the recorder gap in #328. Defects filed from live evidence today:
+#318, #320, #321, #324, #328, #331; #308 also carries the ledger
+posting race. The verifier seat continues, handed from
+`agentic-sdlc-70` to `agentic-sdlc-eb` at 20:46Z, observe-only. All fix
+rounds and rungs today ran on agy with gemini-3.8-flash-high. Next:
+design PRs for #321, #308 and #312 through Themis; #269 first-hop
+intake by the poller once the ceiling frees; the #319 bundle; and #331
+and #324 fixes so the ledger stops holding clean heads.
+
 ## Fast path to the demo (operator directive, 2026-09-08 06:40 UTC)
 
 The operator's call: cut corners, skip review rounds, get the loop
