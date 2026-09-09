@@ -10,7 +10,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 RUN_SH="${RUN_SH:-$REPO_ROOT/scripts/placement/vm-local/run.sh}"
 CLAIM_SH="${CLAIM_SH:-$REPO_ROOT/scripts/ops/claim.sh}"
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
@@ -185,7 +185,7 @@ poll_tick() {
                 key="$(printf '%s' "$trigger_body" | sha256sum | awk '{print $1}')"
             fi
 
-            local poll_state_dir="${POLL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sdlc-poller}"
+            local poll_state_dir="${POLL_STATE_DIR:-${TMPDIR:-/tmp}/sdlc-poller}"
             mkdir -p "$poll_state_dir" 2>/dev/null || true
             local repo_hash
             repo_hash="$(printf '%s' "$REPO_ROOT" | sha256sum | head -c 8)"
