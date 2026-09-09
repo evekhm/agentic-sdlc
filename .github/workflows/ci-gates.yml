@@ -167,3 +167,25 @@ jobs:
           fi
           BASE_SHA="$merge_base" PR_BODY_FILE="$body_file" \
             bash scripts/ci/spec_check.sh
+
+      - name: Evaluate DEEP diff rules
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if ! merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"; then
+            echo "::error::diff-rules: no merge base for $BASE_SHA and $HEAD_SHA"
+            exit 1
+          fi
+          diff_files="$(git diff --name-only "$merge_base...$HEAD_SHA")"
+          paths_file="$(mktemp)"
+          printf '%s\n' "$diff_files" > "$paths_file"
+          lines="$(git diff "$merge_base...$HEAD_SHA" -- . ':!tests' ':!.claude/agents' ':!.agents/agents' | wc -l || echo 0)"
+          file_count="$(wc -l < "$paths_file" || echo 0)"
+          python3 -m pip install --disable-pip-version-check pyyaml >/dev/null 2>&1 || true
+          rule="$(python3 scripts/ops/execution.py --diff-rules --lines "$lines" --files "$file_count" --paths-file "$paths_file" || true)"
+          if [ -n "$rule" ]; then
+            echo "Diff matches criteria ($rule); deep-review recommendation logged"
+          fi

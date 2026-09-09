@@ -140,7 +140,7 @@ if [ "$is_pr" = "pr" ]; then
             HOLD_SET+=( "$n" )
         done <<<"$closes"
     else
-        branch_issue "$NUMBER" || true
+        branch_issue "$NUMBER" 2>/dev/null || true
         [ -z "$BRANCH_ISSUE" ] || HOLD_SET+=( "$BRANCH_ISSUE" )
     fi
 fi
@@ -183,8 +183,8 @@ if [ -n "$BODY_FILE" ]; then
 fi
 
 if [ -n "$ADD_LABEL" ]; then
-    gh api -X POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" \
-        -f "labels[]=deep-review" >/dev/null \
+    gh api "repos/$GITHUB_REPO/issues/$NUMBER/labels" \
+        -X POST -f "labels[]=deep-review" >/dev/null \
         || die "the label on #$NUMBER was not applied"
     echo "labelled: #$NUMBER with $ADD_LABEL as $AS"
 fi
