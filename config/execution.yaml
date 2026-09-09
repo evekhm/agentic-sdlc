@@ -32,7 +32,7 @@
 #                 job log.
 
 loop:
-  autonomous_merge: false
+  autonomous_merge: true
   max_rung_dispatches_per_issue: 12
   max_cost_usd_per_issue: 50.00
 
