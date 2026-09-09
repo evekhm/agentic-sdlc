@@ -65,8 +65,8 @@ admin), unchanged between the two reads:
 |---|---|
 | `gh api repos/evekhm/agentic-sdlc/environments/themis` | `deployment_branch_policy.custom_branch_policies: true`, `protected_branches: false`; `protection_rules` holds one `branch_policy` entry and no `required_reviewers` |
 | `gh api repos/evekhm/agentic-sdlc/environments/themis/deployment-branch-policies` | `total_count: 1`, the single policy is `main` |
-| `gh api repos/evekhm/agentic-sdlc/environments/themis/secrets` | `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY`; no Themis key at repository level (`actions/secrets` lists `ANTIGRAVITY_ADC_JSON`, `ARGUS_APP_PRIVATE_KEY`, `ATLAS_APP_PRIVATE_KEY`) and no organization exists (`orgs/evekhm` is 404, a user account) |
-| `python3 scripts/auth/create_all_apps.py --only themis --check` | exit 0, closing line `every entry is complete`; run by the operator at 05:30 UTC and again by the operator's session at 14:35 UTC |
+| `gh api repos/evekhm/agentic-sdlc/environments/themis/secrets` | `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY`; no Themis key at repository level (`actions/secrets` lists `ANTIGRAVITY_ADC_JSON`, `ARGUS_APP_PRIVATE_KEY`, `ATLAS_APP_PRIVATE_KEY`) and no organization level exists (`orgs/evekhm/actions/secrets` is 404; `evekhm` is a user account) |
+| `python3 scripts/auth/create_all_apps.py --only themis --check` | exit 0, closing line `every entry is complete`, run at 14:35 UTC (the raw output is in the evidence folder) |
 
 P2, branch protection on `main`, read 2026-09-09 13:04 UTC and again
 14:35 UTC by `evekhm` (repository admin), unchanged between the two
@@ -91,10 +91,18 @@ loop-ledger comment as `evekhm-themis-app[bot]`; merge-gate run
 with `merger: evekhm-themis-app[bot]`; the consensus recorder's first
 ledger with both reviewers at one head is PR #294 comment 5601912787
 (D31, #267). Acceptance 27 (D29): the `mergeStateStatus` read owed by
-the flip pull request is the merge-gate `evaluate` run on its own head,
-recorded on #64 by the merger with the run id. Acceptance 20: the
-end-to-end traversal on one throwaway issue runs after this merge with
-the supervisor up; its evidence lands on #64.
+the flip pull request came from the merge-gate `gate` job of a main-ref
+run on its head (the `evaluate` job runs only on `pull_request` events,
+with the default token, and declines at D30 before the read): run
+34365593567 read `CLEAN` at 275b24a with `merger: evekhm-themis-app[bot]`
+and declined on conjuncts (2)(3)(4)(5)(11). Conjunct (2) was false
+because the two jobs the gate's own `pull_request` run skips,
+`merge-gate` and `merge-gate (record)`, sit on every head as foreign
+`SKIPPED` check runs under D24, so the merge actor declines every pull
+request on (2) until #298 lands; the flag is armed and the gate fails
+closed. Acceptance 20: the end-to-end traversal on one throwaway issue
+runs after this merge, once step 2 is up, which waits on #295; its
+evidence lands on #64.
 
 ## Capabilities
 
