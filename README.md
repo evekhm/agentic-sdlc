@@ -24,9 +24,7 @@ Two kinds of actors appear in this document.
 
 Six personas cover six jobs: product owner, architect, implementer,
 two reviewers and maintainer. Two seats stand beside them: an advisor
-and a merge actor. Each persona carries a name from Greek myth. The
-name is a handle and the job is what matters, so this file introduces
-every role before its name and writes the names in italics.
+and a merge actor. Each persona carries a name from Greek myth. 
 
 **The loop.** Every issue climbs five rungs in order. Each rung ends
 in a pull request that carries one artifact. A merge means the
