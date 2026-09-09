@@ -1417,7 +1417,7 @@ personas:
     harness: antigravity
 EOF
 : > "$LAUNCHES"; : > "$WRITES"
-DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 run 0 "AT-12: odyssey antigravity launch" -- 108 --as odyssey
+TREE="$T" DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" run 0 "AT-12: odyssey antigravity launch" -- 108 --as odyssey
 [ -s "$LAUNCHES" ] || fail "AT-12: nothing was launched for antigravity"
 grep -q "agy" "$LAUNCHES" || fail "AT-12: expected agy in launches"
 pass "AT-12: antigravity launch uses agy"
@@ -1428,7 +1428,7 @@ personas:
     harness: claude-code
 EOF
 : > "$LAUNCHES"; : > "$WRITES"
-DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 run 0 "AT-12: odyssey claude-code launch" -- 108 --as odyssey
+TREE="$T" DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 run 0 "AT-12: odyssey claude-code launch" -- 108 --as odyssey
 [ -s "$LAUNCHES" ] || fail "AT-12: nothing was launched for claude-code"
 grep -q "claude" "$LAUNCHES" || fail "AT-12: expected claude in launches"
 pass "AT-12: claude-code launch uses claude"
@@ -1439,7 +1439,7 @@ personas:
     harness: antigravity
 EOF
 : > "$LAUNCHES"; : > "$WRITES"
-DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 run 0 "AT-12: restored odyssey antigravity launch" -- 108 --as odyssey
+TREE="$T" DEPLOYMENTS="$fixture_dep" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_ok.json" run 0 "AT-12: restored odyssey antigravity launch" -- 108 --as odyssey
 [ -s "$LAUNCHES" ] || fail "AT-12: nothing was launched for restored antigravity"
 grep -q "agy" "$LAUNCHES" || fail "AT-12: expected agy in restored launches"
 pass "AT-12: restored antigravity launch uses agy"
