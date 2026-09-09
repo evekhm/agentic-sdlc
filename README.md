@@ -15,8 +15,8 @@ decides escalations.
 
 This is a **harness-agnostic SDLC**. The process comes first: the
 roles, the protocols, the gates and the artifacts are defined once,
-in vendor-free sources, and none of them depends on a particular
-vendor. Each persona is then assigned its own coding harness and model,
+in vendor-free sources that carry over to any harness. Each persona
+is then assigned its own coding harness and model,
 whichever fits the team's needs and requirements: frontier reasoning
 where judgment shapes the outcome, fast capacity where the process has
 matured, or the platform a team already runs on. Currently supported
@@ -308,8 +308,8 @@ the two reviewers must resolve to different model families
 ([#271](https://github.com/evekhm/agentic-sdlc/issues/271)). Every
 rung persona is pinned there, and each of the five tiers maps to a
 Flash thinking level in
-[`config/model_tiers.yaml`](config/model_tiers.yaml). Nothing in the
-design requires Claude Code. Where Claude pays for itself is judgment:
+[`config/model_tiers.yaml`](config/model_tiers.yaml). The design runs
+whole on either harness. Where Claude pays for itself is judgment:
 the second review family at the code gate, and the frontier seats a
 team already invested in Claude keeps there, such as the advisor
 ([#199](https://github.com/evekhm/agentic-sdlc/issues/199)).
