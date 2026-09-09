@@ -99,12 +99,14 @@ PR_LABELS="$(prq '[.labels[]?.name] | .[]')"
 # `refs` case-insensitively in the body, then the <actor>/<n>-<slug>
 # branch. Two different issues is corrupted input; none is a pull
 # request outside the ladder, a distinguishable outcome and no failure.
-LINKED="$( { prq '[.closingIssuesReferences[]?.number] | .[]';
-             prq '.body // ""' | grep -Eoi '(^|[^[:alnum:]])(refs?|close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -Eo '[0-9]+$'; } | sort -un || true)"
-if [ -z "$LINKED" ]; then
-    HEAD_REF="$(prq '.headRefName // ""')"
-    if [[ "$HEAD_REF" =~ ^[a-z][a-z-]*/([0-9]+)- ]]; then LINKED="${BASH_REMATCH[1]}"; fi
+BODY_REFS="$(prq '.body // ""' | grep -Eoi '(^|[^[:alnum:]])(refs?|references?|close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' | grep -Eo '[0-9]+$' || true)"
+CLOSING_REFS="$(prq '[.closingIssuesReferences[]?.number] | .[]' 2>/dev/null || true)"
+HEAD_REF="$(prq '.headRefName // ""')"
+BRANCH_REFS=""
+if [[ "$HEAD_REF" =~ ^[a-z][a-z-]*/([0-9]+)- ]]; then
+    BRANCH_REFS="${BASH_REMATCH[1]}"
 fi
+LINKED="$(printf '%s\n%s\n%s\n' "$CLOSING_REFS" "$BODY_REFS" "$BRANCH_REFS" | grep -E '^[0-9]+$' | sort -un || true)"
 n_linked="$(grep -c . <<<"$LINKED" || true)"
 if [ "$n_linked" -gt 1 ]; then
     decline "#$PR links two different issues ($(tr '\n' ' ' <<<"$LINKED"| sed 's/ $//' | sed 's/\([0-9][0-9]*\)/#\1/g')) — corrupted input, nothing written"
@@ -232,15 +234,15 @@ fi
 # unevaluable. Read once here — before D10, which needs it for a
 # `behind` marker — and reused at conjunct (2) below without a second
 # GraphQL call.
-GRAPHQL_ROLLUP='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){mergeStateStatus commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}}}}'
-read_merge_state() { # sets MERGE_STATE, CHECKS_TSV (name<TAB>state<TAB>run-id); returns 1 unreadable
+GRAPHQL_ROLLUP='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){mergeStateStatus commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}}}}'
+read_merge_state() { # sets MERGE_STATE, CHECKS_TSV (name<TAB>state<TAB>run-id<TAB>db-id); returns 1 unreadable
     local owner="${R%%/*}" repo="${R#*/}" out
     out="$(gh api graphql -f query="$GRAPHQL_ROLLUP" -F owner="$owner" -F repo="$repo" -F pr="$PR" 2>/dev/null)" || return 1
     jq -e '.data.repository.pullRequest != null' <<<"$out" >/dev/null 2>&1 || return 1
     MERGE_STATE="$(jq -r '.data.repository.pullRequest.mergeStateStatus // "UNKNOWN"' <<<"$out")"
     CHECKS_TSV="$(jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? |
-        if .__typename == "CheckRun" then [(.name // "?"), ((.conclusion // .status) // ""), ((.checkSuite.workflowRun.databaseId) // "")]
-        else [(.context // "?"), (.state // ""), ""] end | @tsv' <<<"$out")"
+        if .__typename == "CheckRun" then [(.name // "?"), ((.conclusion // .status) // ""), ((.checkSuite.workflowRun.databaseId) // ""), ((.databaseId) // "")]
+        else [(.context // "?"), (.state // ""), "", ""] end | @tsv' <<<"$out")"
     return 0
 }
 MERGE_STATE_RETRY_SLEEP="${MERGE_STATE_RETRY_SLEEP:-2}"
@@ -402,9 +404,29 @@ elif [ "$MERGE_STATE" = "BEHIND" ]; then
     else log "autonomous_merge is false — behind recorded, no escalation (D27)"; fi
 elif [ "$MERGE_STATE" = "CLEAN" ] || [ "$MERGE_STATE" = "UNSTABLE" ]; then
     RUN_ID="${GITHUB_RUN_ID:-}"
-    OTHER="$(awk -F'\t' -v id="$RUN_ID" '$3 == "" || $3 != id' <<<"$CHECKS_TSV")"
-    n_other="$(grep -c . <<<"$OTHER" || true)"
-    failing="$(awk -F'\t' '{ st = ($2 == "" ? "PENDING" : toupper($2)); if (st != "SUCCESS") printf " %s=%s", $1, st }' <<<"$OTHER")"
+    eval_res="$(awk -F'\t' -v own_id="$RUN_ID" '
+        {
+            name = $1; st = $2; run_id = $3; db_id = $4
+            if (own_id != "" && run_id == own_id) next
+            if (!seen[name]) { seen[name] = 1; names[++total] = name }
+            if (db_id != "") {
+                if (!has_dbid[name] || (db_id + 0 > max_dbid[name] + 0)) {
+                    has_dbid[name] = 1; max_dbid[name] = db_id + 0; state[name] = st
+                }
+            } else {
+                if (!has_dbid[name]) state[name] = st
+            }
+        }
+        END {
+            failing = ""
+            for (i = 1; i <= total; i++) {
+                n = names[i]; s = state[n]; val = (s == "" ? "PENDING" : toupper(s))
+                if (val != "SUCCESS" && val != "NEUTRAL") failing = failing " " n "=" val
+            }
+            printf "%d\t%s\n", total, failing
+        }' <<<"$CHECKS_TSV")"
+    n_other="${eval_res%%$'\t'*}"
+    failing="${eval_res#*$'\t'}"
     if [ "$n_other" -eq 0 ]; then
         WHY[2]="mergeStateStatus $MERGE_STATE but no check besides the gate's own run"
     elif [ -n "$failing" ]; then

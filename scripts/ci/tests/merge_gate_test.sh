@@ -130,15 +130,21 @@ case "${1:-} ${2:-}" in
     state="${states[$idx]}"
     checks_json="[]"
     if [ -f "$FX/mergestate-$pr.checks" ]; then
-      checks_json="$(while IFS='|' read -r ty name val runid; do
+      checks_json="$(while IFS='|' read -r ty name val runid dbid; do
         [ -n "$ty" ] || continue
         if [ "$ty" = check ]; then
-          if [ -n "$runid" ]; then
+          if [ -n "$runid" ] && [ -n "$dbid" ]; then
+            jq -nc --arg n "$name" --arg c "$val" --argjson r "$runid" --argjson d "$dbid" \
+              '{__typename:"CheckRun", name:$n, conclusion:$c, databaseId:$d, checkSuite:{workflowRun:{databaseId:$r}}}'
+          elif [ -n "$runid" ]; then
             jq -nc --arg n "$name" --arg c "$val" --argjson r "$runid" \
-              '{__typename:"CheckRun", name:$n, conclusion:$c, checkSuite:{workflowRun:{databaseId:$r}}}'
+              '{__typename:"CheckRun", name:$n, conclusion:$c, databaseId:null, checkSuite:{workflowRun:{databaseId:$r}}}'
+          elif [ -n "$dbid" ]; then
+            jq -nc --arg n "$name" --arg c "$val" --argjson d "$dbid" \
+              '{__typename:"CheckRun", name:$n, conclusion:$c, databaseId:$d, checkSuite:{workflowRun:null}}'
           else
             jq -nc --arg n "$name" --arg c "$val" \
-              '{__typename:"CheckRun", name:$n, conclusion:$c, checkSuite:{workflowRun:null}}'
+              '{__typename:"CheckRun", name:$n, conclusion:$c, databaseId:null, checkSuite:{workflowRun:null}}'
           fi
         else
           jq -nc --arg n "$name" --arg s "$val" '{__typename:"StatusContext", context:$n, state:$s}'
@@ -262,7 +268,7 @@ mergestate_checks() { # <pr> <row>...
   local pr="$1"; shift
   printf '%s\n' "$@" > "$FX/mergestate-$pr.checks"
 }
-row() { printf '%s|%s|%s|%s' "$1" "$2" "$3" "$4"; } # <type> <name> <val> <runid>
+row() { printf '%s|%s|%s|%s|%s' "$1" "$2" "$3" "$4" "${5:-}"; } # <type> <name> <val> <runid> [dbid]
 # The green roll-up: the gate's own check run (excluded by run id, D24)
 # plus one other check and one status context, both green.
 GREEN_CHECKS=(
@@ -779,6 +785,71 @@ run_fail "$ESCALATE" "MG-30b: escalate refuses under the default token's identit
 has "github-actions[bot], which D23 never trusts" "MG-30b: names the excluded login"
 no_writes "MG-30b"
 rm -f "$FX/viewer-login"
+
+banner "MG-31 · D3 · check roll-up deduplication: superseded CANCELLED check superseded by newer SUCCESS passes conjunct 2"
+mk_green
+mergestate_checks 123 \
+  "$(row check merge-gate '' 999 500)" \
+  "$(row check 'execution — bindings' CANCELLED 1001 2001)" \
+  "$(row check 'execution — bindings' SUCCESS 1002 2002)" \
+  "$(row status 'argus via gh-actions' SUCCESS '' '')"
+run "MG-31: exits 0" 123
+has "conjunct (2): true" "MG-31: superseded cancelled check resolved by newer success passes (2)"
+merged "MG-31: and the merge proceeds"
+
+banner "MG-32 · D3 · check roll-up deduplication: superseded SUCCESS check superseded by newer FAILURE fails conjunct 2"
+mk_green
+mergestate_checks 123 \
+  "$(row check merge-gate '' 999 500)" \
+  "$(row check 'execution — bindings' SUCCESS 1001 2001)" \
+  "$(row check 'execution — bindings' FAILURE 1002 2002)" \
+  "$(row status 'argus via gh-actions' SUCCESS '' '')"
+run "MG-32: exits 0" 123
+has "conjunct (2): false" "MG-32: superseded success check overridden by newer failure fails (2)"
+has "execution — bindings=FAILURE" "MG-32: names the failing check"
+not_merged "MG-32"
+
+banner "MG-33 · D3 · check roll-up deduplication: pending check in roll-up fails conjunct 2"
+mk_green
+mergestate_checks 123 \
+  "$(row check merge-gate '' 999 500)" \
+  "$(row check 'execution — bindings' '' 1001 2001)" \
+  "$(row status 'argus via gh-actions' SUCCESS '' '')"
+run "MG-33: exits 0" 123
+has "conjunct (2): false" "MG-33: pending check fails (2)"
+has "execution — bindings=PENDING" "MG-33: names the pending check"
+not_merged "MG-33"
+
+banner "MG-34 · D3 · gate's own run excluded by workflow run id, foreign check named merge-gate counts"
+mk_green
+mergestate_checks 123 \
+  "$(row check merge-gate SUCCESS 999 500)" \
+  "$(row check merge-gate FAILURE 1001 2003)" \
+  "$(row check 'execution — bindings' SUCCESS 1002 2002)"
+run "MG-34: exits 0" 123
+has "conjunct (2): false" "MG-34: foreign check named merge-gate counts and fails"
+has "merge-gate=FAILURE" "MG-34: names the failing foreign check"
+not_merged "MG-34"
+
+banner "MG-35 · D6 · pull request linking conflicting issues declines as corrupted input"
+mk_green
+PR_BODY="Refs #100"
+PR_HEADREF="odyssey/200-slug"
+pr_fixture 123
+run "MG-35: exits 0" 123
+has "corrupted input, nothing written" "MG-35: conflicting issues declines"
+has "#100" "MG-35: names first conflicting issue"
+has "#200" "MG-35: names second conflicting issue"
+not_merged "MG-35"
+
+banner "MG-36 · D7 · unlinked pull request exits 0 without evaluation or writes"
+mk_green
+PR_BODY="Routine maintenance with no issue references"
+PR_HEADREF="ops/routine-maintenance"
+pr_fixture 123
+run "MG-36: exits 0" 123
+has "not a ladder pull request; nothing evaluated, nothing written" "MG-36: unlinked PR skips cleanly"
+not_merged "MG-36"
 
 echo
 echo "merge_gate_test.sh: all scenarios passed"

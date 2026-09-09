@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-gates-${{ github.event.pull_request.number || github.ref }}
+  group: ci-gates-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:

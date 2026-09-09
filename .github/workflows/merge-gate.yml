@@ -3,27 +3,21 @@
 # evaluates D5's eleven conjuncts and is runnable locally by the same
 # command this file runs.
 #
-# Three jobs. `evaluate` runs on pull_request events with the default
-# token, read-only, DRY_RUN=1: a same-repo pull_request run executes the
-# workflow file from the pull request's head, so nothing that can write
-# or mint the merge actor's token may run on that trigger. `record` and
-# `gate` run on the other four triggers, which execute the workflow file
-# from the default branch, under the `themis` Environment whose
-# deployment-branch policy admits `main` only. `record` maintains the
-# consensus ledger, and `gate` evaluates merge readiness.
+# Mutating jobs (record, gate) run on main-ref events under the `themis`
+# Environment whose deployment-branch policy admits `main` only.
+# `evaluate` lives in .github/workflows/merge-gate-evaluate.yml (#298, D1).
+# `record` maintains the consensus ledger, and `gate` evaluates merge
+# readiness.
 #
 # Themis (`<owner>-themis-app`) holds the merge-actor role; it is a
 # system actor with no prompt, harness or goals, and the six personas in
 # INTENT.md are unchanged.
 #
 # Every checkout is the literal default branch. No ref an event supplied
-# is ever checked out, and a pull_request whose base is another branch
-# fails closed before anything runs (D5 conjunct 1).
+# is ever checked out.
 name: Merge Gate
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
   check_suite:
     types: [completed]
   status:
@@ -39,48 +33,9 @@ on:
 permissions: {}
 
 jobs:
-  evaluate:
-    name: merge-gate (evaluate)
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      pull-requests: read
-      issues: read
-      checks: read
-      statuses: read
-    steps:
-      - name: Fail closed unless the base is the default branch
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          if [ "$BASE_REF" != "main" ]; then
-            echo "::error::merge-gate: the pull request's base is '$BASE_REF'; only main is gated (D5 conjunct 1)"
-            exit 1
-          fi
-
-      - name: Checkout the default branch
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: main
-          fetch-depth: 1
-
-      - name: Evaluate the eleven conjuncts (dry run, no writes)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DRY_RUN: "1"
-          TARGET: ${{ github.event.pull_request.number }}
-        run: |
-          if [ ! -f scripts/ci/merge_gate.sh ]; then
-            echo "scripts/ci/merge_gate.sh is not on main — nothing to evaluate"
-            exit 0
-          fi
-          bash scripts/ci/merge_gate.sh "$TARGET"
-
   record:
     name: merge-gate (record)
-    if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: themis
@@ -144,7 +99,7 @@ jobs:
   gate:
     name: merge-gate
     needs: [record]
-    if: ${{ always() && github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request) }}
+    if: ${{ always() && (github.event_name != 'issue_comment' || github.event.issue.pull_request) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: themis

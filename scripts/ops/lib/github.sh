@@ -54,6 +54,13 @@ closing_refs() {
         | grep -Eo '[0-9]+$' | sort -un || true
 }
 
+# issue_refs <pr-body> — distinct same-repo issue numbers extracted from
+# closing keywords and reference mentions, one per line, sorted.
+issue_refs() {
+    grep -Eoi '(^|[^[:alnum:]])(refs?|references?|close[sd]?|fix(es|ed)?|resolve[sd]?)[[:space:]]+#[0-9]+' <<<"$1" \
+        | grep -Eo '[0-9]+$' | sort -un || true
+}
+
 # branch_issue <pr-number>
 #   sets BRANCH_ISSUE  the issue number in an <actor>/<n>-<slug> head
 #                      branch, or empty when the branch does not match
@@ -123,21 +130,35 @@ resolve_issue() {
     # fallback's own `[ -n "$BRANCH_ISSUE" ] || return 2` signals an
     # unresolvable pull request to the caller (#216).
     branch_issue "$number" || true
+    local body_refs branch_refs union union_count
     closes="$(closing_refs "$(jq -r '.body // ""' <<<"$view")")"
     closes_count=0
     [ -z "$closes" ] || closes_count="$(grep -c . <<<"$closes")"
     if [ "$closes_count" -gt 1 ]; then
-        # Two closing references is two units of work. The never-guess
-        # rule applies: report them and stop rather than take the first.
         die "PR #$number closes more than one issue: $(sed 's/^/#/' <<<"$closes" \
             | tr '\n' ' ')— dispatch one of them by its own number"
     fi
-    if [ "$closes_count" -eq 1 ]; then
-        ISSUE="$closes"
+
+    body_refs="$(issue_refs "$(jq -r '.body // ""' <<<"$view")")"
+    branch_refs=""
+    [ -z "$BRANCH_ISSUE" ] || branch_refs="$BRANCH_ISSUE"
+    union="$(printf '%s\n%s\n' "$body_refs" "$branch_refs" | grep -E '^[0-9]+$' | sort -un || true)"
+    union_count=0
+    [ -z "$union" ] || union_count="$(grep -c . <<<"$union")"
+
+    if [ "$union_count" -gt 1 ]; then
+        die "PR #$number links more than one issue: $(sed 's/^/#/' <<<"$union" | tr '\n' ' ')— dispatch one of them by its own number"
+    fi
+    if [ "$union_count" -eq 0 ]; then
+        return 2
+    fi
+
+    ISSUE="$union"
+    if grep -qxE "$ISSUE" <<<"$closes"; then
         RESOLVED_VIA="Closes #$ISSUE in the body"
+    elif grep -qxE "$ISSUE" <<<"$body_refs"; then
+        RESOLVED_VIA="Refs #$ISSUE in the body"
     else
-        [ -n "$BRANCH_ISSUE" ] || return 2
-        ISSUE="$BRANCH_ISSUE"
         RESOLVED_VIA="the branch name $BRANCH_REF"
     fi
     if ! ISSUE_JSON="$(gh_json "repos/$GITHUB_REPO/issues/$ISSUE")"; then
