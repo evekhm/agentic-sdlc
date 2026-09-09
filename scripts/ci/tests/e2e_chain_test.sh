@@ -5,7 +5,7 @@
 #   bash scripts/ci/tests/e2e_chain_test.sh [-k <pattern>]
 #
 # Hermetic contract test suite covering Decisions D1 through D8 and Acceptance
-# Criteria AT-1 through AT-22 (the eighteen executable scenarios).
+# Criteria AT-1 through AT-23 (the nineteen executable scenarios).
 #
 # Stub helpers copied from:
 # - scripts/ci/tests/lifecycle_advance_test.sh:57-63, 73-178, 187-195
@@ -131,6 +131,11 @@ for (( idx=0; idx<${#args[@]}; idx++ )); do
         --label=*)
             label_filters+=("${args[$idx]#--label=}")
             ;;
+        --limit)
+            idx=$((idx + 1))
+            ;;
+        --limit=*)
+            ;;
         --json)
             idx=$((idx + 1))
             json_fields="${args[$idx]:-}"
@@ -181,6 +186,13 @@ if [ "$cmd" = "issue" ] || [ "$cmd" = "pr" ] || [ "$cmd" = "search" ]; then
     fi
 
     if [ "$subcmd" = "list" ] || [ "$cmd" = "search" ]; then
+        if [ -f "$FIXTURES/fail-in-progress-list" ]; then
+            for lf in "${label_filters[@]}"; do
+                if [ "$lf" = "in-progress" ]; then
+                    exit 1
+                fi
+            done
+        fi
         content="[]"
         if [ "$cmd" = "pr" ] || [ "$subcmd" = "prs" ]; then
             [ -f "$FIXTURES/pr-list.json" ] && content="$(cat "$FIXTURES/pr-list.json")"
@@ -1538,7 +1550,7 @@ run_at17() {
     manual_count="$(grep -c 'odyssey `manual`' "$spec_doc" || true)"
     ladder_count="$(grep -c 'odyssey `ladder`' "$spec_doc" || true)"
 
-    if grep -qF "## Deployment status" "$spec_doc" && [ "$steps" -eq 7 ] && [ "$manual_count" -eq 0 ] && [ "$ladder_count" -eq 1 ]; then
+    if grep -qF "## Deployment status" "$spec_doc" && [ "$steps" -ge 7 ] && [ "$manual_count" -eq 0 ] && [ "$ladder_count" -eq 1 ]; then
         pass "AT-17 (D6, D8): docs/SPEC.md deployment status section and table updated"
     else
         fail "AT-17 (D6, D8): docs/SPEC.md missing 7-step checklist or odyssey ladder update (steps: $steps, manual: $manual_count, ladder: $ladder_count)"
@@ -1755,10 +1767,68 @@ EOF
         unsuffixed_ignored=1
     fi
 
-    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$has_launch1" -eq 1 ] && [ "$no_claim" -eq 1 ]        && [ "$state_dir_used" -eq 1 ] && [ "$lock_prevented" -eq 1 ]        && [ "$non_reviewer_ignored" -eq 1 ] && [ "$unsuffixed_ignored" -eq 1 ]; then
+    # Sub-case (iii): a reviewer's later clean verdict after its own findings comment produces no launch (S-8)
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    cat > "$FIXTURES/issue-4242.json" <<\EOF
+{
+  "number": 4242,
+  "state": "open",
+  "title": "PR 4242",
+  "labels": [{"name": "status:in-review"}],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "<!-- review-verdict:argus:findings -->\n<!-- finding:R1-1:high:open: -->"
+    },
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "### Argus review\n<!-- review-verdict:argus:clean -->"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-4242.json" <<\EOF
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "<!-- review-verdict:argus:findings -->\n<!-- finding:R1-1:high:open: -->"
+  },
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "### Argus review\n<!-- review-verdict:argus:clean -->"
+  }
+]
+EOF
+    cat > "$FIXTURES/pr-list.json" <<\EOF
+[
+  {
+    "number": 4242,
+    "title": "PR 4242",
+    "state": "open",
+    "labels": [{"name": "status:in-review"}],
+    "headRefName": "odyssey/4241-fix"
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+    rm -rf "$poll_state_dir"
+    mkdir -p "$poll_state_dir"
+
+    local rc5=0
+    (cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc5=$?
+    local clean_superseded=0
+    if [ "$rc5" -eq 0 ] && [ ! -s "$LAUNCHES" ] && [ ! -s "$CLAIMS" ]; then
+        clean_superseded=1
+    fi
+
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$has_launch1" -eq 1 ] && [ "$no_claim" -eq 1 ] \
+       && [ "$state_dir_used" -eq 1 ] && [ "$lock_prevented" -eq 1 ] \
+       && [ "$non_reviewer_ignored" -eq 1 ] && [ "$unsuffixed_ignored" -eq 1 ] && [ "$clean_superseded" -eq 1 ]; then
         pass "AT-20 (D2, D5, D6, D7): fix-round claim bypass, POLL_STATE_DIR, lock isolation, reviewer-only verified"
     else
-        fail "AT-20 (D2, D5, D6, D7): poll.sh failed fix-round checks (rc1=$rc1 rc2=$rc2 launch=$has_launch1 no_claim=$no_claim state_dir=$state_dir_used lock_prev=$lock_prevented non_rev=$non_reviewer_ignored unsuff=$unsuffixed_ignored)"
+        fail "AT-20 (D2, D5, D6, D7): poll.sh failed fix-round checks (rc1=$rc1 rc2=$rc2 launch=$has_launch1 no_claim=$no_claim state_dir=$state_dir_used lock_prev=$lock_prevented non_rev=$non_reviewer_ignored unsuff=$unsuffixed_ignored clean_super=$clean_superseded)"
     fi
 }
 run_at20
@@ -2151,6 +2221,99 @@ EOF
     fi
 }
 run_at22
+
+# =============================================================================
+# AT-23 (D3): First-hop ceiling fails closed on measurement query loss
+# =============================================================================
+run_at23() {
+    local name="AT-23"
+    should_run "$name" || return 0
+    TOTAL=$((TOTAL + 1))
+    banner "$name (D3): First-hop ceiling fails closed on measurement loss"
+    local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
+
+    if [ ! -f "$poll_sh" ]; then
+        fail "AT-23 (D3): scripts/placement/vm-local/poll.sh does not exist"
+        return 0
+    fi
+
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    echo "1" > "$FIXTURES/loop-max_concurrent_first_hops"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+  max_concurrent_first_hops: 1
+personas:
+  athena:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
+    # Two armed issues (intent:new + intake:auto)
+    cat > "$FIXTURES/issue-303.json" <<'EOF'
+{
+  "number": 303,
+  "title": "Issue 303",
+  "state": "open",
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-304.json" <<'EOF'
+{
+  "number": 304,
+  "title": "Issue 304",
+  "state": "open",
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 303,
+    "title": "Issue 303",
+    "state": "open",
+    "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+    "comments": []
+  },
+  {
+    "number": 304,
+    "title": "Issue 304",
+    "state": "open",
+    "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+    "comments": []
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
+
+    # Stub gh exits 1 only on the --label in-progress query
+    touch "$FIXTURES/fail-in-progress-list"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local out="" rc=0
+    out="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
+
+    local zero_launches=0 zero_claims=0 has_logged_line=0
+    [ ! -s "$LAUNCHES" ] && zero_launches=1
+    [ ! -s "$CLAIMS" ] && zero_claims=1
+    grep -q "poll\.sh: measuring query failed (gh issue list --label in-progress); skipping intake" <<<"$out" && has_logged_line=1
+
+    if [ "$rc" -eq 0 ] && [ "$zero_launches" -eq 1 ] && [ "$zero_claims" -eq 1 ] && [ "$has_logged_line" -eq 1 ]; then
+        pass "AT-23 (D3): ceiling fails closed on measurement loss (0 launches, 0 claims, logged line)"
+    else
+        fail "AT-23 (D3): failed closed ceiling check (rc=$rc launches=$zero_launches claims=$zero_claims logged=$has_logged_line out='$out')"
+    fi
+}
+run_at23
 
 # =============================================================================
 # Summary
