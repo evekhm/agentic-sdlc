@@ -111,6 +111,11 @@ jobs:
       - name: Posting-path tests
         run: bash scripts/ops/tests/post_test.sh
 
+      - name: Review split contract tests
+        run: |
+          bash scripts/ops/tests/review_split_contract_test.sh
+          bash scripts/ci/tests/review_split_gate_contract_test.sh
+
   spec-check:
     name: spec-check — docs/SPEC.md obligation
     runs-on: ubuntu-latest
