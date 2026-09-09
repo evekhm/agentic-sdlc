@@ -1307,7 +1307,7 @@ EOF
     local out="" rc=0
     out="$(DRY_RUN=1 HEADLESS=1 bash "$work_sh" 108 --as odyssey 2>&1)" || rc=$?
     if [ "$rc" -eq 0 ] && ! grep -q "does not own stage review" <<<"$out" \
-       && grep -q -- "--> odyssey" <<<"$out" && grep -qE "branch:.*odyssey/107-fix" <<<"$out"; then
+       && grep -q "--> odyssey" <<<"$out" && grep -qE "branch:.*odyssey/107-fix" <<<"$out"; then
         pass "AT-13 (D2, D8): work.sh proceeded under fix-round resume protocol"
     else
         fail "AT-13 (D2, D8): work.sh did not proceed under resume protocol (rc=$rc): $out"
