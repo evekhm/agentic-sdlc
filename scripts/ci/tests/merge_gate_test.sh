@@ -858,4 +858,12 @@ has "not a ladder pull request; nothing evaluated, nothing written" "MG-36: unli
 not_merged "MG-36"
 
 echo
+banner "MG-37 · D3 D4 · foreign reviewer check run atlas via gh-actions failing fails conjunct (2)"
+mk_green
+mergestate_checks 123   "$(row check merge-gate '' 999 500)"   "$(row check 'atlas via gh-actions' FAILURE 1003 2003)"   "$(row check 'execution — bindings' SUCCESS 1002 2002)"
+run "MG-37: exits 0" 123
+has "conjunct (2): false" "MG-37: foreign atlas check failing fails conjunct (2)"
+has "atlas via gh-actions=FAILURE" "MG-37: names the failing atlas check"
+not_merged "MG-37"
+
 echo "merge_gate_test.sh: all scenarios passed"
