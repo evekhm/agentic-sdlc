@@ -35,11 +35,24 @@ fi
 export GH_TOKEN="${THEMIS_TOKEN:-}"
 
 # Query pull request info
-PR_JSON="$(gh pr view "$PR" --json number,labels,closingIssuesReferences,body,headRefOid,commits 2>/dev/null || true)"
+PR_JSON="$(gh pr view "$PR" --json number,headRefName,labels,closingIssuesReferences,body,headRefOid,commits 2>/dev/null || true)"
 if [ -z "$PR_JSON" ]; then
   echo "Failed to retrieve pull request #$PR" >&2
   exit 1
 fi
+
+get_linked_issues() {
+  local json="$1"
+  local closing_refs body_refs branch_ref head_ref
+  closing_refs="$(echo "$json" | jq -r '(.closingIssuesReferences[]?.number // empty)')"
+  body_refs="$(echo "$json" | jq -r '.body // ""' | grep -oEi '\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved|refs?)\s+#[0-9]+' | grep -oE '[0-9]+' || true)"
+  head_ref="$(echo "$json" | jq -r '.headRefName // ""')"
+  branch_ref=""
+  if [[ "$head_ref" =~ ^([a-zA-Z0-9_-]+/)?([0-9]+)- ]]; then
+    branch_ref="${BASH_REMATCH[2]}"
+  fi
+  printf '%s\n%s\n%s\n' "$closing_refs" "$body_refs" "$branch_ref" | grep -E '^[0-9]+$' | sort -u || true
+}
 
 # Guard 2 (#291): Circuit breaker on hold
 # Check PR itself
@@ -48,12 +61,9 @@ if echo "$PR_JSON" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&
   exit 0
 fi
 
-# Check closing issues (covers all 9 GitHub keywords case-insensitive, R1-14)
-CLOSING_ISSUES="$(echo "$PR_JSON" | jq -r '(.closingIssuesReferences[]?.number // empty)')"
-BODY_CLOSING="$(echo "$PR_JSON" | jq -r '.body // ""' | grep -oEi '\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#[0-9]+' | grep -oE '[0-9]+' || true)"
-ALL_CLOSING="$(printf '%s\n%s\n' "$CLOSING_ISSUES" "$BODY_CLOSING" | sort -u | grep -E '^[0-9]+$' || true)"
-
-for iss in $ALL_CLOSING; do
+# Check linked issues (closing references, body closing/refs keywords, branch name pattern)
+ALL_LINKED="$(get_linked_issues "$PR_JSON")"
+for iss in $ALL_LINKED; do
   iss_json="$(gh issue view "$iss" --json labels 2>/dev/null || true)"
   if echo "$iss_json" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
     echo "hold present on #$iss, recorder writes nothing"
@@ -64,9 +74,9 @@ done
 # Resolve recorder login via GraphQL viewer query (S3, D30)
 VIEWER_QUERY='query { viewer { login } }'
 RECORDER_LOGIN="$(gh api graphql -f query="$VIEWER_QUERY" 2>/dev/null | jq -r '.data.viewer.login // empty' || true)"
-if [ -z "$RECORDER_LOGIN" ]; then
-  echo "cannot resolve recorder login via GraphQL viewer" >&2
-  exit 1
+if [ -z "$RECORDER_LOGIN" ] || [ "$RECORDER_LOGIN" = "github-actions[bot]" ]; then
+  echo "recorder login is '$RECORDER_LOGIN' (unauthenticated or github-actions[bot]), recorder writes nothing"
+  exit 0
 fi
 
 # Run the python engine to derive ledger state and actions
@@ -102,8 +112,10 @@ for l in current_labels:
 
 valid_commits = set()
 for c in pr_data.get("commits", []):
-    if isinstance(c, dict) and "sha" in c:
-        valid_commits.add(c["sha"])
+    if isinstance(c, dict):
+        sha = c.get("oid") or c.get("sha")
+        if sha:
+            valid_commits.add(sha)
 
 # If valid_commits is empty, query commits API
 if not valid_commits:
@@ -119,8 +131,10 @@ if not valid_commits:
                     else:
                         c_data.append(item)
             for c in c_data:
-                if isinstance(c, dict) and "sha" in c:
-                    valid_commits.add(c["sha"])
+                if isinstance(c, dict):
+                    sha = c.get("sha") or c.get("oid")
+                    if sha:
+                        valid_commits.add(sha)
     except Exception:
         pass
 
@@ -159,8 +173,9 @@ for c in comments:
     c_user = c.get("user", {})
     c_login = c_user.get("login", "")
     c_id = c.get("id")
-    if "<!-- consensus-ledger:" in body:
-        if c_login == recorder_login and f"<!-- consensus-ledger:{pr} -->" in body:
+    target_ledger_marker = f"<!-- consensus-ledger:{pr} -->"
+    if target_ledger_marker in body:
+        if c_login == recorder_login:
             if existing_comment_id is None:
                 existing_comment_id = c_id
                 existing_body = body
@@ -358,7 +373,7 @@ for c_idx, c in enumerate(comments):
             if fsev == "high" and fpr != "dispute" and fst != "withdrawn":
                 if fid not in failure_scenarios:
                     fsev = "normal"
-                    audit_notes.append("[demoted from high: missing failure_scenario marker]")
+                    audit_notes.append(f"[demoted from high: missing failure_scenario marker] on {fid}")
 
             is_new = (fid not in initial_existing_row_ids and fid not in rows)
 
@@ -590,16 +605,14 @@ TO_REMOVE="$(jq -r '.to_remove | join(",")' "$PLAN_JSON")"
 
 if [ "${DRY_RUN:-0}" != "1" ]; then
   # Guard 2 (#291, Smoke N6): Re-read hold immediately before the first write
-  PR_LATEST_JSON="$(gh pr view "$PR" --json labels,closingIssuesReferences,body 2>/dev/null || true)"
+  PR_LATEST_JSON="$(gh pr view "$PR" --json number,headRefName,labels,closingIssuesReferences,body 2>/dev/null || true)"
   if echo "$PR_LATEST_JSON" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
     echo "hold present on #$PR, recorder writes nothing"
     exit 0
   fi
-  CLOSING_LATEST="$(echo "$PR_LATEST_JSON" | jq -r '(.closingIssuesReferences[]?.number // empty)')"
-  BODY_CLOSING_LATEST="$(echo "$PR_LATEST_JSON" | jq -r '.body // ""' | grep -oEi '\b(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#[0-9]+' | grep -oE '[0-9]+' || true)"
-  ALL_CLOSING_LATEST="$(printf '%s\n%s\n' "$CLOSING_LATEST" "$BODY_CLOSING_LATEST" | sort -u | grep -E '^[0-9]+$' || true)"
+  ALL_LINKED_LATEST="$(get_linked_issues "$PR_LATEST_JSON")"
 
-  for iss in $ALL_CLOSING_LATEST; do
+  for iss in $ALL_LINKED_LATEST; do
     iss_json="$(gh issue view "$iss" --json labels 2>/dev/null || true)"
     if echo "$iss_json" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
       echo "hold present on #$iss, recorder writes nothing"
