@@ -50,6 +50,60 @@ launching the autonomy flip pull request (#251, D6):
 7. Initiate issue processing:
    Verify poller intake on target issue or trigger first hop.
 
+**Autonomous merge armed (#64 acceptance 28).** `config/execution.yaml`
+sets `loop.autonomous_merge: true` from the merge of the pull request
+that added this entry. P1 and P2 of `intent/64-autonomous-loop/spec.md`
+were discharged before the flip; every read below was run on
+2026-09-09 by the identity named, and the raw outputs are in the
+operator's run folder `runs/2026-09-09_133000_flip-evidence/`.
+
+P1, the merge actor's Environment (D31 names it `themis`), read
+2026-09-09 13:04 UTC and again 14:35 UTC by `evekhm` (repository
+admin), unchanged between the two reads:
+
+| Read | Result |
+|---|---|
+| `gh api repos/evekhm/agentic-sdlc/environments/themis` | `deployment_branch_policy.custom_branch_policies: true`, `protected_branches: false`; `protection_rules` holds one `branch_policy` entry and no `required_reviewers` |
+| `gh api repos/evekhm/agentic-sdlc/environments/themis/deployment-branch-policies` | `total_count: 1`, the single policy is `main` |
+| `gh api repos/evekhm/agentic-sdlc/environments/themis/secrets` | `THEMIS_APP_ID`, `THEMIS_APP_PRIVATE_KEY`; no Themis key at repository level (`actions/secrets` lists `ANTIGRAVITY_ADC_JSON`, `ARGUS_APP_PRIVATE_KEY`, `ATLAS_APP_PRIVATE_KEY`) and no organization level exists (`orgs/evekhm/actions/secrets` is 404; `evekhm` is a user account) |
+| `python3 scripts/auth/create_all_apps.py --only themis --check` | exit 0, closing line `every entry is complete`, run at 14:35 UTC (the raw output is in the evidence folder) |
+
+P2, branch protection on `main`, read 2026-09-09 13:04 UTC and again
+14:35 UTC by `evekhm` (repository admin), unchanged between the two
+reads:
+
+| Read | Result |
+|---|---|
+| `gh api repos/evekhm/agentic-sdlc/branches/main/protection/required_status_checks` | `strict: false`; four contexts, all from `.github/workflows/ci-gates.yml` (app 15368): `drift — compiled targets match their sources`, `execution — bindings, adapters and triggers agree`, `sanitize — no leaked paths, credentials or vendor names`, `spec-check — docs/SPEC.md obligation` |
+| `gh api repos/evekhm/agentic-sdlc/branches/main/protection` | `enforce_admins: false`, `required_pull_request_reviews: null`, `restrictions: null`, `allow_force_pushes: false`, `allow_deletions: false`; no bypass list names the merge actor |
+
+Checklist state at the flip: steps 1, 3, 4 and 5 ran green on the
+operator VM on 2026-09-09 at 14:35 UTC (`execution.py --check` PASS
+with five bindings; `mint_app_token.py --require-repo --quiet` exit 0
+for athena, daedalus and odyssey). Step 2, the VM supervisor, is
+started after this merge and only once the amendment on #295 gates the
+poller's intake on `loop.autonomous_merge`, because the poller as
+merged in PR #294 launches athena on every open unclaimed `intent:new`
+issue and the backlog held thirty on 2026-09-09. Live proofs before
+the flip: lifecycle run 34315501873 minted as Themis and wrote the #64
+loop-ledger comment as `evekhm-themis-app[bot]`; merge-gate run
+34315613103 evaluated all eleven conjuncts and declined on (3)(4)(5)(11)
+with `merger: evekhm-themis-app[bot]`; the consensus recorder's first
+ledger with both reviewers at one head is PR #294 comment 5601912787
+(D31, #267). Acceptance 27 (D29): the `mergeStateStatus` read owed by
+the flip pull request came from the merge-gate `gate` job of a main-ref
+run on its head (the `evaluate` job runs only on `pull_request` events,
+with the default token, and declines at D30 before the read): run
+34365593567 read `CLEAN` at 275b24a with `merger: evekhm-themis-app[bot]`
+and declined on conjuncts (2)(3)(4)(5)(11). Conjunct (2) was false
+because the two jobs the gate's own `pull_request` run skips,
+`merge-gate` and `merge-gate (record)`, sit on every head as foreign
+`SKIPPED` check runs under D24, so the merge actor declines every pull
+request on (2) until #298 lands; the flag is armed and the gate fails
+closed. Acceptance 20: the end-to-end traversal on one throwaway issue
+runs after this merge, once step 2 is up, which waits on #295; its
+evidence lands on #64.
+
 ## Capabilities
 
 ### docs.structure
