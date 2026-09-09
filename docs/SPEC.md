@@ -8,6 +8,19 @@ version cite their PR inline.
 
 ## Deployment status
 
+Bootstrap phase (Rung 0–2 of the pinned tracker, issue #12). CI
+enforcement of this spec arrives with `ci.gates` below (#6): from the
+merge of that PR, the drift, sanitization and spec checks run on every
+pull request, so the living-spec rule and the generated-target rule
+are machine-enforced rather than convention-enforced. Making the three
+checks *required* to merge is a branch-protection setting a human
+applies to `main`; until it is applied, a red check is visible but not
+blocking. Every other rule in this file remains convention-enforced.
+During Rung 0, commits landed on `main` directly; this seed entry
+records that state. From this file's first commit forward,
+behavior-bearing changes go through PRs per the tracker workflow in
+AGENTS.md.
+
 The operator executes the seven-step enablement checklist prior to
 launching the autonomy flip pull request (#251, D6):
 
@@ -21,6 +34,7 @@ launching the autonomy flip pull request (#251, D6):
    `~/.gemini/config/config.json`. Alternatively, copy
    `scripts/placement/vm-local/poll.service` to
    `~/.config/systemd/user/poll.service` and run `systemctl --user daemon-reload && systemctl --user enable --now poll.service`.
+   When the checkout lives elsewhere, set `SDLC_REPO_ROOT` in the sidecar's `env` block and `WorkingDirectory` in `poll.service` to its absolute path.
 3. Verify branch protection on `main`:
    Run `gh api repos/evekhm/agentic-sdlc/branches/main/protection` and
    verify required status checks with strict false and enforce_admins false.
