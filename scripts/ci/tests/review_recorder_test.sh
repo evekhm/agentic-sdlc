@@ -8,8 +8,8 @@
 # helper checks. No network, no live tokens.
 #
 # Each test asserts behaviors derived from numbered Decisions (D1-D10)
-# and Acceptance criteria (AT-2..AT-18). Contract tests fail (RED)
-# when scripts/ci/review_recorder.sh has not yet been implemented.
+# and Acceptance criteria (AT-2..AT-18 for #267; AT-291-1..AT-291-11 for #291).
+# Contract tests fail (RED) when required behavior has not yet been implemented.
 
 set -euo pipefail
 
@@ -115,10 +115,28 @@ record_write() {
 case "${1:-} ${2:-}" in
   "pr view")
     n="$3"
+    if [ -f "$FX/pr-$n.fail" ]; then
+      echo "gh: API error (HTTP 500) fetching pull request #$n" >&2
+      exit 1
+    fi
+    if [ -f "$FX/pr-$n.flip_hold" ]; then
+      cnt_file="$FX/pr-$n.view_count"
+      cnt=0
+      [ -f "$cnt_file" ] && cnt="$(cat "$cnt_file")"
+      echo $((cnt + 1)) > "$cnt_file"
+      if [ "$cnt" -ge 1 ]; then
+        jq '.labels = [{"name":"hold"}]' "$FX/pr-$n.json"
+        exit 0
+      fi
+    fi
     [ -f "$FX/pr-$n.json" ] && { cat "$FX/pr-$n.json"; exit 0; }
     echo "no pull request fixture $n" >&2; exit 1;;
   "issue view")
     n="$3"
+    if [ -f "$FX/issue-$n.fail" ]; then
+      echo "gh: API error (HTTP 500) fetching issue #$n" >&2
+      exit 1
+    fi
     [ -f "$FX/issue-$n.json" ] && { cat "$FX/issue-$n.json"; exit 0; }
     echo '{"labels":[]}'; exit 0;;
   "pr merge"|"issue edit"|"issue comment")
@@ -685,7 +703,7 @@ EOF
   pass "test_ledger_comment_lifecycle (D1, D4, AT-4)"
 }
 
-# AT-5 (D5): High finding without failure_scenario demoted to normal
+# AT-5 (D5) / AT-291-4 (D4): High finding without failure_scenario demoted to normal with finding ID attribution
 test_high_failure_scenario_demotion() {
   reset_state
   pr_fixture 104 "$H"
@@ -706,14 +724,14 @@ EOF
   comments_fixture 104 "$(comment_item "$ARGUS" "$rev_body" 3004)"
 
   if [ ! -f "$RECORDER" ]; then
-    fail "test_high_failure_scenario_demotion: $RECORDER does not exist (D5, AT-5)"
+    fail "test_high_failure_scenario_demotion: $RECORDER does not exist (D5, AT-5, AT-291-4)"
     return 1
   fi
 
   bash "$RECORDER" 104 || { fail "test_high_failure_scenario_demotion: recorder execution failed"; return 1; }
   grep -q "ledger-row:R1-2@D5:normal:open:none" "$WRITES" || { fail "test_high_failure_scenario_demotion: high was not demoted to normal (D5)"; return 1; }
-  grep -q "\[demoted from high: missing failure_scenario marker\]" "$WRITES" || { fail "test_high_failure_scenario_demotion: audit note missing (D5)"; return 1; }
-  pass "test_high_failure_scenario_demotion (D5, AT-5)"
+  grep -q "\[demoted from high: missing failure_scenario marker\] on R1-2@D5" "$WRITES" || { fail "test_high_failure_scenario_demotion: audit note missing finding ID attribution (D4, AT-291-4)"; return 1; }
+  pass "test_high_failure_scenario_demotion (D5, AT-5, AT-291-4)"
 }
 
 # AT-6 (D5): Non-enum severity refusal (critical, low) logs and creates no row
@@ -752,7 +770,7 @@ EOF
   pass "test_non_enum_severity_refusal (D5, AT-6)"
 }
 
-# AT-7 (D6): Round funnel enforcement (rounds 2-3 tracking rows; past round 3 demotion)
+# AT-7 (D6) / AT-291-6 (D6): Round funnel enforcement (rounds 2-3 tracking rows; past round 3 demotion)
 test_round_funnel() {
   reset_state
   pr_fixture 106 "$H"
@@ -848,7 +866,7 @@ EOF
   grep -q "ledger-row:R4-1:normal:open:none" "$WRITES" || { fail "test_round_funnel: high finding past round 3 not demoted (D6)"; return 1; }
   grep -q "ledger-row:R4-2:security:open:pending" "$WRITES" || { fail "test_round_funnel: security finding past round 3 refused (D6)"; return 1; }
 
-  pass "test_round_funnel (D6, AT-7)"
+  pass "test_round_funnel (D6, AT-7, AT-291-6)"
 }
 
 # AT-8 (D7): Security dual agreement requirement (existence and fix verification)
@@ -1007,7 +1025,7 @@ EOF
   pass "test_owner_retier (D9, AT-9)"
 }
 
-# AT-10 (D5, D7, D8): Label synchronization via gh issue edit and hold circuit breaker (#291)
+# AT-10 (D5, D7, D8) / AT-291-1, AT-291-2, AT-291-3, AT-291-5, AT-291-7: Label synchronization via gh issue edit and hold circuit breaker (#291)
 test_label_sync() {
   reset_state
 
@@ -1111,7 +1129,32 @@ EOF
   [ ! -s "$WRITES" ] || { fail "test_label_sync: writes attempted when closed issue carries hold (#291)"; return 1; }
   echo "$out_c" | grep -Fq "hold present on #209, recorder writes nothing" || { fail "test_label_sync: log missing held object line for #209 (#291)"; return 1; }
 
-  pass "test_label_sync (D5, D7, D8, AT-10)"
+  # Case (d): Monotonic round counter progression (D7, AT-291-7)
+  # When PR already has review:2, an earlier round review (round:1) does not decrement review:2 to review:1.
+  reset_state
+  pr_fixture 110 "$H"
+  jq '.labels = [{"name":"review:2"}]' "$FX/pr-110.json" > "$FX/pr-110.json.tmp"
+  mv "$FX/pr-110.json.tmp" "$FX/pr-110.json"
+  issue_fixture 110 "review:2"
+
+  run_fixture 2011 "$ARGUS" "$H" "pull_request" "completed" "success"
+  local rev_body_r1
+  rev_body_r1="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2011 -->
+<!-- round:1 -->
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 110 "$(comment_item "$ARGUS" "$rev_body_r1" 3012)"
+
+  bash "$RECORDER" 110 || { fail "test_label_sync: recorder execution failed on monotonic round check (D7, AT-291-7)"; return 1; }
+  grep -E "gh issue edit 110.*--remove-label.*review:2" "$WRITES" && { fail "test_label_sync: higher round label review:2 was decremented (D7, AT-291-7)"; return 1; }
+  grep -E "gh issue edit 110.*--add-label.*review:1" "$WRITES" && { fail "test_label_sync: lower round label review:1 was added over review:2 (D7, AT-291-7)"; return 1; }
+
+  pass "test_label_sync (D5, D7, D8, AT-10, AT-291-1..3, AT-291-5, AT-291-7)"
 }
 
 # AT-13 (D4, D5): Merge gate round trip evaluation of Decision-tagged ID
@@ -1327,6 +1370,133 @@ EOF
   pass "test_wire_format_assigned (D4, AT-18)"
 }
 
+# AT-291-9 (D1, D2): Observable write-time hold re-read halts execution and prevents writes
+test_write_time_hold_reread() {
+  reset_state
+  pr_fixture 114 "$H"
+  touch "$FX/pr-114.flip_hold"
+  run_fixture 2016 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2016 -->
+<!-- round:1 -->
+<!-- finding:R1-1@D1:high:open:none -->
+<!-- failure-scenario:R1-1@D1 -->
+Concrete failure scenario
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 114 "$(comment_item "$ARGUS" "$rev_body" 3016)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_write_time_hold_reread: $RECORDER does not exist (D1, D2, AT-291-9)"
+    return 1
+  fi
+
+  local out
+  out="$(bash "$RECORDER" 114 2>&1)" || { fail "test_write_time_hold_reread: recorder execution failed"; return 1; }
+
+  [ ! -s "$WRITES" ] || { fail "test_write_time_hold_reread: writes attempted after write-time hold was applied (D1, D2, AT-291-9)"; return 1; }
+  echo "$out" | grep -Fq "hold present on #114, recorder writes nothing" || { fail "test_write_time_hold_reread: log missing held object line for #114 (D1, D2, AT-291-9)"; return 1; }
+
+  pass "test_write_time_hold_reread (D1, D2, AT-291-9)"
+}
+
+# AT-291-11 (D1, D2, Argus R1-3): Hold probe failure must fail closed (zero writes, exit 1)
+test_hold_probe_fail_closed() {
+  reset_state
+  pr_fixture 115 "$H" "" "" '[215]'
+  jq '.body = "Closes #215"' "$FX/pr-115.json" > "$FX/pr-115.json.tmp"
+  mv "$FX/pr-115.json.tmp" "$FX/pr-115.json"
+  issue_fixture 115 "bootstrap"
+  touch "$FX/issue-215.fail"
+
+  run_fixture 2017 "$ARGUS" "$H" "pull_request" "completed" "success"
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2017 -->
+<!-- round:1 -->
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 115 "$(comment_item "$ARGUS" "$rev_body" 3017)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_hold_probe_fail_closed: $RECORDER does not exist (D1, D2, AT-291-11)"
+    return 1
+  fi
+
+  local out
+  if out="$(bash "$RECORDER" 115 2>&1)"; then
+    fail "test_hold_probe_fail_closed: recorder exited 0 despite hold probe failure (fail-open violation; D1, D2, AT-291-11)"
+    return 1
+  fi
+
+  [ ! -s "$WRITES" ] || { fail "test_hold_probe_fail_closed: writes attempted when hold probe failed (D1, D2, AT-291-11)"; return 1; }
+  echo "$out" | grep -Eiq "error|fail" || { fail "test_hold_probe_fail_closed: log missing error diagnostic on failed hold probe (D1, D2, AT-291-11)"; return 1; }
+
+  pass "test_hold_probe_fail_closed (D1, D2, AT-291-11)"
+}
+
+# AT-291-8 (D8): Python engine extraction to scripts/ci/review_recorder.py (PLAYBOOK.md:521)
+test_python_engine_extraction() {
+  reset_state
+  local py_script="$REPO/scripts/ci/review_recorder.py"
+
+  if [ ! -f "$py_script" ]; then
+    fail "test_python_engine_extraction: $py_script does not exist (D8, AT-291-8)"
+    return 1
+  fi
+
+  if [ ! -x "$py_script" ]; then
+    fail "test_python_engine_extraction: $py_script is not executable (D8, AT-291-8)"
+    return 1
+  fi
+
+  if ! grep -Eq 'python3\s+.*review_recorder\.py' "$RECORDER"; then
+    fail "test_python_engine_extraction: $RECORDER does not invoke review_recorder.py (D8, AT-291-8)"
+    return 1
+  fi
+
+  # Direct test of the python engine standalone CLI contract
+  local test_workdir="$WORK/py_test"
+  mkdir -p "$test_workdir"
+  pr_fixture 116 "$H"
+  local pr_json
+  pr_json="$(cat "$FX/pr-116.json")"
+
+  run_fixture 2018 "$ARGUS" "$H" "pull_request" "completed" "success"
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2018 -->
+<!-- round:1 -->
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 116 "$(comment_item "$ARGUS" "$rev_body" 3018)"
+
+  python3 "$py_script" "116" "$GITHUB_REPOSITORY" "$pr_json" "$test_workdir" "$THEMIS" || {
+    fail "test_python_engine_extraction: standalone review_recorder.py invocation failed (D8, AT-291-8)"
+    return 1
+  }
+
+  [ -f "$test_workdir/action_plan.json" ] || { fail "test_python_engine_extraction: action_plan.json not generated (D8, AT-291-8)"; return 1; }
+  [ -f "$test_workdir/new_body.md" ] || { fail "test_python_engine_extraction: new_body.md not generated (D8, AT-291-8)"; return 1; }
+  jq -e '.comment_action == "POST"' "$test_workdir/action_plan.json" >/dev/null || { fail "test_python_engine_extraction: action_plan.json missing POST action (D8, AT-291-8)"; return 1; }
+
+  pass "test_python_engine_extraction (D8, AT-291-8)"
+}
+
 # --- Test Runner ---
 
 TESTS=(
@@ -1343,6 +1513,9 @@ TESTS=(
   test_atlas_carry_forward
   test_provenance_workflow_dispatch
   test_wire_format_assigned
+  test_write_time_hold_reread
+  test_hold_probe_fail_closed
+  test_python_engine_extraction
 )
 
 TOTAL=0
