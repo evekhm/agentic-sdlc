@@ -29,7 +29,7 @@ On long-running sessions, `agy` can encounter a transport-layer stream interrupt
 However, because `agy` sets `"status": "ERROR"` in the envelope, `work.sh` evaluates `[ "$status" != "SUCCESS" ]` as true. It immediately logs `==> atlas's session did not complete (exit 0, status ERROR).` and terminates with exit code 1 *before* extracting `.response` or evaluating the `WORK-RESULT:` line (lines 1361–1379).
 
 This failure mode was observed on PR #309 during unattended run `34389163039` for job `atlas via gh-actions`:
-- Atlas completed its review turns and posted a clean review comment (`5606845153`) carrying `<!-- review-verdict:atlas:clean -->` and `<!-- reviewed-head:275b24a... -->`.
+- Atlas completed its review turns and posted a clean review comment (`5606845153`) carrying its clean verdict marker and its reviewed-head marker for `006c51c0ff463768ea3c04fe08893713ca64f8a6`.
 - Atlas emitted `WORK-RESULT: ok #291 posted clean round 1 review on pull request #309`.
 - `agy` encountered a stream interrupt error at stream close and exited 0 with envelope `"status": "ERROR"`.
 - `work.sh` exited 1, causing job `atlas via gh-actions` to conclude with `FAILURE`.
