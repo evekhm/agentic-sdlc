@@ -235,7 +235,7 @@ comments_fixture() { # <number> <comment-json>...
 }
 consensus_ledger() { # <pr> <argus-oid|-> <atlas-oid|-> [row ...]   row = id:severity:status:peer
   local pr="$1" a="$2" b="$3"; shift 3
-  local out="### Findings ledger for #$pr"$'\n'"<!-- consensus-ledger:$pr -->"
+  local out="### Findings ledger for #$pr"$'\n'"<!-- consensus-ledger:$pr -->"$'\n'"<!-- assigned:argus,atlas -->"
   [ "$a" = - ] || out="$out"$'\n'"<!-- reviewed-head:argus:$a -->"
   [ "$b" = - ] || out="$out"$'\n'"<!-- reviewed-head:atlas:$b -->"
   local r; for r in "$@"; do out="$out"$'\n'"<!-- ledger-row:$r -->"; done
@@ -523,10 +523,16 @@ run "MG-13d: security fixed with both AGREEs, normal open, exits 0" 123
 has "conjunct (4): true" "MG-13d: a normal row is never blocking"
 merged "MG-13d"
 mk_green
-comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" "R1-1:severe:open:none")" 2026-01-04T00:00:00Z 813)"
-run "MG-13e: a row outside the enum exits 0" 123
-has "cannot parse" "MG-13e: an unparseable ledger row is unevaluable, and unevaluable is false"
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" "R1-1:low:open:none")" 2026-01-04T00:00:00Z 813)"
+run "MG-13e: a row with legacy 'low' severity exits 0" 123
+has "cannot parse" "MG-13e: legacy 'low' row is rejected outside enum"
 not_merged "MG-13e"
+
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" "R1-1@D4:suggestion:open:none")" 2026-01-04T00:00:00Z 825)"
+run "MG-13f: suggestion with Decision-tagged ID passes and merges" 123
+has "conjunct (4): true" "MG-13f: suggestion is non-blocking"
+merged "MG-13f"
 
 banner "MG-14 · conjunct (11) · a ledger with no head marker earns nothing"
 mk_green

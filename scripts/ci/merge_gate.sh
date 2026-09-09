@@ -21,11 +21,12 @@
 # and (11) are false, which is plan P1's fail-closed posture. The
 # recorder must emit exactly these lines; the gate adds no field.
 #   <!-- consensus-ledger:<pr> -->
+#   <!-- assigned:argus,atlas -->
 #   <!-- reviewed-head:argus:<full-oid> -->
 #   <!-- reviewed-head:atlas:<full-oid> -->              absent = never reviewed
 #   <!-- ledger-row:<id>:<severity>:<status>:<peer> -->   0..n
 #   <!-- consensus-ledger-end -->
-#   severity: security|high|normal|low   status: open|fixed|withdrawn
+#   severity: security|high|normal|suggestion   status: open|fixed|withdrawn
 #   peer: pending|agree|dispute|none
 #
 # Loop ledger (D13): ONE container comment per issue, appended in place,
@@ -268,7 +269,7 @@ else
     ARGUS_HEAD="$(sed -nE 's/^<!-- reviewed-head:argus:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
     ATLAS_HEAD="$(sed -nE 's/^<!-- reviewed-head:atlas:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
     n_cl_any="$(grep -c 'ledger-row:' <<<"$CL" || true)"
-    CTUP="$(sed -nE 's/^<!-- ledger-row:([A-Za-z0-9-]+:(security|high|normal|low):(open|fixed|withdrawn):(pending|agree|dispute|none)) -->$/\1/p' <<<"$CL")"
+    CTUP="$(sed -nE 's/^<!-- ledger-row:([A-Za-z0-9@-]+:(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none)) -->$/\1/p' <<<"$CL")"
     n_cl_ok="$(grep -c . <<<"$CTUP" || true)"
     if [ "$n_cl_any" != "$n_cl_ok" ]; then
         for i in 3 4 5 11; do WHY[$i]="the consensus ledger has a row this gate cannot parse"; done
