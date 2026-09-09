@@ -175,9 +175,10 @@ if prev_atlas_head:
 accepted_heads = dict(prev_ledger_heads)
 last_accepted_heads = {}
 
-max_round = 1
+max_round = 0
 
 # Process comments in chronological order
+verdict_blocks_found = 0
 for c in comments:
     body = c.get("body", "")
     user_obj = c.get("user", {})
@@ -200,167 +201,177 @@ for c in comments:
         else:
             audit_notes.append(f"[refused: retier by @{author_login}: unauthorized]")
 
-    # Check for structured review verdict block
-    v_match = re.search(r'<!-- review-verdict:(argus|atlas):(clean|findings) -->(.*?)<!-- review-verdict-end -->', body, re.DOTALL)
-    if not v_match:
-        continue
+    # Check for structured review verdict block (finditer for multiple blocks, Smoke N5)
+    v_matches = list(re.finditer(r'<!-- review-verdict:(argus|atlas):(clean|findings) -->(.*?)<!-- review-verdict-end -->', body, re.DOTALL))
+    if not v_matches and re.search(r'<!-- review-verdict:(argus|atlas):(clean|findings) -->', body):
+        verdict_blocks_found += 1
+    for v_match in v_matches:
+        verdict_blocks_found += 1
+        reviewer = v_match.group(1)
+        verdict = v_match.group(2)
+        block = v_match.group(0)
 
-    reviewer = v_match.group(1)
-    verdict = v_match.group(2)
-    block = v_match.group(0)
-
-    # Validate author login
-    expected_login = f"evekhm-{reviewer}-app[bot]"
-    if author_login != expected_login:
-        audit_notes.append(f"[refused: verdict block author {author_login} does not match {expected_login}]")
-        continue
-
-    # Extract reviewed-head
-    h_match = re.search(r'<!-- reviewed-head:([0-9a-f]{40}) -->', block)
-    if not h_match:
-        audit_notes.append(f"[refused: verdict block from @{reviewer}: missing reviewed-head marker]")
-        continue
-    reviewed_head = h_match.group(1)
-
-    # Validate commit in PR history
-    if reviewed_head not in valid_commits:
-        print(f"refused: verdict block from @{reviewer}: commit {reviewed_head} not in pull request history", file=sys.stderr)
-        audit_notes.append(f"[refused: verdict block from @{reviewer}: commit {reviewed_head} not in pull request history]")
-        continue
-
-    # Extract run-id
-    r_match = re.search(r'<!-- run-id:([0-9]+) -->', block)
-    if not r_match:
-        audit_notes.append(f"[refused: verdict block from @{reviewer}: missing run-id marker]")
-        continue
-    run_id = r_match.group(1)
-
-    # Provenance check via GitHub Actions API
-    run_info = {}
-    try:
-        run_res = subprocess.run(["gh", "api", f"repos/{repo}/actions/runs/{run_id}"], capture_output=True, text=True)
-        if run_res.returncode == 0 and run_res.stdout.strip():
-            run_info = json.loads(run_res.stdout)
-    except Exception as e:
-        print(f"Error querying run {run_id}: {e}", file=sys.stderr)
-
-    run_head_sha = run_info.get("head_sha", "")
-    run_path = run_info.get("path", "")
-    run_repo = run_info.get("head_repository", {}).get("full_name", "")
-    run_event = run_info.get("event", "")
-    run_status = run_info.get("status", "")
-    run_concl = run_info.get("conclusion")
-    if run_concl is None or run_concl == "null":
-        run_concl = None
-
-    # Check 4 provenance predicates
-    if run_head_sha != reviewed_head:
-        audit_notes.append(f"[refused: run {run_id} head_sha mismatch: expected {reviewed_head}, got {run_head_sha}]")
-        continue
-    if run_path != ".github/workflows/unattended.yml":
-        audit_notes.append(f"[refused: run {run_id} workflow path mismatch: expected .github/workflows/unattended.yml, got {run_path}]")
-        continue
-    if run_repo != repo:
-        audit_notes.append(f"[refused: run {run_id} repository mismatch: expected {repo}, got {run_repo}]")
-        continue
-    if run_event not in ("pull_request", "workflow_dispatch"):
-        audit_notes.append(f"[refused: run {run_id} event mismatch: event must be pull_request or workflow_dispatch, got {run_event}]")
-        continue
-
-    # Terminal conclusion failure or cancelled causes withdrawal
-    if run_status == "completed" and run_concl in ("failure", "cancelled"):
-        audit_notes.append(f"[run {run_id} ended {run_concl}; verdict withdrawn]")
-        if reviewer in last_accepted_heads and last_accepted_heads[reviewer] != reviewed_head:
-            accepted_heads[reviewer] = last_accepted_heads[reviewer]
-        elif reviewer in prev_ledger_heads and prev_ledger_heads[reviewer] != reviewed_head:
-            accepted_heads[reviewer] = prev_ledger_heads[reviewer]
-        else:
-            accepted_heads.pop(reviewer, None)
-        continue
-
-    # Provenance passed! Accept verdict block
-    accepted_heads[reviewer] = reviewed_head
-    last_accepted_heads[reviewer] = reviewed_head
-
-    # Extract round
-    round_match = re.search(r'<!-- round:([0-9]+) -->', block)
-    block_round = int(round_match.group(1)) if round_match else 1
-    max_round = max(max_round, block_round)
-
-    # Extract sibling failure scenarios
-    failure_scenarios = set(re.findall(r'<!-- failure-scenario:([A-Za-z0-9@-]+) -->', block))
-
-    # Parse finding lines
-    finding_matches = re.finditer(r'<!-- finding:([A-Za-z0-9@-]+):([A-Za-z0-9]+):([A-Za-z0-9]+):([A-Za-z0-9]+) -->', block)
-    for fm in finding_matches:
-        fid = fm.group(1)
-        fsev = fm.group(2)
-        fst = fm.group(3)
-        fpr = fm.group(4)
-
-        # Validate severity enum
-        if fsev not in ("security", "high", "normal", "suggestion"):
-            print(f"finding {fid}: severity {fsev} is not one of security|high|normal|suggestion")
-            audit_notes.append(f"[refused: {fid}: invalid severity {fsev}]")
+        # Validate author login
+        expected_login = f"evekhm-{reviewer}-app[bot]"
+        if author_login != expected_login:
+            audit_notes.append(f"[refused: verdict block author {author_login} does not match {expected_login}]")
             continue
 
-        # Determine finding round
-        m_r = re.match(r'^(?:AT-)?R([0-9]+)-', fid)
-        if m_r:
-            finding_round = int(m_r.group(1))
-        else:
-            finding_round = block_round
+        # Extract reviewed-head
+        h_match = re.search(r'<!-- reviewed-head:([0-9a-f]{40}) -->', block)
+        if not h_match:
+            audit_notes.append(f"[refused: verdict block from @{reviewer}: missing reviewed-head marker]")
+            continue
+        reviewed_head = h_match.group(1)
 
-        # Check high failure scenario marker
-        if fsev == "high" and finding_round == block_round and fpr != "dispute" and fst != "withdrawn":
-            if fid not in failure_scenarios:
-                fsev = "normal"
-                audit_notes.append("[demoted from high: missing failure_scenario marker]")
+        # Validate commit in PR history
+        if reviewed_head not in valid_commits:
+            print(f"refused: verdict block from @{reviewer}: commit {reviewed_head} not in pull request history", file=sys.stderr)
+            audit_notes.append(f"[refused: verdict block from @{reviewer}: commit {reviewed_head} not in pull request history]")
+            continue
 
-        is_new = (fid not in initial_existing_row_ids and fid not in rows)
+        # Extract run-id
+        r_match = re.search(r'<!-- run-id:([0-9]+) -->', block)
+        if not r_match:
+            audit_notes.append(f"[refused: verdict block from @{reviewer}: missing run-id marker]")
+            continue
+        run_id = r_match.group(1)
 
-        if is_new:
-            if finding_round in (2, 3):
-                if fsev == "suggestion":
-                    fsev = "normal"
-                    fpr = "none"
-            elif finding_round >= 4:
-                if fsev != "security":
-                    fsev = "normal"
+        # Provenance check via GitHub Actions API
+        run_info = {}
+        try:
+            run_res = subprocess.run(["gh", "api", f"repos/{repo}/actions/runs/{run_id}"], capture_output=True, text=True)
+            if run_res.returncode == 0 and run_res.stdout.strip():
+                run_info = json.loads(run_res.stdout)
+        except Exception as e:
+            print(f"Error querying run {run_id}: {e}", file=sys.stderr)
 
-        # Determine discovering reviewer
-        if fid.startswith("AT-"):
-            discoverer = "atlas"
-        else:
-            discoverer = "argus"
+        run_head_sha = run_info.get("head_sha", "")
+        run_path = run_info.get("path", "")
+        run_repo = run_info.get("head_repository", {}).get("full_name", "")
+        run_event = run_info.get("event", "")
+        run_status = run_info.get("status", "")
+        run_concl = run_info.get("conclusion")
+        if run_concl is None or run_concl == "null":
+            run_concl = None
 
-        if fsev == "security":
-            if fid not in rows:
-                rows[fid] = {"severity": fsev, "status": fst, "peer": "pending"}
+        # Check 4 provenance predicates
+        if run_head_sha != reviewed_head:
+            audit_notes.append(f"[refused: run {run_id} head_sha mismatch: expected {reviewed_head}, got {run_head_sha}]")
+            continue
+        if run_path != ".github/workflows/unattended.yml":
+            audit_notes.append(f"[refused: run {run_id} workflow path mismatch: expected .github/workflows/unattended.yml, got {run_path}]")
+            continue
+        if run_repo != repo:
+            audit_notes.append(f"[refused: run {run_id} repository mismatch: expected {repo}, got {run_repo}]")
+            continue
+        if run_event not in ("pull_request", "workflow_dispatch"):
+            audit_notes.append(f"[refused: run {run_id} event mismatch: event must be pull_request or workflow_dispatch, got {run_event}]")
+            continue
+
+        # Terminal conclusion failure or cancelled causes withdrawal
+        if run_status == "completed" and run_concl in ("failure", "cancelled"):
+            audit_notes.append(f"[run {run_id} ended {run_concl}; verdict withdrawn]")
+            if reviewer in last_accepted_heads and last_accepted_heads[reviewer] != reviewed_head:
+                accepted_heads[reviewer] = last_accepted_heads[reviewer]
+            elif reviewer in prev_ledger_heads and prev_ledger_heads[reviewer] != reviewed_head:
+                accepted_heads[reviewer] = prev_ledger_heads[reviewer]
             else:
-                if reviewer == discoverer:
-                    if rows[fid]["status"] != "fixed" and fst == "fixed":
-                        rows[fid]["status"] = "fixed"
-                        rows[fid]["peer"] = "pending"
-                    else:
-                        rows[fid]["status"] = fst
+                accepted_heads.pop(reviewer, None)
+            continue
+
+        # Provenance passed! Accept verdict block
+        accepted_heads[reviewer] = reviewed_head
+        last_accepted_heads[reviewer] = reviewed_head
+
+        # Extract round
+        round_match = re.search(r'<!-- round:([0-9]+) -->', block)
+        block_round = int(round_match.group(1)) if round_match else 1
+        if reviewed_head == pr_head:
+            max_round = max(max_round, block_round)
+
+        # Extract sibling failure scenarios
+        failure_scenarios = set(re.findall(r'<!-- failure-scenario:([A-Za-z0-9@-]+) -->', block))
+
+        # Parse finding lines
+        finding_matches = re.finditer(r'<!-- finding:([A-Za-z0-9@-]+):([A-Za-z0-9]+):([A-Za-z0-9]+):([A-Za-z0-9]+) -->', block)
+        for fm in finding_matches:
+            fid = fm.group(1)
+            fsev = fm.group(2)
+            fst = fm.group(3)
+            fpr = fm.group(4)
+
+            # Validate severity enum
+            if fsev not in ("security", "high", "normal", "suggestion"):
+                print(f"finding {fid}: severity {fsev} is not one of security|high|normal|suggestion")
+                audit_notes.append(f"[refused: {fid}: invalid severity {fsev}]")
+                continue
+
+            # Determine finding round
+            m_r = re.match(r'^(?:AT-)?R([0-9]+)-', fid)
+            if m_r:
+                finding_round = int(m_r.group(1))
+            else:
+                finding_round = block_round
+
+            # Check high failure scenario marker (D5) keyed on block: any high finding without sibling marker is demoted
+            if fsev == "high" and fpr != "dispute" and fst != "withdrawn":
+                if fid not in failure_scenarios:
+                    fsev = "normal"
+                    audit_notes.append("[demoted from high: missing failure_scenario marker]")
+
+            is_new = (fid not in initial_existing_row_ids and fid not in rows)
+
+            if is_new:
+                # Post-cap funnel (D6): past round 3, admit only security findings
+                if block_round >= 4:
+                    if fsev != "security":
+                        fsev = "normal"
+                elif block_round in (2, 3):
+                    # In rounds 2-3, new observations land as normal (D6).
+                    # Earlier findings carried forward (e.g. R1-5 in round 2 per plan.md:150 and test_label_sync) keep recorded tier.
+                    if finding_round == block_round:
+                        if fsev == "suggestion":
+                            fsev = "normal"
+                            fpr = "none"
+
+            # Determine discovering reviewer
+            if fid.startswith("AT-"):
+                discoverer = "atlas"
+            else:
+                discoverer = "argus"
+
+            if fsev == "security":
+                if fid not in rows:
+                    rows[fid] = {"severity": fsev, "status": fst, "peer": "pending"}
                 else:
-                    if fpr == "agree":
-                        if fst == "fixed" or rows[fid]["status"] == "fixed":
+                    if reviewer == discoverer:
+                        if rows[fid]["status"] != "fixed" and fst == "fixed":
                             rows[fid]["status"] = "fixed"
-                            rows[fid]["peer"] = "agree"
-                        elif rows[fid]["status"] == "open":
-                            rows[fid]["peer"] = "agree"
-                    elif fpr == "dispute":
-                        rows[fid]["peer"] = "dispute"
-        else:
-            if fid not in rows:
-                rows[fid] = {"severity": fsev, "status": fst, "peer": fpr if fpr == "dispute" else "none"}
+                            rows[fid]["peer"] = "pending"
+                        else:
+                            rows[fid]["status"] = fst
+                    else:
+                        if fpr == "agree":
+                            if fst == "fixed" or rows[fid]["status"] == "fixed":
+                                rows[fid]["status"] = "fixed"
+                                rows[fid]["peer"] = "agree"
+                            elif rows[fid]["status"] == "open":
+                                rows[fid]["peer"] = "agree"
+                        elif fpr == "dispute":
+                            rows[fid]["peer"] = "dispute"
             else:
-                if reviewer == discoverer:
-                    rows[fid]["status"] = fst
-                if fpr == "dispute":
-                    rows[fid]["peer"] = "dispute"
+                if fid not in rows:
+                    rows[fid] = {"severity": fsev, "status": fst, "peer": fpr if fpr == "dispute" else "none"}
+                else:
+                    if reviewer == discoverer:
+                        rows[fid]["status"] = fst
+                    if fpr == "dispute":
+                        rows[fid]["peer"] = "dispute"
+
+if verdict_blocks_found == 0 and existing_comment_id is None:
+    print(f"no verdict blocks on #{pr}, recorder writes nothing")
+    sys.exit(0)
 
 # Build new consensus ledger comment body
 lines = [
@@ -378,14 +389,15 @@ for fid in sorted(rows.keys()):
 lines.append("<!-- consensus-ledger-end -->")
 lines.append("")
 
-if rows:
-    lines.append("| Finding ID | Severity | Status | Peer |")
-    lines.append("| --- | --- | --- | --- |")
+# Format markdown table
+lines.append("| Finding ID | Severity | Status | Peer | Description / Notes |")
+lines.append("|---|---|---|---|---|")
+if not rows:
+    lines.append("|_No findings recorded._|||||")
+else:
     for fid in sorted(rows.keys()):
         r = rows[fid]
-        lines.append(f"| {fid} | {r['severity']} | {r['status']} | {r['peer']} |")
-else:
-    lines.append("_No findings recorded._")
+        lines.append(f"| `{fid}` | `{r['severity']}` | `{r['status']}` | `{r['peer']}` | |")
 
 # Deduplicate audit notes
 unique_notes = []
@@ -410,6 +422,19 @@ if existing_comment_id:
         comment_action = "PATCH"
 else:
     comment_action = "POST"
+
+# Fetch current labels on PR
+current_labels = set()
+for l in pr_data.get("labels", []):
+    if isinstance(l, dict) and "name" in l:
+        current_labels.add(l["name"])
+
+managed_labels = {
+    "argus:findings", "argus:suggestions",
+    "consensus:agreed", "consensus:pending", "consensus:disputed",
+    "review:merge-ready", "review:verifying",
+    "review:1", "review:2", "review:3"
+}
 
 # Calculate derived labels
 desired_labels = set()
@@ -436,35 +461,59 @@ else:
             desired_labels.add("consensus:agreed")
 
 # Round labels
-if max_round >= 3:
-    desired_labels.add("review:3")
-elif max_round == 2:
-    desired_labels.add("review:2")
-elif max_round == 1:
-    desired_labels.add("review:1")
+existing_round_label = None
+for l in current_labels:
+    if l in ("review:1", "review:2", "review:3"):
+        existing_round_label = l
+        break
 
-# review:verifying & review:merge-ready
-argus_head = accepted_heads.get("argus")
-reviewed_head_matches = (argus_head is not None and argus_head == pr_head)
+if max_round > 0:
+    round_label = f"review:{min(max_round, 3)}"
+    desired_labels.add(round_label)
+elif existing_comment_id is not None and existing_round_label:
+    desired_labels.add(existing_round_label)
 
-if open_blocking and not reviewed_head_matches:
-    desired_labels.add("review:verifying")
+# Head-pinned labels: review:verifying & review:merge-ready
+# A ledger with no head marker gets neither review:verifying nor review:merge-ready (D8, REVIEW.md:373)
+if accepted_heads:
+    argus_head = accepted_heads.get("argus")
+    atlas_head = accepted_heads.get("atlas")
 
-if not open_blocking and ("consensus:agreed" in desired_labels) and reviewed_head_matches and not has_dispute:
-    desired_labels.add("review:merge-ready")
+    # review:verifying requires open blocking rows AND at least one reviewer's accepted head behind current head
+    at_least_one_behind = any(h != pr_head for h in accepted_heads.values())
+    if open_blocking and at_least_one_behind:
+        desired_labels.add("review:verifying")
 
-# Fetch current labels on PR
-current_labels = set()
-for l in pr_data.get("labels", []):
-    if isinstance(l, dict) and "name" in l:
-        current_labels.add(l["name"])
+    # review:merge-ready requires BOTH reviewers' accepted heads at current head with zero open blocking rows,
+    # with the Atlas carry-forward branch matching merge_gate.sh:293-305
+    reviewers_ok_for_merge = False
+    if not open_blocking and not has_dispute and ("consensus:agreed" in desired_labels):
+        if argus_head == pr_head and atlas_head == pr_head:
+            reviewers_ok_for_merge = True
+        elif argus_head == pr_head and atlas_head is not None:
+            # Atlas carry-forward (D7):
+            # (i) a verdict exists (atlas_head is not None)
+            # (ii) no AT-* row open
+            at_open = any(fid.startswith("AT-") and r["status"] == "open" for fid, r in rows.items())
+            # (iii) no security row open or fixed without both AGREEs
+            sec_unagreed = any(r["severity"] == "security" and (r["status"] == "open" or r["peer"] != "agree") for r in rows.values())
+            # (iv) no dispute and no human mention naming Atlas after its last comment
+            atlas_comments = [c for c in comments if c.get("user", {}).get("login") == "evekhm-atlas-app[bot]"]
+            atlas_last_time = max([c.get("created_at", "") for c in atlas_comments], default="")
+            mentions_atlas = False
+            for c in comments:
+                if c.get("user", {}).get("type") != "Bot" and c.get("created_at", "") > atlas_last_time:
+                    if "atlas" in c.get("body", "").lower():
+                        mentions_atlas = True
+                        break
+            # (v) no unconsumed deep-review grant
+            deep_review = ("deep-review" in current_labels)
 
-managed_labels = {
-    "argus:findings", "argus:suggestions",
-    "consensus:agreed", "consensus:pending", "consensus:disputed",
-    "review:merge-ready", "review:verifying",
-    "review:1", "review:2", "review:3"
-}
+            if not at_open and not sec_unagreed and not mentions_atlas and not deep_review:
+                reviewers_ok_for_merge = True
+
+        if reviewers_ok_for_merge:
+            desired_labels.add("review:merge-ready")
 
 to_add = sorted([l for l in desired_labels if l not in current_labels])
 to_remove = sorted([l for l in managed_labels if l in current_labels and l not in desired_labels])
@@ -485,6 +534,9 @@ PYEOF
 
 # Read action plan
 PLAN_JSON="$WORKDIR/action_plan.json"
+if [ ! -f "$PLAN_JSON" ]; then
+  exit 0
+fi
 COMMENT_ACTION="$(jq -r '.comment_action' "$PLAN_JSON")"
 COMMENT_ID="$(jq -r '.existing_comment_id // empty' "$PLAN_JSON")"
 TO_ADD="$(jq -r '.to_add | join(",")' "$PLAN_JSON")"

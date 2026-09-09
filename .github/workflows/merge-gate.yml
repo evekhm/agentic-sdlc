@@ -92,8 +92,6 @@ jobs:
       pull-requests: write
       issues: write
       actions: read
-      checks: read
-      statuses: read
     steps:
       - name: Checkout the default branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -146,7 +144,7 @@ jobs:
   gate:
     name: merge-gate
     needs: [record]
-    if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)
+    if: ${{ always() && github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: themis
