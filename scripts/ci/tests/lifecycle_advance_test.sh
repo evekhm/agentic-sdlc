@@ -66,6 +66,10 @@ pass() { echo "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 banner() { printf '\n--- %s\n' "$*"; }
 
+# #64 D23/D30: the merge actor's login, the one trusted ledger writer.
+# The gh stub answers the advancer's viewer read with it.
+export MERGER='evekhm-merge-actor-app[bot]'
+
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 # The stub answers exactly the READS the advancer makes, and only from
@@ -95,6 +99,17 @@ if [ "${1:-}" = "issue" ] && [ "${2:-}" = "view" ]; then
   exit 0
 fi
 if [ "${1:-}" = "api" ]; then
+  if [ "${2:-}" = "graphql" ] && [[ "$*" == *"viewer { login }"* ]]; then
+    # #64 D30: the one GraphQL read the advancer makes — who holds
+    # MERGE_ACTOR_TOKEN. An App installation token answers its
+    # `<slug>[bot]` login (verified live 2026-09-09; GET /user is 403 for
+    # it). $FIXTURES/viewer-unreadable arms a failed read and
+    # $FIXTURES/viewer-login overrides the answer (S36n, S36o).
+    [ -f "$FIXTURES/viewer-unreadable" ] && exit 1
+    login="$MERGER"; [ -f "$FIXTURES/viewer-login" ] && login="$(cat "$FIXTURES/viewer-login")"
+    jq -nc --arg l "$login" '{data: {viewer: {login: $l}}}'
+    exit 0
+  fi
   for a in "$@"; do
     case "$a" in
       -X|-f|-F|--method|--input) printf '%s\n' "gh $*" >> "$WRITES"; exit 1 ;;
@@ -369,7 +384,7 @@ row() { jq -r --arg a "$1" ".stages[] | select(.artifact == \$a) | .$2" \
 lrow() { jq -r --arg l "$1" ".stages[] | select(.label == \$l) | .$2" \
            "$SANDBOX/personas/lifecycle.json"; }
 
-reset_fixtures() { rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable "$FIXTURES"/loop-* "$FIXTURES"/binding-*; : > "$INVOKES"; }
+reset_fixtures() { rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable "$FIXTURES"/loop-* "$FIXTURES"/binding-* "$FIXTURES"/viewer-login; : > "$INVOKES"; }
 issue_fixture() { # <number> <state> [label ...]
   local n="$1" state="$2" labels='[]'
   shift 2
@@ -1233,8 +1248,8 @@ reset_fixtures
 # below that must be TRUSTED is authored by MERGER instead. ACTIONS_BOT
 # stays defined for the one scenario (S36c2) that pins the narrowing
 # itself: a login this ladder used to trust is now exactly as untrusted
-# as any other forged login.
-MERGER='evekhm-merge-actor-app[bot]'
+# as any other forged login. MERGER itself is exported above the gh
+# stub, which answers the D30 viewer read with it.
 ACTIONS_BOT='github-actions[bot]'
 ledger_comment() { # <login> <id> <issue> [row ...] — one trusted-or-not container comment
   local login="$1" id="$2" n="$3" r body
@@ -1288,6 +1303,26 @@ comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 902 999 \
 run "$C0" "$C1" "S36c2: a github-actions[bot] ledger does not stop the ladder either (D23)"
 has "--add-label $INTENT_TO" "S36c2: the label is written past the narrowed-out rows"
 hasnt "non-monotonic" "S36c2: no refusal is raised — the ledger this narrowed writer left is prose, exactly like mallory's"
+
+banner "S36n · #64 D30 · an unresolvable merge-actor login makes every ledger unreadable: red, no label"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+: > "$FIXTURES/viewer-unreadable"
+run_fail "$C0" "$C1" "S36n: a failed viewer read ends red"
+has "cannot resolve the merge actor's login from MERGE_ACTOR_TOKEN" "S36n: the failure names the D30 read"
+has "unreadable is not absent" "S36n: and D13's rule"
+hasnt "--add-label" "S36n: no label is written"
+not_invoked 'gh api user' "S36n: GET /user is never called (403 for an installation token)"
+rm -f "$FIXTURES/viewer-unreadable"
+
+banner "S36o · #64 D23 D30 · MERGE_ACTOR_TOKEN resolving to github-actions[bot] is no trusted writer: red, no label"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+printf '%s\n' "$ACTIONS_BOT" > "$FIXTURES/viewer-login"
+run_fail "$C0" "$C1" "S36o: the default token's identity ends red"
+has "cannot resolve the merge actor's login from MERGE_ACTOR_TOKEN" "S36o: refused as no trusted writer"
+hasnt "--add-label" "S36o: no label is written"
+reset_fixtures
 
 banner "S36d · #64 D13 · a dispatch bound already reached refuses the label write in green with one refusal row"
 reset_fixtures
@@ -1380,20 +1415,27 @@ run_fail "$C0" "$C1" "S36l: exits red"
 has "unreadable is not absent" "S36l: the failure says why"
 hasnt "--add-label" "S36l: no label is written"
 
-banner "S36m · #64 D25 · MERGE_ACTOR_TOKEN reaches only the two ledger writes, no other gh call"
+banner "S36m · #64 D25 D30 · MERGE_ACTOR_TOKEN reaches the two ledger writes and the viewer read, no other gh call"
 # The whole harness runs under DRY_RUN=1 (see "nothing was written" below),
 # so ledger_append's two real `gh api -X PATCH/POST` calls are structurally
 # unreachable here — there is no live write to capture a token from. This
 # checks the same invariant statically, the way S3 checks kw_count is gone:
-# by name, not by behavior.
+# by name, not by behavior. D25's r3 note admits one further call: the
+# `viewer { login }` read that names the trusted writer (D30), which must
+# run on the merge actor's token because on github.token it would name
+# the one login D23 excludes.
 writer_calls="$(grep -n 'GH_TOKEN="\$MERGE_ACTOR_TOKEN"' "$ADVANCER" || true)"
-[ "$(wc -l <<<"$writer_calls" | tr -d ' ')" = 2 ] \
-  || { printf '%s\n' "$writer_calls" >&2; fail "S36m: expected exactly 2 gh calls carrying MERGE_ACTOR_TOKEN (the PATCH and the POST), found $(wc -l <<<"$writer_calls" | tr -d ' ')"; }
+[ "$(wc -l <<<"$writer_calls" | tr -d ' ')" = 3 ] \
+  || { printf '%s\n' "$writer_calls" >&2; fail "S36m: expected exactly 3 gh calls carrying MERGE_ACTOR_TOKEN (the PATCH, the POST and the viewer read), found $(wc -l <<<"$writer_calls" | tr -d ' ')"; }
 grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api -X PATCH' "$ADVANCER" \
   || fail "S36m: the ledger-row PATCH does not carry MERGE_ACTOR_TOKEN"
 grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api -X POST' "$ADVANCER" \
   || fail "S36m: the new-ledger POST does not carry MERGE_ACTOR_TOKEN"
-pass "S36m: exactly the PATCH and the POST inside ledger_append carry MERGE_ACTOR_TOKEN"
+grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api graphql -f query=.query { viewer { login } }' "$ADVANCER" \
+  || fail "S36m: the D30 viewer read does not carry MERGE_ACTOR_TOKEN"
+! grep -q 'gh api user' "$ADVANCER" || fail "S36m: the advancer calls 'gh api user', which is 403 for an App installation token (D30)"
+! grep -q 'MERGE_ACTOR_LOGIN' "$ADVANCER" || fail "S36m: the advancer still reads MERGE_ACTOR_LOGIN — a guessed identity (S3, R4-4)"
+pass "S36m: exactly the PATCH, the POST and the viewer read carry MERGE_ACTOR_TOKEN; no GET /user, no MERGE_ACTOR_LOGIN"
 other_gh_calls="$(grep -n '^\s*gh \|[^"]gh api\|[^"]gh issue' "$ADVANCER" | grep -v 'GH_TOKEN="\$MERGE_ACTOR_TOKEN"' || true)"
 if grep -q 'GH_TOKEN=' <<<"$other_gh_calls"; then
   printf '%s\n' "$other_gh_calls" >&2

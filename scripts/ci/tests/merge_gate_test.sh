@@ -11,10 +11,15 @@
 # Each scenario names the Decision row it pins. The green fixture is
 # built once (mk_green) and every flip scenario changes exactly one
 # thing from it, so a failure names the conjunct that moved. MG-21
-# onward cover Amendment r2 (D23-D28) and S3: the trusted-writer set
-# narrowed to the merge actor's own login, resolved via `gh api user`
-# rather than guessed, and conjunct (2) read from `mergeStateStatus`
-# rather than branch-protection required checks.
+# onward cover Amendment r2 (D23-D28), S3 and D30: the trusted-writer set
+# narrowed to the merge actor's own login, read from its token through
+# GraphQL `viewer { login }` and never guessed, and conjunct (2) read
+# from `mergeStateStatus` rather than branch-protection required checks.
+#
+# The stub models the platform for the credential the scripts run under,
+# an App installation token: `gh api user` answers 403 on every call
+# (the 2026-09-08 defect, R4-2, was a fixture that let it succeed), and
+# `viewer { login }` answers `<slug>[bot]`. Both verified live 2026-09-09.
 
 set -euo pipefail
 
@@ -79,11 +84,23 @@ case "${1:-} ${2:-}" in
   "pr merge"|"issue edit"|"issue comment")
     record_write "$@"; exit 0;;
   "api user")
-    # S3, D23: the merge actor's own login, resolved from the token in
-    # scope. $FX/user-unreadable simulates an unresolvable identity.
-    [ -f "$FX/user-unreadable" ] && { echo "unauthorized" >&2; exit 1; }
-    printf '{"login":"%s"}\n' "$MERGER"; exit 0;;
+    # GET /user for an App installation token: HTTP 403, always. This is
+    # GitHub's answer, verbatim, for the credential both scripts run
+    # under (R4-2; scripts/ops/post.sh:159-165). No fixture makes it
+    # succeed — a script that calls it is broken in production whatever
+    # this suite says, and MG-21c asserts neither script calls it.
+    echo '{"message":"Resource not accessible by integration","documentation_url":"https://docs.github.com/rest/users/users#get-the-authenticated-user","status":"403"}'
+    echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1;;
   "api graphql")
+    if [[ "$*" == *"viewer { login }"* ]]; then
+      # D30: who holds the token. An installation token answers its
+      # `<slug>[bot]` login (verified live 2026-09-09). $FX/viewer-unreadable
+      # arms a failed read; $FX/viewer-login overrides the answer — e.g.
+      # github-actions[bot], what the evaluate job's default token is.
+      [ -f "$FX/viewer-unreadable" ] && { echo '{"errors":[{"message":"Resource not accessible by integration"}]}'; exit 1; }
+      login="$MERGER"; [ -f "$FX/viewer-login" ] && login="$(cat "$FX/viewer-login")"
+      jq -nc --arg l "$login" '{data: {viewer: {login: $l}}}'; exit 0
+    fi
     # D24: mergeStateStatus + check roll-up (with each CheckRun's owning
     # workflow-run id). $FX/mergestate-<pr>.state holds one state per
     # line, consumed in order across repeated calls (simulating GitHub's
@@ -611,15 +628,33 @@ has "Failing closed" "MG-20: the decline names the fail-closed rule"
 not_merged "MG-20"
 no_writes "MG-20"
 
-banner "MG-21 · merge_gate.sh · S3 · an unresolvable merge-actor login fails closed"
+banner "MG-21 · merge_gate.sh · S3 D30 · an unresolvable merge-actor login fails closed"
 mk_green
-: > "$FX/user-unreadable"
+: > "$FX/viewer-unreadable"
 run "MG-21: exits 0 (a decline, not a script failure)" 123
-has "cannot resolve the merge actor's login via 'gh api user'" "MG-21: names the S3 reason"
-has "S3" "MG-21: cites the fixing decision"
+has "cannot resolve the merge actor's login via GraphQL viewer" "MG-21: names the S3 reason"
+has "D30" "MG-21: cites the fixing decision"
 not_merged "MG-21"
 no_writes "MG-21"
-rm -f "$FX/user-unreadable"
+rm -f "$FX/viewer-unreadable"
+
+banner "MG-21b · merge_gate.sh · D23 D30 · a token that resolves to github-actions[bot] is never the merge actor"
+mk_green
+printf '%s\n' "$ACTIONS" > "$FX/viewer-login"
+run "MG-21b: exits 0 (the evaluate job's expected decline, D29)" 123
+has "github-actions[bot], which D23 never trusts" "MG-21b: names the excluded login"
+not_merged "MG-21b"
+no_writes "MG-21b"
+rm -f "$FX/viewer-login"
+
+banner "MG-21c · merge_gate.sh · D30 · the green path resolves through viewer once and never calls GET /user"
+mk_green
+run "MG-21c: exits 0" 123
+merged "MG-21c: the green fixture still merges"
+[ "$(grep -c 'gh api user' "$INVOKES")" -eq 0 ] || { cat "$INVOKES" >&2; fail "MG-21c: the gate called 'gh api user', which is 403 for its own credential"; }
+pass "MG-21c: no 'gh api user' call"
+[ "$(grep -c 'viewer { login }' "$INVOKES")" -eq 1 ] || { cat "$INVOKES" >&2; fail "MG-21c: expected exactly one viewer read"; }
+pass "MG-21c: exactly one viewer read"
 
 banner "MG-22 · D23 · github-actions[bot] is narrowed out of the trusted-writer set"
 mk_green
@@ -641,8 +676,8 @@ mergestate_fixture 123 UNKNOWN
 run "MG-23: exits 0" 123
 has "conjunct (2): false" "MG-23: persistent UNKNOWN fails (2)"
 has "still UNKNOWN after" "MG-23: names the bounded retry"
-[ "$(grep -c 'gh api graphql' "$INVOKES")" -eq 4 ] || { cat "$INVOKES" >&2; fail "MG-23: expected exactly 4 graphql reads (1 initial + 3 retries)"; }
-pass "MG-23: exactly 4 graphql reads"
+[ "$(grep -c 'gh api graphql.*-F pr=' "$INVOKES")" -eq 4 ] || { cat "$INVOKES" >&2; fail "MG-23: expected exactly 4 roll-up reads (1 initial + 3 retries)"; }
+pass "MG-23: exactly 4 roll-up reads"
 not_merged "MG-23"
 
 banner "MG-24 · D24 · mergeStateStatus UNKNOWN then CLEAN on retry succeeds"
@@ -720,14 +755,24 @@ run "MG-29c: mergeStateStatus UNKNOWN exits 0" 123
 has "still live" "MG-29c: the marker stays live while mergeStateStatus is UNKNOWN"
 no_writes "MG-29c"
 
-banner "MG-30 · escalate.sh · S3 · an unresolvable merge-actor login refuses, nothing written"
+banner "MG-30 · escalate.sh · S3 D30 · an unresolvable merge-actor login refuses, nothing written"
 mk_green
 comments_fixture 456 "$(comment "$MERGER" "<!-- escalation:status:implementing:budget:$H -->" 2026-01-05T00:00:00Z 828)"
-: > "$FX/user-unreadable"
+: > "$FX/viewer-unreadable"
 run_fail "$ESCALATE" "MG-30: escalate refuses when the merge actor's login is unresolvable" 456 --reason budget --head "$H"
-has "cannot resolve the merge actor's login via 'gh api user'" "MG-30: names the S3 reason"
+has "cannot resolve the merge actor's login via GraphQL viewer" "MG-30: names the S3 reason"
 no_writes "MG-30"
-rm -f "$FX/user-unreadable"
+[ "$(grep -c 'gh api user' "$INVOKES")" -eq 0 ] || { cat "$INVOKES" >&2; fail "MG-30: escalate called 'gh api user', which is 403 for its own credential"; }
+pass "MG-30: no 'gh api user' call"
+rm -f "$FX/viewer-unreadable"
+
+banner "MG-30b · escalate.sh · D23 D30 · MERGE_ACTOR_TOKEN resolving to github-actions[bot] refuses, nothing written"
+mk_green
+printf '%s\n' "$ACTIONS" > "$FX/viewer-login"
+run_fail "$ESCALATE" "MG-30b: escalate refuses under the default token's identity" 456 --reason budget --head "$H"
+has "github-actions[bot], which D23 never trusts" "MG-30b: names the excluded login"
+no_writes "MG-30b"
+rm -f "$FX/viewer-login"
 
 echo
 echo "merge_gate_test.sh: all scenarios passed"
