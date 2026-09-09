@@ -1,6 +1,6 @@
 # Plan: the loop merges itself; the human is the escalation path
 
-**Issue:** #64 · **Spec:** spec.md (Approved, D1-D22, AT-1..AT-24) · **Author:** daedalus (`evekhm-daedalus-app[bot]`)
+**Issue:** #64 · **Spec:** spec.md (Approved, D1-D29, AT-1..AT-24) · **Author:** daedalus (`evekhm-daedalus-app[bot]`)
 
 Eight tasks. Each names the files it touches, the steps in order, the Decision rows it implements, the acceptance tests it makes pass, and its done-when. **Implement on top of `origin/main` at the SHA the dispatcher pins; this plan was verified at `bf78de9`.** Every `file:line` below was re-read at that commit.
 
@@ -10,9 +10,18 @@ Order: T1 (tests, all red) → T2 (config and parser) → T3 (permissions and wo
 
 **P1 · Merge gate ledger dependency:** As D5 conjuncts (3), (4), (5), and (11) rely on the recorder (#8/#9) which is not yet merged, `merge_gate.sh` parses `gh issue comments` for the loop ledger and `review-stuck` marker, but explicitly fails closed for the consensus ledger if it's missing (which it will be until #8/#9 lands).
 
+**P2 · Sync (Amendment r2, PR #257 round 4 → S1-S4 fix, odyssey):** Round 4 review found S1-S3 (PR #257 comments 5592288923, 5592295614) and Amendment r2 (D23-D29, spec.md) resolved them at the design level; this plan's T1/T3/T5/T6 did not anticipate that amendment and are extended here rather than rewritten, per D19's r2 scope note:
+- **T3 / `.github/workflows/lifecycle.yml`:** added `environment: themis` and an `actions/create-github-app-token` mint step (D23), reaching `lifecycle_advance.sh` and, on a D14 refusal, `escalate.sh` as `MERGE_ACTOR_TOKEN`; `GH_TOKEN` for the label/comment writes stays `github.token` (D25/D26). `.github/workflows/merge-gate.yml` dropped its now-dead `GATE_CHECK_NAME` env (D24 excludes the gate's own check by `checkSuite.workflowRun.databaseId`, not by name).
+- **T5 / `scripts/ci/merge_gate.sh`:** trusted-writer identity is resolved via `gh api user` rather than trusted by env-var guess (S3); conjunct (2) is reimplemented on `mergeStateStatus` plus a `GRAPHQL_ROLLUP` check/status read with bounded retry on `UNKNOWN` (D24); `BEHIND` escalates with reason-code `behind`, gated by `loop.autonomous_merge` (D27) and self-clearing per D10's r2 amendment (D28).
+- **T4 / `scripts/ci/escalate.sh`:** S3's `gh api user` identity fix; `behind` added to the closed reason-code set (D24).
+- **T6 / `scripts/ci/lifecycle_advance.sh`:** the two ledger-row writes (`ledger_append`'s PATCH and POST) carry `GH_TOKEN="$MERGE_ACTOR_TOKEN"`; every other `gh` call in the script keeps the ambient `GITHUB_TOKEN` (D23/D25).
+- **T1 / test files:** `scripts/ci/tests/merge_gate_test.sh` was substantially rewritten — a `gh api graphql` stub replacing the old `required_status_checks` stub, `api user` stub for S3, and new scenarios MG-21..MG-30 for S3/D23/D24/D27/D28. `scripts/ci/tests/lifecycle_advance_test.sh` gained scenario S36c2 (github-actions[bot], trusted under the superseded D22, is no longer trusted under D23) and S36m (a static assertion that only `ledger_append`'s two writes carry `MERGE_ACTOR_TOKEN`, since the whole harness runs under `DRY_RUN=1` and never reaches a live write to capture a token from).
+- **r3 (D30, PR #279; PR #257 round 5 R4-2/R4-4/R5-1):** the `gh api user` read above answers 403 for an App installation token, so every identity line in T4/T5 declined or refused on every run, and T6 still guessed from `MERGE_ACTOR_LOGIN`. All three scripts now read the login from the merge-actor token through GraphQL `viewer { login }`: `merge_gate.sh` and `escalate.sh` at start, `lifecycle_advance.sh` lazily in `read_ledger` under `MERGE_ACTOR_TOKEN` (the one further call D25's r3 note admits; S36m counts three). A failed read or an answer of `github-actions[bot]` declines / refuses / makes the ledger unreadable (`read_ledger` rc 3). The test stubs model the platform: `gh api user` always answers 403 and is asserted never called (MG-21c); the viewer read answers `<slug>[bot]` by default, with `viewer-unreadable` / `viewer-login` fixtures for the two refusal paths (MG-21, MG-21b, MG-30, MG-30b, S36n, S36o). Verified live 2026-09-09 under the odyssey App's installation token.
+- **Not done at runtime, by design:** S4 (the private key's exposure is bounded only by the off-repo `themis` Environment setting) is precondition P1 in Amendment r2 — unverifiable from inside the loop, as D23 itself says — and S5-S8 (medium/low severity) are left as-is per the repo owner's standing merge policy (security/high findings block merge; the rest do not).
+
 ## T1 · The acceptance suite
 
-Touch: `scripts/ci/tests/merge_gate_test.sh`, `scripts/ops/tests/execution_test.sh`
+Touch: `scripts/ci/tests/merge_gate_test.sh`, `scripts/ops/tests/execution_test.sh`, `scripts/ci/tests/lifecycle_advance_test.sh`
 
 1. **`merge_gate_test.sh`**: Create a new hermetic test file with a stub `gh` (to avoid network) and stubs for `claude`, `gemini`, `agy`, `curl` that exit 1 if called. Add scenarios for:
    - Dry-run mode avoiding mutations.
@@ -34,6 +43,7 @@ Touch: `scripts/ci/tests/merge_gate_test.sh`, `scripts/ops/tests/execution_test.
    - Adapter invoked exactly once.
    - Flag `loop.autonomous_merge: false` skips merge and dispatch.
 2. **`execution_test.sh`**: Add scenarios checking that `loop:` top-level block is parsed correctly, `max_rung_dispatches_per_issue` must be positive integer, `trigger: ladder` requires no events.
+   - *Sync (PR #257 round 3, R3-3):* a config with no `loop:` block fails `--check` (D20), so `write_config` prepends a valid block to the older fixtures that say nothing about it and `write_config_raw` writes a fixture verbatim for the scenario that proves the failure.
 
 **Decisions:** D3, D5-D18.
 **Acceptance:** AT-1 to AT-16, AT-18, AT-23, AT-24.
@@ -63,11 +73,12 @@ Touch: `config/execution.yaml`, `scripts/ops/execution.py`
 Touch: `scripts/auth/app_manifests.yaml`, `.github/workflows/merge-gate.yml`
 
 1. **`scripts/auth/app_manifests.yaml`**:
-   - Add an entry for `merge-actor` (not a persona) with `MERGE_ACTOR_APP_PRIVATE_KEY` mapping to `contents: write`, `pull_requests: write`, `issues: write`, `checks: read`, `statuses: read`.
+   - Add an entry for `themis` (the merge actor; a system actor with no persona file) with `THEMIS_APP_PRIVATE_KEY` mapping to `contents: write`, `pull_requests: write`, `issues: write`, `checks: read`, `statuses: read`.
 2. **`.github/workflows/merge-gate.yml`**:
    - Create workflow triggering on `pull_request`, `check_suite: completed`, `status`, `issue_comment: created`, `workflow_dispatch`.
    - Request the 5 required permissions.
-   - Action runs `scripts/ci/merge_gate.sh` passing `MERGE_ACTOR_APP_PRIVATE_KEY`.
+   - Action runs `scripts/ci/merge_gate.sh` passing `THEMIS_APP_PRIVATE_KEY`.
+   - *Sync (PR #257 round 3, Argus R1-2):* two jobs. `pull_request` runs execute the workflow file from the pull request's head, so that trigger gets a read-only job (`contents/pull-requests/issues/checks/statuses: read`, default token, `DRY_RUN=1`) that fails closed unless `github.base_ref` is `main`; the other four triggers run the writing job from `main` with the five permissions, `environment: themis`, and both actions pinned by SHA. The operator scopes `THEMIS_APP_ID` and `THEMIS_APP_PRIVATE_KEY` to that Environment with a `main`-only deployment-branch policy. `issue_comment` events on plain issues are skipped.
 
 **Decisions:** D3, D4.
 **Acceptance:** AT-19.
@@ -100,6 +111,7 @@ Touch: `scripts/ci/merge_gate.sh`
    - Evaluates escalation self-clearing (D10) by checking live markers.
    - If D5 conjuncts pass and `execution.py --loop autonomous_merge` is `true`: calls merge API, writes loop-ledger row.
    - If `autonomous_merge` is `false`: writes loop-ledger row but skips merge API call.
+   - *Sync (PR #257 round 3):* D13 names three row kinds and none for a merge, so the gate writes only `refusal:*` rows; the merged head reaches the ledger through the advancer's `dispatch` or `terminal` row for the rung the merge opens, and conjunct (10) reads the highest such rung minus one. A refusal row is written in both flag settings; escalation follows only when the flag is true (D18).
    - If consensus times out or blocks, delegates to `scripts/ci/escalate.sh` (D9, D8).
    - Checks trusted writers (D22) when reading the ledger.
 
@@ -109,7 +121,7 @@ Touch: `scripts/ci/merge_gate.sh`
 
 ## T6 · Lifecycle Advancer
 
-Touch: `scripts/ci/lifecycle_advance.sh`, `.github/workflows/lifecycle.yml`
+Touch: `scripts/ci/lifecycle_advance.sh`, `.github/workflows/lifecycle.yml`, `scripts/ci/tests/lifecycle_advance_test.sh`
 
 1. **`scripts/ci/lifecycle_advance.sh`**:
    - Read bounds via `execution.py --loop`. Fail closed if invalid.
@@ -117,9 +129,12 @@ Touch: `scripts/ci/lifecycle_advance.sh`, `.github/workflows/lifecycle.yml`
    - Do NOT run dispatch if `execution.py --loop autonomous_merge` is `false` (D18) or if `trigger` is not `ladder` (D16).
    - If allowed, use `scripts/ops/execution.py --binding <persona>` to find adapter and run `scripts/placement/<name>/run.sh <issue>`.
    - Do not dispatch for the review rung (D17).
-2. **`.github/workflows/lifecycle.yml`**:
+2. **`scripts/ci/tests/lifecycle_advance_test.sh`**:
+   - Specify the stub's new answers for the new ledger reads/comments.
+3. **`.github/workflows/lifecycle.yml`**:
    - Update permissions to include `issues: write`.
    - Add a step to invoke `scripts/ci/escalate.sh` when `lifecycle_advance.sh` exits reporting a non-monotonic refusal.
+   - *Sync (PR #257 round 3):* the same step also escalates `budget`, because D13 makes a tripped bound a green exit plus a budget escalation and D19 leaves the advancer with no escalation call of its own. The advancer prints `refusal reason-code: <budget|non-monotonic> for #<n>` on stderr; the step reads both. The advancer also writes the `dispatch` row (before the adapter runs) and the `terminal` row (D17), and its ledger reader is a copy of the gate's, since D19 permits no new shared file.
 
 **Decisions:** D14, D16-D18.
 **Acceptance:** AT-15, AT-16, AT-23.
@@ -154,5 +169,6 @@ Commands to run from the root of the tree:
 | 4 | `bash scripts/ci/spec_check.sh origin/main <body-file>` | exit 0 | AT-21 |
 | 5 | `python3 scripts/sync_agents.py --check` | exit 0 | AT-21 |
 | 6 | `python3 scripts/ops/execution.py --check` | exit 0 | AT-21, AT-24 |
+| 7 | `bash scripts/ci/tests/lifecycle_advance_test.sh` | exit 0 | AT-24 |
 
-**Done when:** All six checks pass green.
+**Done when:** All seven checks pass green.

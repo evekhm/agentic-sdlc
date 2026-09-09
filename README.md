@@ -367,8 +367,9 @@ When the owner steps in at a gate, the action means the same thing
 everywhere. A merged pull request is acceptance of the artifact in it.
 A closed pull request is a rejection, and it is final. When a decision
 in the artifact is wrong, edit it in the pull request. The edited row
-is the decision
-([REVIEW.md, "Merge is the escape hatch"](REVIEW.md#merge-is-the-escape-hatch)).
+*is* the decision. You never comment asking for a change and wait for
+a session to make it ([REVIEW.md, "Merge is the escape
+hatch"](REVIEW.md#merge-is-the-escape-hatch)). The autonomous loop merges itself when consensus is reached; a human is the escalation path.
 
 ## Where the rules live
 

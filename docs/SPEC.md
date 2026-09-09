@@ -950,6 +950,84 @@ ignore the signal. Tests: `scripts/ops/tests/execution_test.sh`,
 `placement_test.sh` and `post_test.sh`, all three run by the
 `execution` gate (`ci.gates`).
 
+### loop.autonomous
+
+Themis (`<owner>-themis-app`) holds the merge-actor role; it is a system
+actor with no prompt, harness or goals, and the six personas in
+INTENT.md are unchanged.
+
+The ladder runs itself between the two human gates (#64, PR #257). One
+`loop:` block in `config/execution.yaml` is required (D20) and is read
+through `scripts/ops/execution.py --loop <key>`:
+
+- `autonomous_merge` (bool): `true` arms the merge and the next-rung
+  dispatch; `false` leaves every guard evaluated and every ledger row
+  written while nothing is merged or dispatched (D18).
+- `max_rung_dispatches_per_issue` (int): the number of dispatch rows
+  one issue may carry before the advancer refuses the next rung (D13).
+- `max_cost_usd_per_issue` (number): the summed cost of those rows at
+  which the same refusal fires.
+
+`scripts/ci/merge_gate.sh <pr>` is the one merger. It runs from
+`.github/workflows/merge-gate.yml` on a closed trigger list (D3) and
+merges only when all eleven D5 conjuncts hold at the pull request's
+current head, among them: both reviewers reviewed that head (Atlas may
+carry forward under D7), the blocking set is empty, the consensus axis
+is agreed, neither `hold` nor `blocked` is present, the merger is a
+different identity from the author, the target rung outranks every rung
+the loop ledger records, and the ledger's head marker is present. With
+the flag off the same evaluation runs and nothing is written.
+
+CI (conjunct 2) is read from the pull request's own `mergeStateStatus`
+rather than reconstructed from a required-checks list: `CLEAN` or
+`UNSTABLE` with every check run and commit status on the head other
+than the gate's own — excluded by run identity
+(`checkSuite.workflowRun.databaseId`), never by name — passing, and at
+least one such check existing. `UNKNOWN` is retried up to three times
+before it is treated as unevaluable; `BEHIND` is the one false conjunct
+that escalates, with reason-code `behind`, gated by `autonomous_merge`
+(D18 governs it like any other escalation) and self-clearing when a
+later read finds the head no longer behind (D24, D27, D28).
+
+`scripts/ci/escalate.sh <issue> --reason <code> --head <oid>` is the
+one escalation writer (D9): it swaps `status:*` for
+`status:review-stuck` and posts one comment carrying
+`<!-- escalation:<displaced>:<reason>:<head-oid> -->`, idempotent on
+(reason, head). Its callers are the gate and `lifecycle.yml`; the
+advancer calls no escalation itself (D19). A later gate run at a head
+whose reason has cleared restores the displaced label; `budget` and
+`non-monotonic` stay until a human clears them (D10).
+
+The loop ledger is one container comment per issue,
+`<!-- loop-ledger:<n> -->` … `<!-- loop-ledger-end -->`, with three row
+kinds: `dispatch` (rung entered, merged head-oid, event, pr, at, cost),
+`terminal` (the review rung, D17) and `refusal:<reason>`. Only rows a
+trusted writer posted count — the merge actor App alone, its login read
+from its own token through GraphQL `viewer { login }` (D23, D30; `GET
+/user` is 403 for an App installation token, and a read that fails or
+answers `github-actions[bot]` trusts nobody and fails closed);
+`github-actions[bot]`, trusted under the superseded D22, is not — a
+comment it posted carrying a ledger or escalation marker is logged and
+ignored, never state and never a decline. Every write of such a comment
+therefore carries the merge actor's own token: `merge_gate.sh` and
+`escalate.sh` already held it, and `lifecycle_advance.sh`'s ledger rows
+(dispatch, terminal and D13/D14 refusal rows) now do too, minted the
+same way `merge-gate.yml` mints it and reaching each script by name as
+`MERGE_ACTOR_TOKEN`; the `status:*` label writes and handoff comments
+stay on `GITHUB_TOKEN` so they start no workflow (D16). An unreadable or
+unparseable ledger fails closed and is never read as absent.
+
+`.github/workflows/merge-gate.yml` holds `contents: write`,
+`pull-requests: write`, `issues: write`, `checks: read`,
+`statuses: read` and nothing else (acceptance 19); the merge actor
+App's manifest in `scripts/auth/app_manifests.yaml` requests the same
+five plus the `metadata: read` every App carries. Both
+`merge-gate.yml`'s mutating job and `lifecycle.yml` mint that App's
+token under one job-level `environment: themis`, whose
+deployment-branch policy admits `main` only (D23); that policy is
+unverifiable from inside the loop and is precondition P1, not a
+runtime check (Amendment r2).
+
 ## Agreed, not yet built
 
 Each entry is on the record as a tracker issue; it moves into the

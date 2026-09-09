@@ -31,6 +31,11 @@
 #                 scripts/ops/session_spend.sh, or total_cost_usd in the
 #                 job log.
 
+loop:
+  autonomous_merge: false
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.00
+
 personas:
   # 2.00 while the number was decorative; 8.00 now that it stops a run.
   # Measured over six argus dispatches through 2026-09-07 that produced a
@@ -61,6 +66,6 @@ personas:
     events: [pull_request]
     placement: gh-actions
     max_cost_usd: 8.00
-  athena:    { trigger: manual, placement: vm-local, max_cost_usd: 5.00 }
-  daedalus:  { trigger: manual, placement: vm-local, max_cost_usd: 5.00 }
-  odyssey:   { trigger: manual, placement: vm-local, max_cost_usd: 10.00 }
+  athena:    { trigger: ladder, placement: vm-local, max_cost_usd: 5.00 }
+  daedalus:  { trigger: ladder, placement: vm-local, max_cost_usd: 5.00 }
+  odyssey:   { trigger: ladder, placement: vm-local, max_cost_usd: 10.00 }

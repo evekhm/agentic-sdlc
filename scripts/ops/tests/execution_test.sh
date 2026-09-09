@@ -60,7 +60,21 @@ fixture_tree() {
 }
 
 # write_config <tree> <heredoc-on-stdin>
-write_config() { cat > "$1/config/execution.yaml"; }
+# D20 (#64) makes the loop block required, so a fixture that says
+# nothing about it gets a quiet, valid one prepended; a fixture that
+# carries its own is written as given. write_config_raw writes exactly
+# what it is handed.
+write_config_raw() { cat > "$1/config/execution.yaml"; }
+write_config() {
+  local body
+  body="$(cat)"
+  if grep -q '^loop:' <<<"$body"; then
+    printf '%s\n' "$body" > "$1/config/execution.yaml"
+  else
+    printf 'loop:\n  autonomous_merge: false\n  max_rung_dispatches_per_issue: 12\n  max_cost_usd_per_issue: 50.0\n%s\n' \
+      "$body" > "$1/config/execution.yaml"
+  fi
+}
 
 # ---------------------------------------------------------------------------
 banner "D2/D19 the committed file is the one the gate passes"
@@ -94,7 +108,7 @@ pass "D2: an event nothing subscribes to lists nobody"
 
 banner "D2 --binding is one line an adapter can report"
 run 0 "D2: --binding odyssey exits 0" -- "$EXEC_PY" --binding odyssey
-has "manual vm-local" "D2: the trigger and placement are printed"
+has "ladder vm-local" "D2: the trigger and placement are printed"
 run 1 "D2: --binding on a persona with no entry exits 1" -- "$EXEC_PY" --binding cassandra
 has "has no execution binding" "D2: it says why — #11 owns cassandra's cadence"
 
@@ -126,7 +140,7 @@ personas:
   odyssey: { trigger: whenever, placement: vm-local, max_cost_usd: 1.0 }
 YAML
 run 1 "D2: a trigger outside the enumeration exits 1" -- "$CHECK" --check
-has "which is not one of repo-event, scheduled, manual" "D2: the three shapes are named"
+has "which is not one of repo-event, scheduled, manual, ladder" "D2: the four shapes are named"
 
 write_config "$T" <<'YAML'
 personas:
@@ -210,6 +224,65 @@ run 0 "D17: the unchanged file passes once the adapter directory is merged" -- "
 [ "$config_before" = "$(cat "$T/config/execution.yaml")" ] \
   || fail "D17: the config was edited between the two runs — that is not the round trip"
 pass "D17: the config file is byte-identical across the failing and the passing run"
+
+banner "D16/D18/D20 loop block and ladder trigger"
+write_config "$T" <<'YAML'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 10
+  max_cost_usd_per_issue: 100.0
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 0 "D16: trigger: ladder passes with no events" -- "$CHECK" --check
+OUT="$(python3 "$CHECK" --loop max_rung_dispatches_per_issue)"
+[ "$OUT" = "10" ] || fail "D20: --loop did not print the int value 10"
+pass "D20: --loop prints values"
+
+write_config "$T" <<'YAML'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: -1
+  max_cost_usd_per_issue: 100.0
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D20: max_rung_dispatches_per_issue must be positive integer" -- "$CHECK" --check
+has "must be positive integer" "D20: error caught negative int"
+
+write_config "$T" <<'YAML'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 10
+  max_cost_usd_per_issue: 100.0
+personas:
+  atlas:
+    trigger: ladder
+    events: [pull_request]
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D16: trigger: ladder rejects events" -- "$CHECK" --check
+has "only repo-event subscribes to an event" "D16: trigger: ladder must not carry events"
+
+banner "D20 a config with no loop block fails --check (#64)"
+write_config_raw "$T" <<'YAML'
+personas:
+  atlas:
+    trigger: ladder
+    placement: gh-actions
+    max_cost_usd: 2.00
+YAML
+run 1 "D20: --check fails when the loop block is absent" -- "$CHECK" --check
+has "no loop block" "D20: the failure names the missing block"
+run 1 "D20: --loop fails the same way" -- "$CHECK" --loop autonomous_merge
+has "no loop block" "D20: --loop names the missing block"
 
 echo
 echo "execution_test.sh: all scenarios passed"

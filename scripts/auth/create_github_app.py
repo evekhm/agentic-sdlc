@@ -29,8 +29,11 @@ This calls the one-time conversion endpoint, then:
   - writes a redacted record (id/slug/client_id only, no secrets) next to it
   - prints the app_id and client_id to paste into personas/<persona>.yaml
 
-Then run discover_installations.py <persona> after installing the App
-on the repo, same as the Athena flow.
+For a persona entry, run discover_installations.py <persona> after
+installing the App on the repo, same as the Athena flow. A system entry
+(`kind: system` in the manifest, such as themis) has no persona file and
+no installation_id to discover: install it, then let
+create_all_apps.py provision its Environment and secrets.
 """
 
 import argparse
@@ -111,7 +114,11 @@ def exchange_code(code: str) -> dict:
         sys.exit(f"GitHub rejected the code exchange ({error.code}): {error.read().decode()}")
 
 
-def save_credentials(persona: str, result: dict) -> None:
+def save_credentials(persona: str, result: dict, kind: str = "persona") -> None:
+    """Write the key and the redacted record, then print what to do next.
+    A persona's next step is its personas/<name>.yaml block; a system
+    actor has no persona file, so its next step is install and provision.
+    """
     LOCAL_KEY_DIR.mkdir(mode=0o700, exist_ok=True)
     slug = result["slug"]
     today = date.today().isoformat()
@@ -127,6 +134,17 @@ def save_credentials(persona: str, result: dict) -> None:
     print(f"private key saved: {key_path}")
     print(f"app_id: {result['id']}")
     print(f"client_id: {result['client_id']}")
+    if kind == "system":
+        print(
+            f"\nNext: install the App on the repo at "
+            f"https://github.com/apps/{slug}/installations/new, then let "
+            "create_all_apps.py provision its Environment, its main-only "
+            "deployment-branch policy and its two secrets. There is no "
+            "personas/ file and no installation_id to discover: "
+            "actions/create-github-app-token resolves the installation at "
+            "mint time."
+        )
+        return
     print(
         f"\nNext: fill these into personas/{persona}.yaml's authority block "
         f"(app_id, client_id, token: {persona.upper()}_APP_PRIVATE_KEY), "

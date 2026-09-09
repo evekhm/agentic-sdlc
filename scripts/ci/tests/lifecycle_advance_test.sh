@@ -46,11 +46,29 @@ export GITHUB_REPO="$TESTREPO"
 # real binary structurally — not merely because the stub file does not
 # exist yet on the next line (#73 Argus R1-6).
 REAL_GIT="$(command -v git)"
+REAL_PYTHON3="$(command -v python3)"
 export PATH="$WORK/bin:$PATH"
+
+# #64 D13/D16: a `python3` stub answers the advancer's two execution.py
+# reads from fixtures when a scenario arms them — `--loop <key>` from
+# $FIXTURES/loop-<key>, `--binding <persona>` from $FIXTURES/binding-
+# <persona> — and passes everything else to the real interpreter, so an
+# unarmed scenario reads the repository's own config/execution.yaml.
+cat > "$WORK/bin/python3" <<PYSTUB
+#!/usr/bin/env bash
+if [ "\${2:-}" = "--loop" ] && [ -f "\$FIXTURES/loop-\${3:-}" ]; then cat "\$FIXTURES/loop-\$3"; exit 0; fi
+if [ "\${2:-}" = "--binding" ] && [ -f "\$FIXTURES/binding-\${3:-}" ]; then cat "\$FIXTURES/binding-\$3"; exit 0; fi
+exec "$REAL_PYTHON3" "\$@"
+PYSTUB
+chmod +x "$WORK/bin/python3"
 
 pass() { echo "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 banner() { printf '\n--- %s\n' "$*"; }
+
+# #64 D23/D30: the merge actor's login, the one trusted ledger writer.
+# The gh stub answers the advancer's viewer read with it.
+export MERGER='evekhm-themis-app[bot]'
 
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -81,6 +99,17 @@ if [ "${1:-}" = "issue" ] && [ "${2:-}" = "view" ]; then
   exit 0
 fi
 if [ "${1:-}" = "api" ]; then
+  if [ "${2:-}" = "graphql" ] && [[ "$*" == *"viewer { login }"* ]]; then
+    # #64 D30: the one GraphQL read the advancer makes — who holds
+    # MERGE_ACTOR_TOKEN. An App installation token answers its
+    # `<slug>[bot]` login (verified live 2026-09-09; GET /user is 403 for
+    # it). $FIXTURES/viewer-unreadable arms a failed read and
+    # $FIXTURES/viewer-login overrides the answer (S36n, S36o).
+    [ -f "$FIXTURES/viewer-unreadable" ] && exit 1
+    login="$MERGER"; [ -f "$FIXTURES/viewer-login" ] && login="$(cat "$FIXTURES/viewer-login")"
+    jq -nc --arg l "$login" '{data: {viewer: {login: $l}}}'
+    exit 0
+  fi
   for a in "$@"; do
     case "$a" in
       -X|-f|-F|--method|--input) printf '%s\n' "gh $*" >> "$WRITES"; exit 1 ;;
@@ -122,6 +151,17 @@ if [ "${1:-}" = "api" ]; then
       fi
       echo "no files fixture for pull request $n" >&2
       exit 1;;
+    */issues/*/comments*)
+      # #64 D13: the issue thread the loop ledger lives in. No fixture
+      # means an empty thread, which is a readable, absent ledger.
+      n="${path#*/issues/}"
+      n="${n%%/*}"
+      if [ -f "$FIXTURES/comments-$n.json" ]; then
+        cat "$FIXTURES/comments-$n.json"
+      else
+        echo '[]'
+      fi
+      exit 0;;
     repos/*)
       # The bare default-branch read: `gh api repos/<owner>/<repo>`, two
       # args and no `--paginate` (AT-3). This arm is last and least
@@ -344,7 +384,7 @@ row() { jq -r --arg a "$1" ".stages[] | select(.artifact == \$a) | .$2" \
 lrow() { jq -r --arg l "$1" ".stages[] | select(.label == \$l) | .$2" \
            "$SANDBOX/personas/lifecycle.json"; }
 
-reset_fixtures() { rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable; : > "$INVOKES"; }
+reset_fixtures() { rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable "$FIXTURES"/loop-* "$FIXTURES"/binding-* "$FIXTURES"/viewer-login; : > "$INVOKES"; }
 issue_fixture() { # <number> <state> [label ...]
   local n="$1" state="$2" labels='[]'
   shift 2
@@ -1006,6 +1046,7 @@ SPEC_SECTIONS_BASELINE="$(sort <<'BASELINE'
 ### ops.dispatch
 ### ops.identity
 ### execution.placement
+### loop.autonomous
 BASELINE
 )"
 [ -n "$SPEC_SECTIONS_BASELINE" ] || fail "S29: the section-set baseline in this test is empty"
@@ -1198,6 +1239,209 @@ has "range walk" "S35: the failure names the range walk"
 hasnt "--add-label" "S35: nothing is written"
 hasnt "DRY-RUN gh issue comment" "S35: no comment is posted"
 not_invoked 'issue view' "S35: no issue is read — the range walk fails before any candidate is discovered"
+
+reset_fixtures
+
+# --- #64: the loop ledger guards the label write (D13, D14, D16-D18, D23) ---
+# D23 narrows the trusted-writer set to the merge actor's own login
+# alone — github-actions[bot] no longer counts, so every ledger comment
+# below that must be TRUSTED is authored by MERGER instead. ACTIONS_BOT
+# stays defined for the one scenario (S36c2) that pins the narrowing
+# itself: a login this ladder used to trust is now exactly as untrusted
+# as any other forged login. MERGER itself is exported above the gh
+# stub, which answers the D30 viewer read with it.
+ACTIONS_BOT='github-actions[bot]'
+ledger_comment() { # <login> <id> <issue> [row ...] — one trusted-or-not container comment
+  local login="$1" id="$2" n="$3" r body
+  shift 3
+  body="<!-- loop-ledger:$n -->"$'\n'
+  for r in "$@"; do body+="- row <!-- loop-ledger-row: $r -->"$'\n'; done
+  body+="<!-- loop-ledger-end -->"
+  jq -nc --arg l "$login" --argjson id "$id" --arg b "$body" \
+    '{id: $id, user: {login: $l, type: "Bot"}, body: $b, created_at: "2026-01-01T00:00:00Z"}'
+}
+comments_fixture() { printf '%s\n' "${@:2}" | jq -sc '.' > "$FIXTURES/comments-$1.json"; }
+INTENT_TO="$(row intent.md advances_to)"
+
+banner "S36a · #64 D14 · a transition into a rung the ledger already records: no label, no comment, one refusal row, red"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+comments_fixture 999 "$(ledger_comment "$MERGER" 900 999 \
+  "dispatch rung:3 head-oid:$C3 pr:none at:2026-01-01T00:00:00Z event:e1 cost:5.0")"
+run_fail "$C0" "$C1" "S36a: intent.md landing after rung 3 was entered ends red"
+has "refusal reason-code: non-monotonic for #999" "S36a: the reason code names the issue for the workflow's escalate step"
+has "loop-ledger-row: refusal:non-monotonic rung:2 head-oid:$C1 pr:none" "S36a: one refusal row keyed (reason, rung, head-oid)"
+has "(comment 900)" "S36a: appended to the existing container by comment id (D13)"
+hasnt "--add-label" "S36a: no status label is written"
+hasnt "gh issue comment 999" "S36a: no advance comment is posted on this path (D14)"
+hasnt "escalate.sh" "S36a: the advancer calls no escalation itself (D19)"
+
+banner "S36b · #64 D14 · the same (rung, head-oid) already on the ledger is a no-op"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+comments_fixture 999 "$(ledger_comment "$MERGER" 901 999 \
+  "dispatch rung:2 head-oid:$C1 pr:none at:2026-01-01T00:00:00Z event:e1 cost:5.0")"
+run "$C0" "$C1" "S36b: a re-run of a recorded transition exits 0"
+has "already recorded at rung 2" "S36b: the idempotency key is recognised"
+hasnt "--add-label" "S36b: no label is written"
+hasnt "loop-ledger-row: refusal" "S36b: nothing is refused"
+
+banner "S36c · #64 D23 · a ledger posted by an untrusted login is prose"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+comments_fixture 999 "$(ledger_comment mallory 902 999 \
+  "dispatch rung:3 head-oid:$C3 pr:none at:2026-01-01T00:00:00Z event:e1 cost:5.0")"
+run "$C0" "$C1" "S36c: a forged ledger does not stop the ladder"
+has "--add-label $INTENT_TO" "S36c: the label is written past the forged rows"
+hasnt "non-monotonic" "S36c: no refusal is raised on prose"
+
+banner "S36c2 · #64 D23 · github-actions[bot] — trusted under the old D22 set — no longer counts"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+comments_fixture 999 "$(ledger_comment "$ACTIONS_BOT" 902 999 \
+  "dispatch rung:3 head-oid:$C3 pr:none at:2026-01-01T00:00:00Z event:e1 cost:5.0")"
+run "$C0" "$C1" "S36c2: a github-actions[bot] ledger does not stop the ladder either (D23)"
+has "--add-label $INTENT_TO" "S36c2: the label is written past the narrowed-out rows"
+hasnt "non-monotonic" "S36c2: no refusal is raised — the ledger this narrowed writer left is prose, exactly like mallory's"
+
+banner "S36n · #64 D30 · an unresolvable merge-actor login makes every ledger unreadable: red, no label"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+: > "$FIXTURES/viewer-unreadable"
+run_fail "$C0" "$C1" "S36n: a failed viewer read ends red"
+has "cannot resolve the merge actor's login from MERGE_ACTOR_TOKEN" "S36n: the failure names the D30 read"
+has "unreadable is not absent" "S36n: and D13's rule"
+hasnt "--add-label" "S36n: no label is written"
+not_invoked 'gh api user' "S36n: GET /user is never called (403 for an installation token)"
+rm -f "$FIXTURES/viewer-unreadable"
+
+banner "S36o · #64 D23 D30 · MERGE_ACTOR_TOKEN resolving to github-actions[bot] is no trusted writer: red, no label"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+printf '%s\n' "$ACTIONS_BOT" > "$FIXTURES/viewer-login"
+run_fail "$C0" "$C1" "S36o: the default token's identity ends red"
+has "cannot resolve the merge actor's login from MERGE_ACTOR_TOKEN" "S36o: refused as no trusted writer"
+hasnt "--add-label" "S36o: no label is written"
+reset_fixtures
+
+banner "S36d · #64 D13 · a dispatch bound already reached refuses the label write in green with one refusal row"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+rows=()
+for i in $(seq 1 12); do rows+=("dispatch rung:1 head-oid:$C0 pr:none at:2026-01-01T00:00:00Z event:e$i cost:1.0"); done
+comments_fixture 999 "$(ledger_comment "$MERGER" 903 999 "${rows[@]}")"
+run "$C0" "$C1" "S36d: a tripped bound is a green exit"
+has "refusal reason-code: budget for #999" "S36d: the reason code is reported for the workflow's escalate step"
+has "loop-ledger-row: refusal:budget rung:2 head-oid:$C1" "S36d: one refusal:budget row"
+hasnt "--add-label" "S36d: no label is written"
+hasnt "gh issue comment 999" "S36d: no comment is posted"
+
+banner "S36e · #64 D13 · a cost bound already reached refuses the same way"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+comments_fixture 999 "$(ledger_comment "$MERGER" 905 999 \
+  "dispatch rung:1 head-oid:$C0 pr:none at:2026-01-01T00:00:00Z event:e1 cost:50.00")"
+run "$C0" "$C1" "S36e: exits 0"
+has "max_cost_usd_per_issue reached" "S36e: the cost bound is the one named"
+has "loop-ledger-row: refusal:budget rung:2" "S36e: one refusal:budget row"
+hasnt "--add-label" "S36e: no label is written"
+
+banner "S36f · #64 D13 · a row that will not parse makes the ledger unreadable: red, nothing written"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+comments_fixture 999 "$(ledger_comment "$MERGER" 904 999 "dispatch: 1")"
+run_fail "$C0" "$C1" "S36f: an unparseable row ends red"
+has "cannot parse" "S36f: the failure names the parse"
+hasnt "--add-label" "S36f: no label is written"
+
+banner "S36g · #64 D16 D18 · with the flag true the next rung is recorded as a dispatch row and handed to the placement adapter"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'ladder vm-local 5.0\n' > "$FIXTURES/binding-athena"
+run "$C0" "$C1" "S36g: exits 0"
+has "--add-label $INTENT_TO" "S36g: the label is written first"
+has "loop-ledger-row: dispatch rung:2 head-oid:$C1 pr:none" "S36g: the dispatch row carries the rung and the merged head"
+has "cost:5.0" "S36g: and the binding's cost ceiling as the recorded cost"
+has "DRY-RUN scripts/placement/vm-local/run.sh 999" "S36g: the adapter is invoked with the issue number and nothing else (D16)"
+
+banner "S36h · #64 D16 · a binding whose trigger is not the ladder is never dispatched"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'gh-actions gh-actions 5.0\n' > "$FIXTURES/binding-athena"
+run "$C0" "$C1" "S36h: exits 0"
+has "--add-label $INTENT_TO" "S36h: the label is written"
+hasnt "run.sh" "S36h: no adapter is invoked"
+hasnt "loop-ledger-row: dispatch" "S36h: no dispatch row is written"
+
+banner "S36i · #64 D18 · with the flag false the label lands and nothing is dispatched"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+printf 'false\n' > "$FIXTURES/loop-autonomous_merge"
+run "$C0" "$C1" "S36i: exits 0"
+has "--add-label $INTENT_TO" "S36i: the label is written"
+hasnt "run.sh" "S36i: no adapter is invoked"
+hasnt "loop-ledger-row: dispatch" "S36i: no dispatch row is written"
+
+banner "S36j · #64 D15 · hold gained between the label and the dispatch stops the dispatch"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+printf 'ladder vm-local 5.0\n' > "$FIXTURES/binding-athena"
+# The stub answers every `issue view` from the same fixture, so hold on
+# the fixture is what the re-read sees; the first read then halts the
+# issue outright, which is the stricter of the two outcomes.
+issue_fixture 999 OPEN status:planning hold
+run "$C0" "$C1" "S36j: exits 0"
+hasnt "run.sh" "S36j: no adapter is invoked under hold"
+hasnt "loop-ledger-row: dispatch" "S36j: no dispatch row is written under hold"
+
+banner "S36k · #64 D17 · the review rung is terminal: one terminal row, no dispatch"
+reset_fixtures
+pulls_fixture "$CM" 4242 odyssey/999-test "Implements the plan. See #999."
+issue_fixture 999 OPEN status:implementing
+printf 'true\n' > "$FIXTURES/loop-autonomous_merge"
+run "$C4" "$CM" "S36k: exits 0"
+has "--add-label $(lrow status:implementing advances_to)" "S36k: the review label is written"
+has "loop-ledger-row: terminal rung:5 head-oid:$CM pr:4242" "S36k: the terminal row names the rung, the merged head and the pull request"
+hasnt "run.sh" "S36k: nothing is dispatched at the last rung"
+
+banner "S36l · #64 D13 · an unreadable thread is not an absent ledger"
+reset_fixtures
+issue_fixture 999 OPEN status:planning
+printf 'not json' > "$FIXTURES/comments-999.json"
+run_fail "$C0" "$C1" "S36l: exits red"
+has "unreadable is not absent" "S36l: the failure says why"
+hasnt "--add-label" "S36l: no label is written"
+
+banner "S36m · #64 D25 D30 · MERGE_ACTOR_TOKEN reaches the two ledger writes and the viewer read, no other gh call"
+# The whole harness runs under DRY_RUN=1 (see "nothing was written" below),
+# so ledger_append's two real `gh api -X PATCH/POST` calls are structurally
+# unreachable here — there is no live write to capture a token from. This
+# checks the same invariant statically, the way S3 checks kw_count is gone:
+# by name, not by behavior. D25's r3 note admits one further call: the
+# `viewer { login }` read that names the trusted writer (D30), which must
+# run on the merge actor's token because on github.token it would name
+# the one login D23 excludes.
+writer_calls="$(grep -n 'GH_TOKEN="\$MERGE_ACTOR_TOKEN"' "$ADVANCER" || true)"
+[ "$(wc -l <<<"$writer_calls" | tr -d ' ')" = 3 ] \
+  || { printf '%s\n' "$writer_calls" >&2; fail "S36m: expected exactly 3 gh calls carrying MERGE_ACTOR_TOKEN (the PATCH, the POST and the viewer read), found $(wc -l <<<"$writer_calls" | tr -d ' ')"; }
+grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api -X PATCH' "$ADVANCER" \
+  || fail "S36m: the ledger-row PATCH does not carry MERGE_ACTOR_TOKEN"
+grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api -X POST' "$ADVANCER" \
+  || fail "S36m: the new-ledger POST does not carry MERGE_ACTOR_TOKEN"
+grep -q 'GH_TOKEN="\$MERGE_ACTOR_TOKEN" gh api graphql -f query=.query { viewer { login } }' "$ADVANCER" \
+  || fail "S36m: the D30 viewer read does not carry MERGE_ACTOR_TOKEN"
+! grep -q 'gh api user' "$ADVANCER" || fail "S36m: the advancer calls 'gh api user', which is 403 for an App installation token (D30)"
+! grep -q 'MERGE_ACTOR_LOGIN' "$ADVANCER" || fail "S36m: the advancer still reads MERGE_ACTOR_LOGIN — a guessed identity (S3, R4-4)"
+pass "S36m: exactly the PATCH, the POST and the viewer read carry MERGE_ACTOR_TOKEN; no GET /user, no MERGE_ACTOR_LOGIN"
+other_gh_calls="$(grep -n '^\s*gh \|[^"]gh api\|[^"]gh issue' "$ADVANCER" | grep -v 'GH_TOKEN="\$MERGE_ACTOR_TOKEN"' || true)"
+if grep -q 'GH_TOKEN=' <<<"$other_gh_calls"; then
+  printf '%s\n' "$other_gh_calls" >&2
+  fail "S36m: a gh call outside ledger_append overrides GH_TOKEN locally — only github.token should reach it (D25)"
+fi
+pass "S36m: every gh call outside ledger_append keeps the ambient GH_TOKEN (github.token), never MERGE_ACTOR_TOKEN"
 
 reset_fixtures
 

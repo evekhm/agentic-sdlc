@@ -1,20 +1,38 @@
 # GitHub App identities (#7)
 
-Each of the six personas (athena, daedalus, cassandra, odyssey, argus,
-atlas) is its own GitHub App — no shared App, no PAT-backed bot users.
-`personas/<name>.yaml`'s `authority` block carries the public identifiers
-(`identity`, `app_id`, `client_id`, `installation_id`); the private key
-never lives in the repo.
+This repo registers seven GitHub Apps: one per persona (athena,
+daedalus, cassandra, odyssey, argus, atlas), plus one system actor
+(themis). There is no shared App and there are no PAT-backed bot users.
+For a persona, `personas/<name>.yaml`'s `authority` block carries the
+public identifiers (`identity`, `app_id`, `client_id`,
+`installation_id`). The system actor has no persona file; its
+identifiers live in the GitHub Environment named in `app_manifests.yaml`.
+The private key never lives in the repo.
+
+`app_manifests.yaml` tells the two apart. An entry with no `kind` is a
+persona. An entry with `kind: system` is a system actor.
 
 ## One-time: registering the Apps
 
 ```
 python3 scripts/auth/create_all_apps.py
+python3 scripts/auth/create_all_apps.py --check
+python3 scripts/auth/create_all_apps.py --only themis
 ```
 
-Loops over every persona in `app_manifests.yaml`, skipping any that
-already has an `app_id` (never re-registers a duplicate App of the same
-name). Per persona, it does everything GitHub's Manifest flow allows to
+The first command walks every entry in `app_manifests.yaml` in file
+order. It skips any persona that already has an `app_id`, so it never
+registers a duplicate App of the same name.
+
+`--check` is read-only. It prints one status row per entry: whether the
+App exists on GitHub, whether its private key is on this machine, and
+then, for a persona, whether `installation_id` is set, or, for a system
+actor, whether its Environment, its branch policy and its two secrets
+are in place. It exits 0 only when every row is complete.
+
+`--only <name>` restricts the run, or the check, to a single entry.
+
+Per persona, the script does everything GitHub's Manifest flow allows to
 be scripted, and stops only at the two clicks GitHub itself requires:
 
 1. Writes a pre-filled `/tmp/github_app_manifest_<persona>.html` (name,
@@ -34,19 +52,60 @@ be scripted, and stops only at the two clicks GitHub itself requires:
 To do one persona at a time instead, use `create_github_app.py` and
 `discover_installations.py` directly — see their docstrings.
 
+## System actor: Themis
+
+Themis is the merge actor of the autonomous loop (#64). It is the one
+trusted writer of the loop's state: the loop ledger, the escalation
+marker, the consensus ledger. It is also the identity that merges a pull
+request once consensus is reached. Themis is a system actor. It has no
+prompt, no harness and no goals, and it is absent from INTENT.md's cast.
+The six personas are unchanged.
+
+Its private key lives in a GitHub Environment named `themis`, whose
+deployment-branch policy admits `main` and nothing else. The reason is
+narrow. A same-repo pull request runs the workflow file from its own
+branch, and that run can read repository secrets. An environment secret
+restricted to `main` is the one GitHub mechanism such a run cannot
+reach. This is spec decision D23 and precondition P1.
+
+The Actions workflows mint Themis tokens from that Environment with
+[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token).
+No repository secret and no organization secret may carry the names
+`THEMIS_APP_ID` or `THEMIS_APP_PRIVATE_KEY`. A secret at either of those
+scopes would be visible to a pull-request run and would defeat P1.
+
+Operator steps:
+
+1. `python3 scripts/auth/create_all_apps.py --only themis`. The full run
+   also reaches Themis, after the six personas.
+2. Click **Create GitHub App** on the pre-filled form. The script grabs
+   the code from the redirect, or you paste it in.
+3. Install the App on this repository only.
+4. The script provisions the Environment `themis`, its `main` branch
+   policy, and the two secrets `THEMIS_APP_ID` and
+   `THEMIS_APP_PRIVATE_KEY`. This needs repository admin, so run it as
+   yourself with `gh` authenticated as the repo owner. If a step is
+   refused, the script prints the exact `gh` command for you to run.
+5. `python3 scripts/auth/create_all_apps.py --check` shows every row
+   complete.
+
+Provisioning is idempotent. Re-running it confirms what is already there
+and creates only what is missing.
+
 ## Naming: why `-app`, not `-bot`
 
-Every App name is `<owner>-<persona>-app` (e.g. `evekhm-athena-app`).
-App slugs and GitHub usernames share one namespace, so an App can't take
-a name an existing user account already holds. `-app` sidesteps any such
-collision and is applied uniformly to all six personas.
+Every App name is `<owner>-<suffix>-app` (e.g. `evekhm-athena-app`,
+`evekhm-themis-app`). App slugs and GitHub usernames share one
+namespace, so an App can't take a name an existing user account already
+holds. `-app` sidesteps any such collision and is applied uniformly to
+all seven Apps.
 
 ## Forking this repo
 
 Nothing here is hardcoded to `evekhm`. `_github_app.py:get_repo_info()`
 derives `(owner, repo)` from `git remote get-url origin`, so running
 `create_all_apps.py` in a fork registers Apps named
-`<fork-owner>-<persona>-app` and installs them on the fork — no script
+`<fork-owner>-<suffix>-app` and installs them on the fork — no script
 edits needed.
 
 ## Runtime: minting a token
@@ -70,11 +129,15 @@ repo's `ARGUS_SETUP.md` appendix.
 
 ## Files
 
-- `app_manifests.yaml` — reviewable source data (name suffix,
-  description, permissions) per persona. Editing an entry only affects
-  Apps created *after* the edit.
+- `app_manifests.yaml` — reviewable source data per entry: name suffix,
+  description, permissions, and, for a system actor, its `kind`,
+  `environment` and `secrets`. Editing an entry only affects Apps
+  created *after* the edit.
 - `_github_app.py` — shared JWT/auth helpers, not a CLI.
 - `create_github_app.py` — register one App via the Manifest flow.
-- `create_all_apps.py` — the six-persona wrapper described above.
-- `discover_installations.py` — find an App's `installation_id`.
+- `create_all_apps.py` — the wrapper described above. It registers all
+  seven Apps, provisions the system actor's Environment and secrets, and
+  carries `--check` and `--only`.
+- `discover_installations.py` — find a persona App's `installation_id`.
+  System actors skip this step.
 - `mint_app_token.py` — mint a working installation token.
