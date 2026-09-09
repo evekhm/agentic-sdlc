@@ -676,3 +676,30 @@ PR #300 17:10 UTC, spec PR #301 `697665b` 17:33 UTC). Open: #295,
 writing the intent, plus #293, #296, #147 and #148. PR #280 merged
 17:42 UTC as `696f516` and daedalus holds the #265 plan rung from
 17:43 UTC, carrying Argus's two open `high` rows as required tasks.
+
+Status snapshot (2026-09-09, ~19:20 UTC, main at `e0f8666`): the first
+autonomous merge fired at 19:03:35Z. PR #309 (the #291 spec, head
+`68bed00`) merged by the merge actor `evekhm-themis-app` as `e0f8666`,
+deciding run 34392659988 (merge-gate.yml, `issue_comment` event raised
+by Atlas's round-2 review), all eleven conjuncts true, no human write;
+the lifecycle advanced #291 to `status:build`. Preconditions merged
+the same day: flip PR #297 (`loop.autonomous_merge: true`), recorder
+PR #292 (#267), chain and VM-poller PR #294 (#251), and #298's own fix
+PR #310 (`744758a`), which corrected the merge gate's skipped
+`pull_request`-event jobs that had made conjunct 2 false on every
+head; heads pushed before `744758a` still carry skipped check runs
+and need one new commit to re-run both reviews. Two defects observed
+live and filed: #308 (a repository-wide `merge-gate` concurrency group
+cancels a pending gate or recorder run across pull requests; a later
+comment re-triggers it) and #312 (a runner review that hits agy's
+stream interrupt reports FAILURE although the review posted; interim
+remedy `gh run rerun <id> --failed`); both rungs launched 19:20 UTC.
+The VM poller (`scripts/placement/vm-local/poll.sh`) stays off until
+#295's implement merges (intake gated on the flag, the fleet cap, the
+lock path); until then rungs are hand-launched with `HEADLESS=1
+scripts/ops/work.sh <n>`. A limit of the two-reviewer gate: on PR #305
+both runner reviews passed and the block came from the verifier's
+citation-at-base-SHA check, which neither runner performs. In flight
+at the stamp: #311 (#288 spec) at `8b4f17f` awaiting the gate, #307
+(#265 plan) fix round pushed `feea773`, and the #295 design rung
+running.

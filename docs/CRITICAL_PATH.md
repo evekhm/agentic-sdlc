@@ -37,6 +37,34 @@ rung (claim 17:43 UTC, issue at status:build); Argus's two open `high`
 rows R3-1 and R3-2 carried into that rung as required tasks. Live
 `gh issue list` state always beats this file.
 
+Status line: 2026-09-09, revision eight (~19:20 UTC, main at
+`e0f8666`): the first autonomous merge fired at 19:03:35Z. PR #309
+(the #291 spec, head `68bed00`) merged by the merge actor
+`evekhm-themis-app` as `e0f8666`, deciding run 34392659988
+(merge-gate.yml, `issue_comment` event raised by Atlas's round-2
+review), all eleven conjuncts true, no human write; the lifecycle
+advanced #291 to `status:build`. Preconditions merged the same day:
+flip PR #297 (`loop.autonomous_merge: true`), recorder PR #292 (#267),
+chain and VM-poller PR #294 (#251), and #298's own fix PR #310
+(`744758a`), which corrected the merge gate's skipped
+`pull_request`-event jobs that had made conjunct 2 false on every
+head; heads pushed before `744758a` still carry skipped check runs
+and need one new commit to re-run both reviews. Two defects observed
+live and filed: #308 (a repository-wide `merge-gate` concurrency group
+cancels a pending gate or recorder run across pull requests; a later
+comment re-triggers it) and #312 (a runner review that hits agy's
+stream interrupt reports FAILURE although the review posted; interim
+remedy `gh run rerun <id> --failed`); both rungs launched 19:20 UTC.
+The VM poller (`scripts/placement/vm-local/poll.sh`) stays off until
+#295's implement merges (intake gated on the flag, the fleet cap, the
+lock path); until then rungs are hand-launched with `HEADLESS=1
+scripts/ops/work.sh <n>`. A limit of the two-reviewer gate: on PR #305
+both runner reviews passed and the block came from the verifier's
+citation-at-base-SHA check, which neither runner performs. In flight
+at the stamp: #311 (#288 spec) at `8b4f17f` awaiting the gate, #307
+(#265 plan) fix round pushed `feea773`, and the #295 design rung
+running.
+
 ## Fast path to the demo (operator directive, 2026-09-08 06:40 UTC)
 
 The operator's call: cut corners, skip review rounds, get the loop
@@ -122,6 +150,18 @@ order:
    the gaps it left were filed as spec amendments #295 (poller intake
    gated on `loop.autonomous_merge`) and #288 (D16 dispatch
    consumption), with post-merge findings on #296.
+   **Correction 2026-09-09 (~19:20 UTC):** the first autonomous merge
+   fired on PR #309 (`e0f8666`) at 19:03:35Z under this chain, with
+   #298's conjunct-2 defect fixed by PR #310 (`744758a`). The VM
+   poller (`scripts/placement/vm-local/poll.sh`) stays off until
+   #295's implement merges (intake gated on the flag, the fleet cap,
+   the lock path); until then rungs are hand-launched with
+   `HEADLESS=1 scripts/ops/work.sh <n>`. Two defects observed live and
+   filed: #308 (a repository-wide `merge-gate` concurrency group
+   cancels a pending gate or recorder run across pull requests; a
+   later comment re-triggers it) and #312 (a runner review that hits
+   agy's stream interrupt reports FAILURE although the review posted;
+   interim remedy `gh run rerun <id> --failed`).
 5. Demo run: the operator launches one rung by hand with the one-line
    prompt ("work issue #98"), and from there the loop carries it: PR,
    runner reviews, #64 merge, advancer flips the label, the runner
@@ -243,7 +283,7 @@ whichever merges second rebases.
 |---|-------|----------------|-------|
 | 6 | #147 | `mode:autonomous` and per-issue override labels honored by work.sh, unattended.yml and the driver. The switch itself. | open, intent:new |
 | 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | PR #232 open (evekhm-odyssey-bot, odyssey/108-ci-spend-ceiling), head 77501a8 after three follow-ups (ceiling header, the docs/SPEC.md twin, the measured-run count). Verifier escalated 06:18 (comment 5580232140); advisor ruling: merges after the B1 clause fix, a rebase and real reviews, and the 8.00 ceiling is the operator's number (not objected to). Three overrun data live on it: 2.75 (argus on PR #233, run 34186361378), 2.28 (argus on PR #221) and 2.33 (argus on PR #235, run 34194196957) against the declared 2.0; across six measured argus runs the ceiling has never bound. Argus refused the PR at 06:26 because #108 is intent:new with no review stage to derive (the #82 class), so under the #221 precedent the verifier's own review under the argus seat (#204 D15) is the review of record. **Correction 2026-09-09:** PR #232 merged 2026-09-08 06:42 UTC as `3d7825d`; #108 itself is still open at intent:new |
-| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at `status:implementing`; plan PR #235 merged. Implementation PR #257 open, escalated to a human at round 3 (keystone paragraph above). #151 closed; PR #228 merged 05:45 UTC 2026-09-08. **Correction 2026-09-09:** PR #257 merged 05:35 UTC as `d61875c` and #64 is at status:in-review; the flip PR #297 (`6c7d71c`, 16:42 UTC) set `loop.autonomous_merge: true`, and #298 holds the two conditions still blocking a first autonomous merge |
+| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at `status:implementing`; plan PR #235 merged. Implementation PR #257 open, escalated to a human at round 3 (keystone paragraph above). #151 closed; PR #228 merged 05:45 UTC 2026-09-08. **Correction 2026-09-09:** PR #257 merged 05:35 UTC as `d61875c` and #64 is at status:in-review; the flip PR #297 (`6c7d71c`, 16:42 UTC) set `loop.autonomous_merge: true`, and #298 holds the two conditions still blocking a first autonomous merge | **Correction 2026-09-09 (~19:20 UTC):** the first autonomous merge fired: PR #309 (#291 spec, head `68bed00`) merged by the merge actor `evekhm-themis-app` as `e0f8666` at 19:03:35Z, deciding run 34392659988 (merge-gate.yml, `issue_comment` event from Atlas's round-2 review), all eleven conjuncts true, no human write; #291 moved to `status:build`. #298's blocking condition (skipped `pull_request`-event jobs making conjunct 2 false) is fixed by PR #310 (`744758a`); heads pushed before that commit still need one new commit to re-run both reviews
 | 9 | #148 | A deterministic closer after review. Removes the last by-hand step. Today's by-hand closes (#207 at status:in-review with its PR merged) are exactly what it removes. | open, intent:new |
 
 ## Gate 3: issues dispatch-ready by construction
