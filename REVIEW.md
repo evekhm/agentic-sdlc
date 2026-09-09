@@ -124,7 +124,8 @@ Enforcement (recorder, not prompt — ports with #8/#9):
   recorded as `normal`, and the demotion is noted in the ledger row —
   loudly, never silently.
 - A human can retier any finding with one comment verb
-  (`@argus retier R2-1 normal`); the recorder records the override
+  (`@argus retier <id> <severity>` or `@atlas retier <id> <severity>`,
+  e.g. `@argus retier R2-1 normal`); the recorder records the override
   and recomputes labels. Human overrides are not debatable by either
   reviewer.
 
@@ -221,9 +222,31 @@ that caps the bill.
 - Pending age belongs to the row, not to the last review marker: a
   marker's age resets on every push, so a PR receiving a commit every
   23 hours would never trip a 24-hour stale-peer alert.
-- The head a review refers to is carried by a machine marker
-  (`Reviewed-head: <full-oid>`) that the deterministic passes match
-  on. The human-facing signature never replaces that marker.
+- The head a review refers to and machine-readable review findings are
+  carried in a structured review verdict block emitted alongside the
+  human-facing markdown review tables:
+
+  ```markdown
+  <!-- review-verdict:<reviewer>:<verdict> -->
+  <!-- reviewed-head:<full-oid> -->
+  <!-- run-id:<n> -->
+  <!-- round:<n> -->
+  <!-- finding:<id>:<severity>:<status>:<peer> -->
+  <!-- failure-scenario:<id> -->
+  <!-- review-verdict-end -->
+  ```
+
+  Where:
+  - `<reviewer>` is `argus` or `atlas`.
+  - `<verdict>` is `clean` or `findings`. A clean review emits zero
+    `<!-- finding:... -->` lines between the round line and the
+    `<!-- review-verdict-end -->` trailer.
+  - `<full-oid>` is the full 40-hex commit SHA of the reviewed head.
+  - `<run-id>` is the integer Actions run ID from `.github/workflows/unattended.yml`.
+  - `<round>` is the integer review round counter (`1`, `2`, `3`, ...).
+  - Each finding line matches `^<!-- finding:([A-Za-z0-9@-]+):(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none) -->$`.
+  - Findings citing spec decisions use format `<id>@<Dn>` (e.g. `R1-1@D4`) or `<id>@none` when uncited.
+  - Each `high` finding must be immediately accompanied by its sibling marker `<!-- failure-scenario:<id> -->`.
 - Both reviewers are stateless between runs. Every conversational
   comment is therefore self-contained: the finding IDs, the head it
   refers to, and the evidence. The thread is the only memory.
@@ -299,7 +322,9 @@ IDs rather than to diff hunks:
   concerns (`Decision: D4`). A finding about behavior no Decision
   covers carries `Decision: none` — and that absence is itself worth
   reading, because unspecified behavior in an implementation PR is
-  usually a missed ambiguity.
+  usually a missed ambiguity. Findings cite decisions in machine
+  markers using format `<id>@<Dn>` (e.g. `R1-1@D4`) or `<id>@none`
+  when uncited.
 - Peer verdicts are recorded **per Decision ID**, not per diff hunk.
   When both reviewers file findings against the same Decision, they
   reconcile into one verdict on that Decision instead of two parallel
