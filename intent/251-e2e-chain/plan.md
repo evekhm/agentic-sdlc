@@ -4,7 +4,7 @@
 - Spec: `intent/251-e2e-chain/spec.md`
 - Author: daedalus
 - Base commit: `4f862c6b8cac5ea82f0792e908aec72fda85ad91`
-- Status: Drafted (Build Rung)
+- Status: Drafted (Build Rung, Round 2)
 
 ## Summary
 
@@ -20,13 +20,13 @@ The plan encompasses:
    `scripts/placement/vm-local/run.sh` to ensure placement calls supply
    `--as <persona>` and delegate cleanly under GitHub Actions.
 3. Claim release integration in `lifecycle_advance.sh` so ladder advances
-   and terminal transitions release the active claim.
+   and terminal transitions release the active claim under `GITHUB_TOKEN`.
 4. Fix-round dispatch support in `scripts/ops/work.sh` enabling authoring
    personas to address reviewer findings on pull requests under review.
 5. The continuous VM background poller `scripts/placement/vm-local/poll.sh`
    consuming loop ledger dispatch rows without model calls.
 6. Supervisor configurations for Antigravity sidecar and systemd user services.
-7. Documentation updates in `docs/SPEC.md`.
+7. Documentation updates and the seven-step enablement checklist in `docs/SPEC.md`.
 
 ## Corrections to Spec Citations
 
@@ -80,145 +80,241 @@ refusal (h) and allows the authoring persona to push fix commits.
 ## Traceability Matrix
 
 ### Decision Rows
-- D1 (Continuous VM poller loop): T1, T6
-- D2 (Fix-round dispatch on review-blocked PRs): T1, T5, T6
-- D3 (Claim before launch): T1, T6
-- D4 (Supervised execution): T1, T7
-- D5 (Harness-agnostic launcher): T1, T6
-- D6 (Failure containment and backoff): T1, T6
-- D7 (Single-session execution and worktree cleanup): T1, T3, T6
-- D8 (Scope boundary and bug fixes): T1, T2, T3, T4, T5, T8, T9
+
+The Decision definitions below are taken verbatim from `intent/251-e2e-chain/spec.md`:
+
+- **D1**: **Claim release on ladder advance.** Upon a ladder rung advance, `lifecycle_advance.sh` reads the latest `Claim:` comment on the issue thread.
+  - Tasks: T1, T3
+- **D2**: **Dispatch path, supervisor process tree, and placement target.** The three ladder personas (`athena`, `daedalus`, `odyssey`) target `vm-local` placement in `config/execution.yaml`.
+  - Tasks: T1, T2, T4, T5, T6, T7
+- **D3**: **Persona credential storage and security boundary.** On the operator VM, persona private keys reside in local key files under `~/.keys/` (binding point 1).
+  - Tasks: T1, T6
+- **D4**: **Missing credential handling at installation time.** No new reason code (such as `missing-key`) is added to escalation schemas.
+  - Tasks: T1, T6
+- **D5**: **First hop dispatch and queue accounting.** `scripts/placement/vm-local/poll.sh` is the single actor for dispatch execution.
+  - Tasks: T1, T6
+- **D6**: **Operator enablement checklist.** The enablement checklist lives in `docs/SPEC.md ## Deployment status`.
+  - Tasks: T1, T8
+- **D7**: **End-to-end validation.** Validation of the autonomous chain is conducted on a dedicated synthetic throwaway issue per #64 acceptance 20.
+  - Tasks: T1, T9
+- **D8**: **Scope boundary and Amendment r5 to #64 D16.** The implementation pull request may modify `scripts/ops/work.sh` (narrow interface change for PR author fix rounds under `status:in-review`), `scripts/ops/tests/work_test.sh`, `scripts/ci/lifecycle_advance.sh`, `scripts/ci/tests/lifecycle_advance_test.sh`, `scripts/placement/vm-local/poll.sh`, `scripts/placement/vm-local/poll.sidecar.json`, `scripts/placement/vm-local/poll.service`, `scripts/placement/vm-local/run.sh`, and `docs/SPEC.md` (deployment status checklist and the deployment table row that reads odyssey `manual` (line 841 at 60fa3cb)).
+  - Tasks: T1, T2, T3, T4, T5, T6, T7, T8, T9
 
 ### Acceptance Criteria
-- AT-1 (`poll.sh` executable, dry run): T1, T6; verified by `e2e_chain_test.sh`
-- AT-2 (Unconsumed dispatch row detection): T1, T6; verified by `e2e_chain_test.sh`
-- AT-3 (Consumed dispatch row skipped): T1, T6; verified by `e2e_chain_test.sh`
-- AT-4 (Mutex and hold safety): T1, T6; verified by `e2e_chain_test.sh`
-- AT-5 (Claim before launch): T1, T6; verified by `e2e_chain_test.sh`
-- AT-6 (Review round detection): T1, T6; verified by `e2e_chain_test.sh`
-- AT-7 (vm-local delegation under GITHUB_ACTIONS): T1, T4; verified by `e2e_chain_test.sh`
-- AT-8 (Harness pin compliance): T1, T6; verified by `e2e_chain_test.sh`
-- AT-9 (Sidecar config validation): T1, T7; verified by `e2e_chain_test.sh`
-- AT-10 (Systemd service unit validation): T1, T7; verified by `e2e_chain_test.sh`
-- AT-11 (Supervised execution): Operator precondition; verified by systemctl/sidecar status
-- AT-12 (Error containment): T1, T6; verified by `e2e_chain_test.sh`
-- AT-13 (work.sh fix-round acceptance): T1, T5; verified by `e2e_chain_test.sh`
-- AT-14 (Worktree branch format): T1, T6; verified by `e2e_chain_test.sh`
-- AT-15 (Primary checkout immutability): T1, T6; verified by `e2e_chain_test.sh`
-- AT-16 (Step 1 intent to spec via Athena): Operator precondition; verified by live issue transition
-- AT-17 (Claim release on session exit): T1, T3, T6; verified by `e2e_chain_test.sh`
-- AT-18 (Full ladder execution): Operator precondition; verified by live issue progression
-- AT-19 (`lifecycle_advance.sh` adapter invocation with `--as`): T1, T2; verified by `e2e_chain_test.sh`
-- AT-20 (`docs/SPEC.md:841` carries `ladder at vm-local`): T1, T8; verified by `e2e_chain_test.sh`
+
+The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec.md`:
+
+- **AT-1 (D1)**: In `bash scripts/ci/tests/lifecycle_advance_test.sh`, a ladder rung transition on an issue whose latest claim comment author login maps to the completing stage persona prints `released claim of <actor> on #<n> (rung <stage> merged)`, deletes `in-progress` under `GITHUB_TOKEN`, and invokes the placement adapter.
+  - Mapped to: T1, T3; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-2 (D1)**: In `bash scripts/ci/tests/lifecycle_advance_test.sh`, an issue carrying `in-progress` where the latest claim comment author login maps to a different persona prints `withholding dispatch: in-progress held by <holder>`, preserves `in-progress`, and withholds adapter dispatch.
+  - Mapped to: T1, T3; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-3 (D1)**: In `bash scripts/ci/tests/lifecycle_advance_test.sh`, an issue carrying `in-progress` where the latest claim comment author is foreign (outside persona mapping) or missing prints `withholding dispatch: in-progress held by foreign login` (or unparseable claim), preserves `in-progress`, and withholds adapter dispatch.
+  - Mapped to: T1, T3; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-4 (D1)**: In `bash scripts/ci/tests/lifecycle_advance_test.sh`, when `loop.autonomous_merge: false` (or key absent), ladder advance prints the substrings `autonomous_merge is false` and `no dispatch for #<n> (D18)` (joined at scripts/ci/lifecycle_advance.sh:1032 by a character this spec's prose rule does not reproduce), leaves `in-progress` intact, and skips claim release.
+  - Mapped to: T1, T3; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-5 (D1)**: In `bash scripts/ci/tests/lifecycle_advance_test.sh`, advancing to the terminal review rung (`advances_to: null`, `status:in-review`) prints `released claim of odyssey on #<n> (rung implement merged)` and removes `in-progress`.
+  - Mapped to: T1, T3; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-6 (D2, #284)**: In `bash scripts/ci/tests/lifecycle_advance_test.sh`, every placement adapter dispatch invocation passes `<issue> --as <persona>` in its argv string.
+  - Mapped to: T1, T2; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-7 (D2)**: Executing `GITHUB_ACTIONS=true scripts/placement/vm-local/run.sh 251 --as athena` prints `delegating #251 execution to operator VM poller` and exits 0.
+  - Mapped to: T1, T4; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-8 (D2)**: Executing `bash -n scripts/placement/vm-local/poll.sh` exits 0. In a mock ledger test, executing `scripts/placement/vm-local/poll.sh --once` finds unconsumed rows, invokes `CLAIM_ACTOR=<persona> CLAIM_SESSION=poll-<pid> scripts/ops/claim.sh <n>` under minted token, verifies the posted claim comment carries `.user.login` matching the persona App identity, and skips already-claimed rows.
+  - Mapped to: T1, T6; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-9 (D2)**: Running `python3 -m json.tool scripts/placement/vm-local/poll.sidecar.json >/dev/null` exits 0, and `jq -e '.command and .args and .env and (.restart_policy == "always")' scripts/placement/vm-local/poll.sidecar.json` prints `true`.
+  - Mapped to: T1, T7; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-10 (D2)**: Running `grep -E '^(Type=simple|Restart=always|ExecStart=)' scripts/placement/vm-local/poll.service` outputs matching unit configuration lines and exits 0.
+  - Mapped to: T1, T7; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-11 (D2, Live supervisor check - NOT RUN, operator precondition)**: Live verification with UI closed: supervisor process is active and running `poll.sh`. Verification command: `pgrep -fa 'bash.*poll.sh'` prints running PID, and log at `~/.gemini/antigravity/sidecar_data/sdlc-poller/logs/sidecar.log` (or `journalctl --user -u poll.service -n 20`) contains `poller active, interval: 30s` (Constraint 5, binding point 5; reported by the operator on #251, comment 5597497232).
+  - Mapped to: NOT RUN (operator precondition)
+- **AT-12 (D2)**: Re-pin property: In a hermetic test in `scripts/ops/tests/work_test.sh`, using a fixture `deployments.yaml`, updating a persona pin from `antigravity` to `claude-code`, running stub `work.sh <issue> --as <persona>`, asserts `claude -p "$PROMPT" --agent "$persona" --output-format json` is invoked, and restoring the fixture returns to `antigravity`.
+  - Mapped to: T1, T5; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-13 (D2, D8)**: Hermetic fix-round dispatch: In `scripts/ops/tests/work_test.sh`, a stub PR authored by odyssey at `status:in-review` dispatched with `scripts/ops/work.sh <pr> --as odyssey` does not refuse (h), does not print `odyssey does not own stage review (owners: argus atlas )`, and proceeds under the resume protocol.
+  - Mapped to: T1, T5; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-14 (D4)**: Missing credential handling: Running `python3 scripts/auth/mint_app_token.py <persona> --require-repo --quiet` preflights keys on VM; when a key is absent, `poll.sh` logs `missing key for <persona>, skipping its rows` and continues without exiting.
+  - Mapped to: T1, T6 (mock half in `scripts/ci/tests/e2e_chain_test.sh`; live half in NOT RUN operator precondition)
+- **AT-15 (D5)**: First hop ledger check: Running `scripts/placement/vm-local/poll.sh --once` on an open `intent:new` issue runs claim and dispatch, and `gh api repos/evekhm/agentic-sdlc/issues/<n>/comments --jq '.[].body | select(test("<!-- loop-ledger"))'` outputs empty string (zero loop-ledger rows prior to merge of `intent.md`).
+  - Mapped to: T1, T6; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-16 (D6, Step 1 check - operator precondition)**: Running `python3 scripts/auth/create_all_apps.py --only themis --check` exits 0, printing the themis row in the table and the closing line `every entry is complete` (scripts/auth/create_all_apps.py:446).
+  - Mapped to: NOT RUN (operator precondition)
+- **AT-17 (D6, D8)**: Running `grep -F "## Deployment status" docs/SPEC.md` finds the section, `sed -n '/## Deployment status/,/##/p' docs/SPEC.md | grep -c '^[0-9]\. '` outputs `7`, `grep -c 'odyssey \`manual\`' docs/SPEC.md` outputs `0`, and `grep -c 'odyssey \`ladder\`' docs/SPEC.md` outputs `1` for the deployment table row that reads odyssey `manual` (line 841 at 60fa3cb).
+  - Mapped to: T1, T8; verified by `scripts/ci/tests/e2e_chain_test.sh`
+- **AT-18 (D7, Synthetic validation - operator precondition)**: Dedicated synthetic issue run verification: running `gh api repos/evekhm/agentic-sdlc/issues/<n>/comments --jq '.[].body | select(test("<!-- loop-ledger"))'` shows four `dispatch` rows and one `terminal` row; running `gh run list --workflow lifecycle.yml --branch main --limit 5 --json databaseId,conclusion` and `gh run list --workflow merge-gate.yml --branch main --limit 5 --json databaseId,conclusion` show all conclusions as `success`; and `gh issue view <n> --json labels --jq '.labels[].name'` outputs `status:in-review` with `in-progress` absent.
+  - Mapped to: NOT RUN (operator precondition)
+- **AT-19 (D8)**: Pre-merge validation checks exit 0:
+  `BODY_FILE="$(mktemp)"; echo "Spec-impact: none - intent/** only, not a behavior-bearing path" > "$BODY_FILE"; bash scripts/ci/spec_check.sh origin/main "$BODY_FILE"; rm -f "$BODY_FILE"`
+  and `bash scripts/ci/sanitize_check.sh`.
+  - Mapped to: T9 (gates table pre-merge validation checks in Rule 9)
+- **AT-20 (D2)**: Hermetic fix-round claim bypass and locking: Under the stub, executing `scripts/placement/vm-local/poll.sh --once` on a fixture PR authored by odyssey at `status:in-review` with an unconsumed blocking review row launches `scripts/placement/vm-local/run.sh <pr> --as odyssey` and records zero calls to `scripts/ops/claim.sh`; a second `--once` execution while the lock exists launches nothing.
+  - Mapped to: T1, T6; verified by `scripts/ci/tests/e2e_chain_test.sh`
 
 ## Detailed Implementation Tasks
 
 ### T1: Hermetic Contract Tests (Build Rung Deliverable)
-- File: `scripts/ci/tests/e2e_chain_test.sh`
-- Description: Implement hermetic test suite covering AT-1 through AT-20.
-  Stubs `gh` and `git` in a temporary workspace. Asserts poller behavior,
-  delegation flags, adapter invocation, fix-round handling, configuration
-  validity, and documentation state.
-- Status at Build Rung: Written and failing (RED).
+- Files: `scripts/ci/tests/e2e_chain_test.sh`
+- Decisions: D1, D2, D4, D5, D6, D8
+- Acceptance: AT-1, AT-2, AT-3, AT-4, AT-5, AT-6, AT-7, AT-8, AT-9, AT-10, AT-12, AT-13, AT-14, AT-15, AT-17, AT-20
+- Description: Implement hermetic test suite covering the sixteen executable acceptance rows.
+  Stubs `gh`, `git`, `python3`, `claude`, and `agy` in a temporary workspace.
+  Copies minimal stub helpers from `scripts/ci/tests/lifecycle_advance_test.sh:57-63, 73-178, 187-195`
+  and `scripts/ops/tests/work_test.sh:72-84, 86-131, 138-160`.
+  Supports `-k <pattern>` filter flag.
+  Output ends with `e2e_chain_test.sh results: 0 passed, N failed out of N run`.
+- Status at Build Rung: Written and failing (RED) due to absence of implementation.
 
-### T2: Adapter Invocation Fix in Lifecycle Advancer (D8, AT-19)
-- File: `scripts/ci/lifecycle_advance.sh`
-- Description: In `scripts/ci/lifecycle_advance.sh` lines 1073 and 1076, add
-  `--as "$persona"` to the invocation of `scripts/placement/$placement/run.sh`.
-- Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-19 turns green).
+### T2: Adapter Invocation Fix in Lifecycle Advancer (D2, D8, AT-6)
+- Files: `scripts/ci/lifecycle_advance.sh`, `scripts/ci/tests/lifecycle_advance_test.sh`
+- Decisions: D2, D8
+- Acceptance: AT-6
+- Description: In `scripts/ci/lifecycle_advance.sh`, update the placement adapter dispatch
+  invocation at line 1073 (dry-run branch) and line 1076 (live execution branch) to append
+  `"$issue" --as "$persona"`.
+- Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-6 turns green).
 
-### T3: Lifecycle Claim Release (D1, D7, AT-17)
-- File: `scripts/ci/lifecycle_advance.sh`
-- Description: In `lifecycle_advance.sh`, implement claim release before
-  transitioning labels or when reaching terminal states (`advances_to` empty).
-  Verify the current claim holder matches the stage completing its run.
-  Remove `in-progress` label using GitHub API under ambient credentials.
-- Test: `bash scripts/ci/tests/lifecycle_advance_test.sh`.
+### T3: Lifecycle Claim Release (D1, D8, AT-1 to AT-5)
+- Files: `scripts/ci/lifecycle_advance.sh`, `scripts/ci/tests/lifecycle_advance_test.sh`
+- Decisions: D1, D8
+- Acceptance: AT-1, AT-2, AT-3, AT-4, AT-5
+- Description: In `scripts/ci/lifecycle_advance.sh`, upon ladder rung advance, read the latest
+  claim comment on the issue thread. Derive the claim holder by mapping comment author
+  login (`.user.login`) through the persona identity table without parsing unauthenticated comment
+  body text. If the mapped claim persona matches the persona owning the completed stage,
+  delete `in-progress` via `gh api -X DELETE` under `GITHUB_TOKEN` before dispatching the successor
+  persona, logging `released claim of <actor> on #<n> (rung <stage> merged)`.
+  Upon advancing to the terminal review rung (`status:in-review`), release the claim held by `odyssey`.
+  If held by another persona, foreign login, or if unparseable, preserve `in-progress` and withhold
+  dispatch. If `loop.autonomous_merge: false` (or key absent), leave `in-progress` intact and skip release.
+- Test: `bash scripts/ci/tests/lifecycle_advance_test.sh` and `e2e_chain_test.sh` (AT-1 to AT-5 turn green).
 
-### T4: VM-Local Adapter GitHub Actions Delegation (D8, AT-7)
-- File: `scripts/placement/vm-local/run.sh`
-- Description: In `scripts/placement/vm-local/run.sh`, inspect the
-  `GITHUB_ACTIONS` environment variable. When set to `true`, emit:
+### T4: VM-Local Adapter GitHub Actions Delegation (D2, D8, AT-7)
+- Files: `scripts/placement/vm-local/run.sh`
+- Decisions: D2, D8
+- Acceptance: AT-7
+- Description: In `scripts/placement/vm-local/run.sh`, inspect the `GITHUB_ACTIONS` environment variable.
+  When set to `true`, log:
   `vm-local: delegating #$NUMBER execution to operator VM poller`
-  and exit 0 immediately before executing preflight checks or `work.sh`.
+  and exit 0 immediately before executing token mint preflights or `work.sh`.
 - Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-7 turns green).
 
-### T5: Work Dispatch Fix-Round Support (D2, D8, AT-13)
+### T5: Work Dispatch Fix-Round Support & Re-Pin Property (D2, D8, AT-12, AT-13)
 - Files: `scripts/ops/work.sh`, `scripts/ops/tests/work_test.sh`
-- Description: In `scripts/ops/work.sh`, when an issue is an open pull request
-  at `status:in-review` and `--as <persona>` matches the pull request head
-  branch author, retain the author's stage. Bypass the review stage switch and
-  refusal (h). In `scripts/ops/tests/work_test.sh:486`, update the expected
-  harness string for odyssey from `claude-code` to `antigravity`.
-- Test: `bash scripts/ops/tests/work_test.sh` and `e2e_chain_test.sh` (AT-13 turns green).
+- Decisions: D2, D8
+- Acceptance: AT-12, AT-13
+- Description: In `scripts/ops/work.sh`, when an issue is an open pull request at `status:in-review`
+  and `--as <persona>` matches the pull request head branch author (`<persona>/<n>-*`), retain the
+  authoring stage and skip refusal (h). Support overridable deployment configuration via
+  `DEPLOYMENTS="${DEPLOYMENTS:-$REPO_ROOT/config/deployments.yaml}"` to support hermetic tests.
+  In `scripts/ops/tests/work_test.sh:486`, update the expected harness string for odyssey from
+  `claude-code` to `antigravity`.
+  Add hermetic test in `scripts/ops/tests/work_test.sh` for the re-pin property (AT-12) and fix-round
+  dispatch (AT-13).
+- Test: `bash scripts/ops/tests/work_test.sh` and `e2e_chain_test.sh` (AT-12, AT-13 turn green).
 
-### T6: Continuous Background Poller (D1, D2, D3, D5, D6, D7, AT-1 to AT-6, AT-12)
-- File: `scripts/placement/vm-local/poll.sh`
-- Description: Create executable bash script implementing the continuous
-  poller loop on a 30-second interval. The script uses `gh` and `jq` without
-  model calls. Reads open issues and pull requests, evaluates unconsumed
-  dispatch rows, checks mutex and hold conditions, claims via `claim.sh`
-  under minted persona tokens, dispatches via `run.sh`, logs execution
-  summaries, and implements error backoff.
-- Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-1 to AT-6, AT-12 turn green).
+### T6: Continuous Background Poller (D2, D4, D5, D8, AT-8, AT-14, AT-15, AT-20)
+- Files: `scripts/placement/vm-local/poll.sh`
+- Decisions: D2, D4, D5, D8
+- Acceptance: AT-8, AT-14, AT-15, AT-20
+- Description: Implement executable poller script `scripts/placement/vm-local/poll.sh`.
+  Design details:
+  1. Modes: Supports `--once` for single-tick execution and continuous loop mode with a 30-second sleep interval.
+  2. Queue evaluation: Evaluates unconsumed `dispatch` ledger rows in issue threads matching
+     `^<!-- loop-ledger-row: dispatch rung:[0-9]+ head-oid:[0-9a-f]{40}`.
+  3. First hop intake: Scans open, unclaimed `intent:new` issues. Claims via `claim.sh` under minted persona
+     token for `athena`, launches `run.sh <issue> --as athena`, and writes zero loop ledger rows (D5).
+  4. Mutex and claim handling: Claims an issue before launch via
+     `CLAIM_ACTOR=<persona> CLAIM_SESSION=poll-<pid> scripts/ops/claim.sh <n>` under
+     `GH_TOKEN="$(python3 scripts/auth/mint_app_token.py <persona>)"` minted per claim.
+     Skips already-claimed issues.
+  5. Fix rounds: Consumes blocking review rows on pull requests authored by vm-local personas.
+     Launches `run.sh <pr> --as <author persona>`, bypassing `claim.sh`.
+     Guards duplicates via a per-PR lock file released when `run.sh` exits.
+     A second `--once` tick while the lock exists launches nothing.
+  6. Missing credential handling: Runs preflight `python3 scripts/auth/mint_app_token.py <persona> --require-repo --quiet`.
+     If missing or unreadable, logs `missing key for <persona>, skipping its rows` and continues polling remaining personas.
+  7. Robustness: Empty or unparseable ledger comments log a diagnostic notice and exit 0.
+     Passes `--as "$persona"` to all adapter invocations.
+- Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-8, AT-14, AT-15, AT-20 turn green).
 
-### T7: Supervisor Unit Configurations (D4, AT-9, AT-10)
-- Files: `scripts/placement/vm-local/poll.sidecar.json`,
-  `scripts/placement/vm-local/agentic-sdlc-poll.service`
-- Description: Create Antigravity sidecar configuration with `command: "bash"`,
-  `args: ["-c", "exec scripts/placement/vm-local/poll.sh"]`,
+### T7: Supervisor Unit Configurations (D2, D8, AT-9, AT-10)
+- Files: `scripts/placement/vm-local/poll.sidecar.json`, `scripts/placement/vm-local/poll.service`
+- Decisions: D2, D8
+- Acceptance: AT-9, AT-10
+- Description: Create Antigravity sidecar configuration in `scripts/placement/vm-local/poll.sidecar.json`
+  with `command: "bash"`, `args: ["-c", "exec scripts/placement/vm-local/poll.sh"]`,
   `restart_policy: "always"`, and required environment variables.
-  Create systemd user service unit with `Restart=always` and `ExecStart`.
+  Create systemd user service unit in `scripts/placement/vm-local/poll.service`
+  with `Type=simple`, `Restart=always`, and `ExecStart=...`.
+  No files are placed at `scripts/ops/poll.sh` or named `agentic-sdlc-poll.service`.
 - Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-9, AT-10 turn green).
 
-### T8: Living Spec and Documentation (D8, AT-20)
-- File: `docs/SPEC.md`
-- Description: Update line 841 in `docs/SPEC.md` to state that athena,
-  daedalus, and odyssey carry bindings for `ladder at vm-local`.
-  Document the VM poller architecture and sidecar supervisor configuration.
-- Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-20 turns green).
+### T8: Living Spec Documentation & 7-Step Deployment Checklist (D6, D8, AT-17)
+- Files: `docs/SPEC.md`
+- Decisions: D6, D8
+- Acceptance: AT-17
+- Description: In `docs/SPEC.md`:
+  1. Under `## Deployment status`, document the seven ordered deployment checklist steps with exact commands:
+     - Step 1: verify Themis provisioning via `python3 scripts/auth/create_all_apps.py --only themis --check` (exit 0).
+     - Step 2: configure VM supervisor via `scripts/placement/vm-local/poll.sidecar.json` into
+       `~/.gemini/config/sidecars/sdlc-poller/sidecar.json` (or install `poll.service` into `~/.config/systemd/user/`).
+     - Step 3: verify branch protection on `main` via `gh api repos/evekhm/agentic-sdlc/branches/main/protection`
+       (confirming four required checks, strict false, enforce_admins false).
+     - Step 4: verify placement bindings via `python3 scripts/ops/execution.py --check` (exit 0).
+     - Step 5: preflight vm-local persona credentials via `python3 scripts/auth/mint_app_token.py <persona> --require-repo --quiet`
+       for athena, daedalus, and odyssey.
+     - Step 6: submit and merge the autonomy flip pull request setting `loop.autonomous_merge: true` in `config/execution.yaml`
+       and documenting P1 and P2 evidence (#64 acceptance 28).
+     - Step 7: launch first hop or verify poller intake on target issue.
+  2. Update the deployment table row for odyssey at line 841 from `manual` to `ladder`.
+  3. Update `### loop.autonomous` (:953) to document VM poller architecture, consumption of dispatch rows, first-hop intake,
+     and fix-round claim bypass.
+  4. Update `### lifecycle.labels` (:290) to document lifecycle advancer claim release on ladder transition under `GITHUB_TOKEN`.
+- Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-17 turns green).
 
-### T9: Test Suite Integration (D8)
-- Files: `.github/workflows/ci-gates.yml`, `scripts/ci/tests/lifecycle_advance_test.sh`
-- Description: Wire `scripts/ci/tests/e2e_chain_test.sh` into the `execution`
-  gate job in `.github/workflows/ci-gates.yml`.
-- Test: `python3 scripts/ops/execution.py --check` and full CI suite.
+### T9: Test Suite Folding & Acceptance Validation (D7, D8, AT-19)
+- Files: `scripts/ci/tests/lifecycle_advance_test.sh`, `scripts/ops/tests/work_test.sh`
+- Decisions: D7, D8
+- Acceptance: AT-19
+- Description: At the implement rung, fold acceptance tests into existing test suites:
+  - Fold AT-1 through AT-6 into `scripts/ci/tests/lifecycle_advance_test.sh`.
+  - Fold AT-12 and AT-13 into `scripts/ops/tests/work_test.sh`.
+  - Maintain remaining integration scenarios in `scripts/ci/tests/e2e_chain_test.sh`.
+  `.github/workflows/ci-gates.yml` is untouched at this rung; folded suites run in no workflow at this rung,
+  issue #246 tracks CI wiring, and the gates table local runs serve as the implement PR pass condition.
+- Test: Gates table local suite runs and pre-merge validation checks exit 0.
 
-## Risk Classifications and Mitigations
+## Corrections
 
-### DEEP-3: Credentials and Token Safety
-Persona tokens are minted at execution time by `mint_app_token.py` using
-App private keys resolved from environment variables or secure key paths.
-Tokens are never committed, logged, or exported into unattended environments.
-The preflight in `run.sh` asserts repository coverage using `--quiet` to
-prevent token exposure in shell output.
-
-### DEEP-5: State Machine, Mutex, and Ledger Integrity
-The loop ledger in issue comments is append-only and keyed by `(rung, head-oid)`.
-The poller inspects existing claims and process liveness before claiming.
-Claim creation via `claim.sh` acts as an atomic mutex on the issue.
-Claim release in `lifecycle_advance.sh` ensures that only the holding persona
-can release `in-progress` upon transition.
-
-### DEEP-6: Supervisor and Process Management
-The poller runs under a supervisor (Antigravity sidecar or systemd user unit)
-with `restart_policy: always`. The poller traps signals, records child process
-identifiers, handles child exits cleanly, and avoids orphaned subshells.
-File-based lock records track running worker sessions.
+This section documents corrections made in Round 2 addressing review findings:
+1. Verbatim alignment: Decision rows D1 through D8 and Acceptance criteria AT-1 through AT-20 are restored verbatim
+   from `intent/251-e2e-chain/spec.md`.
+2. Path standardization: Standardized on canonical paths from the spec Manifest and D8:
+   `scripts/placement/vm-local/poll.sh`, `scripts/placement/vm-local/poll.sidecar.json`,
+   and `scripts/placement/vm-local/poll.service`. Erroneous references to `scripts/ops/poll.sh` and
+   `agentic-sdlc-poll.service` are eliminated.
+3. CI workflow boundary: Clarified that `.github/workflows/ci-gates.yml` is untouched at this rung.
+   Issue #246 tracks CI wiring. The implement PR pass condition is local gate execution.
+4. Deployment status checklist: Added the explicit seven-step deployment checklist with exact commands to T8.
+5. Supervisor documentation: Specified both the primary Antigravity sidecar supervisor configuration
+   and the fallback systemd user service unit.
+6. Continuous poller architecture: Detailed `--once` and loop execution, first hop intake accounting (zero ledger dispatches),
+   claim before launch under minted token, fix-round claim bypass with per-PR locking, and missing key handling.
 
 ## Gates Table
 
 | Gate / Test Suite | Command | Scope | Rung Status |
 |---|---|---|---|
-| Contract Suite | `bash scripts/ci/tests/e2e_chain_test.sh` | Decisions D1-D8, AT-1 to AT-20 | FAIL (RED at base) |
-| Sanitize Gate | `bash scripts/ci/sanitize_check.sh` | Tracked files security and credentials | PASS |
-| Spec Gate | `bash scripts/ci/spec_check.sh` | Living spec obligations | PASS |
-| Execution Gate | `python3 scripts/ops/execution.py --check` | Execution bindings and config schema | PASS |
-| Execution Tests | `bash scripts/ops/tests/execution_test.sh` | Execution model tests | PASS |
-| Placement Tests | `bash scripts/ops/tests/placement_test.sh` | Placement adapter contract tests | PASS |
-| Post Tests | `bash scripts/ops/tests/post_test.sh` | Posting path contract tests | PASS |
+| Contract Suite | `bash scripts/ci/tests/e2e_chain_test.sh` | Acceptance AT-1 to AT-10, AT-12 to AT-15, AT-17, AT-20 | FAIL (RED at build rung) |
 | Advancer Suite | `bash scripts/ci/tests/lifecycle_advance_test.sh` | Lifecycle state transitions | PASS |
-| Work Suite | `bash scripts/ops/tests/work_test.sh` | Dispatch and stage resolution | FAIL (pre-existing odyssey pin mismatch #246) |
-| Supervised Run | System service check | AT-11 operator precondition | NOT RUN (Operator Precondition) |
-| Live Step 1 | Manual issue run | AT-16 operator precondition | NOT RUN (Operator Precondition) |
-| Live End-to-End | Full ladder loop | AT-18 operator precondition | NOT RUN (Operator Precondition) |
+| Work Suite | `bash scripts/ops/tests/work_test.sh` | Dispatch and stage resolution | FAIL (pre-existing odyssey pin mismatch #246, fixed in T5) |
+| Claim Suite | `bash scripts/ops/tests/claim_test.sh` | Mutex and claim validation | PASS |
+| Merge Gate Suite | `bash scripts/ci/tests/merge_gate_test.sh` | PR merge gate evaluation | PASS |
+| Sanitize Gate | `bash scripts/ci/sanitize_check.sh` | Security and secret scan | PASS |
+| Spec Gate | `BODY_FILE="$(mktemp)"; echo "Spec-impact: none - contract tests run by no workflow until #246 wires them; no behavior changes" > "$BODY_FILE"; bash scripts/ci/spec_check.sh origin/main "$BODY_FILE"; rm -f "$BODY_FILE"` | Living spec impact check | PASS |
+| Shellcheck | `shellcheck -S warning scripts/ci/tests/e2e_chain_test.sh` | Shell script static analysis | PASS |
+
+### NOT RUN List (Operator Preconditions)
+
+The following acceptance rows reach live external services or operator environments and are not run inside hermetic test suites:
+- **AT-11 (D2)**: Live supervisor check (operator precondition; requires live supervisor process `poll.sh` on operator VM).
+- **AT-14 (D4, live half)**: Live credential preflight (operator precondition; requires live key verification on operator VM).
+- **AT-16 (D6)**: Step 1 check (operator precondition; requires live Themis GitHub App verification via `create_all_apps.py --only themis --check`).
+- **AT-18 (D7)**: Dedicated synthetic validation run (operator precondition; requires live end-to-end loop execution on dedicated synthetic throwaway issue).
