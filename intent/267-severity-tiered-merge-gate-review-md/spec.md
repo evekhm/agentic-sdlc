@@ -34,63 +34,75 @@ and persona definitions under `personas/**` (outside
 
 | ID | Decision | Rationale |
 |---|---|---|
-| D1 | **Recorder execution context and placement.** The recorder lives at `scripts/ci/review_recorder.sh` and runs in `.github/workflows/merge-gate.yml` inside a dedicated `record` job that executes prior to the `gate` job. It runs under `environment: themis` on `issue_comment` (types: created, edited), `check_suite` (types: completed), and `workflow_dispatch` events. The recorder performs writes directly via `gh api` using the minted Themis GitHub App token. `scripts/ops/post.sh` is excluded because it requires a persona YAML definition in `personas/`, whereas Themis is an infrastructure system identity. `.github/workflows/unattended.yml` and `.github/workflows/lifecycle.yml` are unchanged. | Placing the recorder in `merge-gate.yml` before `gate` guarantees sequential execution on review events, ensuring ledger state is recorded before merge evaluation. A separate workflow would run concurrently and introduce race conditions against the merge gate. |
-| D2 | **Reviewer verdict output contract.** Reviewers emit a structured verdict block in their pull request review comments: <br>`<!-- review-verdict:<reviewer> -->`<br>`<!-- reviewed-head:<full-oid> -->`<br>`<!-- round:<n> -->`<br>`<!-- finding:<id>:<severity>:<status>:<peer> -->`<br>`<!-- review-verdict-end -->`<br>alongside human-readable review tables. The finding line matches regex `^<!-- finding:([A-Za-z0-9-]+):(security\|high\|normal\|suggestion):(open\|fixed\|withdrawn):(pending\|agree\|dispute\|none) -->$`. Reviewers update `REVIEW.md` and `personas/skills/review-protocol.md` to produce this block. Comments lacking this block are ignored. The recorder validates that `<full-oid>` exists in the pull request commit history; verdicts referencing commits absent from the commit list are rejected. | Structured comment blocks allow deterministic parsing without NLP heuristics. Ignoring comments without markers preserves conversational thread comments and historical reviews. Checking the reviewed commit against pull request history prevents reviewers from recording findings against foreign commits. |
-| D3 | **Reviewer identity and trust model.** The recorder validates that comment author logins match authorized reviewer App identities (`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`) and verifies that `reviewed-head` exists in pull request commits. The known residual risk is that same-repo pull request workflows have access to `ARGUS_APP_PRIVATE_KEY` and `ATLAS_APP_PRIVATE_KEY` repository secrets. Target state migration of reviewer keys to main-only Environments and run-from-main workflows is owned by #251 and #265. The recorder wire format remains unchanged across that migration. | Restricting parsing to verified App logins and validated commit SHAs establishes defensible provenance under current infrastructure. Formal secret isolation is delegated to the architecture defined in #251. |
-| D4 | **Single in-place consensus ledger comment.** The consensus ledger exists as exactly one pull request comment carrying `<!-- consensus-ledger:<pr> -->`, authored by Themis. The recorder locates this comment by paginating pull request comments to exhaustive depth. If present, the recorder updates the existing comment in place via `PATCH /repos/<repo>/issues/comments/<id>`. If absent, the recorder creates it via `POST /repos/<repo>/issues/<pr>/comments`. | `scripts/ci/merge_gate.sh:262` reads `sort_by(.id) \| .[0]`, selecting the earliest matching comment. Creating append-only comments would cause the merge gate to read a stale initial comment indefinitely. In-place modification guarantees the gate always evaluates the current state. |
-| D5 | **Authoritative four-tier enum and high demotion.** The authoritative severity enum is `security`, `high`, `normal`, `suggestion`. This resolves naming drift between `REVIEW.md:88` (`suggestion`) and `scripts/ci/merge_gate.sh:28,271` (`low`). The regular expression in `scripts/ci/merge_gate.sh:271` and test fixtures in `scripts/ci/tests/merge_gate_test.sh` are updated to support `suggestion`. Any finding marked `high` that fails to match the closed list in `REVIEW.md:102-111` or lacks a concrete `failure_scenario` is demoted by the recorder to `normal` on the ledger row, with an explanatory note added to the human-readable table: `[demoted from high: not on closed list / missing failure_scenario]`. | Settling on `suggestion` aligns the codebase with `REVIEW.md`. Automatic demotion of invalid high findings enforces rigor mechanically without halting the pipeline on ungrounded blocking claims. |
-| D6 | **Round derivation and admissibility funnel.** The recorder extracts the review round number from `<!-- round:<n> -->` and verifies it against prior rounds. In Round 1, all severity tiers are admissible. In Rounds 2 and 3, new findings are accepted only if classified as `security` or valid `high`; new `normal` or `suggestion` findings are demoted to non-blocking status with note `[late finding: non-blocking per round funnel]`. Beyond Round 3, only new `security` findings are accepted; all other new findings are demoted. | The round funnel prevents late non-critical findings from prolonging review cycles indefinitely, converting an informal guideline into an enforced mechanical gate. |
-| D7 | **Peer consensus column and status transitions.** Argus findings use namespace `R<round>-<n>`; Atlas findings use namespace `AT-R<round>-<n>`. Peer states are `pending`, `agree`, `dispute`, `none`. `security` rows initialize with `peer=pending` and require explicit peer concurrence to reach `peer=agree`. In accordance with `REVIEW.md:257-259`, security findings require dual agreement twice: once on finding validity and once on fix verification. `high` rows carry `peer=none` unless explicitly disputed. An explicit dispute on any blocking row sets `peer=dispute`. Finding status transitions to `fixed` only when verified by the discovering reviewer on a newer commit, or to `withdrawn` when retracted by that reviewer. Pull request authors cannot close findings through author assertions. | Requiring two-party verification for security findings protects critical trust paths. Restricting finding resolution to the reporting reviewer prevents unilateral dismissal by authors. |
-| D8 | **Label derivation by Themis.** The recorder derives pull request labels from ledger state and updates them using the Themis token: `argus:findings` (open blocking rows exist), `argus:suggestions` (open non-blocking rows exist), `consensus:agreed` (no open security rows awaiting peer, all security agreed, no dispute), `consensus:pending` (open security row awaiting peer verdict), `consensus:disputed` (dispute on any blocking row), `review:merge-ready` (no open blocking rows, consensus agreed, reviewed head matches pull request head), and `review:verifying` (open blocking rows exist and pull request head is newer than reviewed head). `scripts/ci/merge_gate.sh` evaluates the ledger block directly. Labels are provisioned by `scripts/setup/bootstrap_tracker.sh --labels-only`. | Labels provide immediate visual feedback on pull request status across developer interfaces. Decoupling label display from merge gate evaluation ensures the gate depends directly on cryptographic and ledger evidence. |
-| D9 | **Owner retier verb.** Repository maintainers can override finding severities by posting `@argus retier <id> <severity>` or `@atlas retier <id> <severity>`. The recorder processes retier commands only from accounts with `admin` or `write` collaborator permissions, verified via `gh api repos/<repo>/collaborators/<user>/permission`. Commands from bot accounts or unauthorized users are ignored. An accepted retier command updates the row severity, recalculates derived labels, and annotates the ledger table with `[retiered to <severity> by @<user>]`. | Human authority retains final arbitration over disputed or misclassified findings. Restricting retier parsing to verified human collaborators blocks unauthorized severity manipulation. |
+| D1 | **Recorder execution context and placement.** The recorder lives at `scripts/ci/review_recorder.sh` and runs in `.github/workflows/merge-gate.yml` inside a dedicated `record` job that executes prior to the `gate` job (`gate` declares `needs: record`). Both jobs run under `environment: themis` and share `concurrency: group: merge-gate`. The workflow triggers on existing events: `issue_comment` (types: `[created]`), `check_suite` (types: `[completed]`), `status`, and `workflow_dispatch`. The `issue_comment` trigger retains `types: [created]` without adding `edited`. On `check_suite` and `status` push events, the ledger is re-derived and stale head markers are dropped. The `record` job skips execution entirely when `github.event.sender.login` is the Themis App login (`evekhm-themis-app[bot]`). It skips the `PATCH` API request when the newly rendered ledger body equals the existing comment body byte for byte. The recorder performs writes directly via `gh api` using the minted Themis GitHub App token; this supersedes the constraint in `intent.md:76` because `scripts/ops/post.sh` requires persona YAML definitions (`post.sh:94-98`, `170-179`) whereas Themis is an infrastructure system identity. `.github/workflows/unattended.yml` and `.github/workflows/lifecycle.yml` are unchanged. | Placing `record` before `gate` with explicit job dependencies ensures sequential execution on review events, ensuring ledger state is recorded before merge evaluation. Sharing the concurrency group serializes runs across the repository, while idempotency guards prevent recursive or redundant workflow dispatches. |
+| D2 | **Reviewer verdict output contract.** Reviewers emit a structured verdict block in their pull request review comments: <br>`<!-- review-verdict:<reviewer>:<verdict> -->`<br>`<!-- reviewed-head:<full-oid> -->`<br>`<!-- run-id:<n> -->`<br>`<!-- round:<n> -->`<br>`<!-- finding:<id>:<severity>:<status>:<peer> -->`<br>`<!-- failure-scenario:<id> -->`<br>`<!-- review-verdict-end -->`<br>alongside human-readable review tables, where `<verdict>` is `clean` or `findings`. The `<id>` field carries `@<Dn>` when citing a spec Decision (such as `R1-1@D4`) or `@none` when uncited, matching `REVIEW.md:290-305`. Each `high` finding must be immediately accompanied by its sibling marker `<!-- failure-scenario:<id> -->`. The finding line matches regex `^<!-- finding:([A-Za-z0-9-@]+):(security\|high\|normal\|suggestion):(open\|fixed\|withdrawn):(pending\|agree\|dispute\|none) -->$`. The reviewer block provides `<!-- reviewed-head:<full-oid> -->`; the recorder qualifies this per reviewer when generating the ledger (`<!-- reviewed-head:argus:<40-hex> -->`, `<!-- reviewed-head:atlas:<40-hex> -->`) matching `scripts/ci/merge_gate.sh:268-269`. Reviewers update `REVIEW.md` and `personas/skills/review-protocol.md` to produce this block. Comments lacking this block are ignored. The recorder validates that `<full-oid>` exists in pull request commit history; verdicts referencing commits absent from the commit list are rejected. Evaluating whether a `high` finding belongs to the closed list in `REVIEW.md:102-111` is a reviewer protocol duty defined in `personas/skills/review-protocol.md`, outside parser responsibility. | Structured comment blocks allow deterministic parsing without NLP heuristics. Ignoring comments without markers preserves conversational thread comments and historical reviews. Checking the reviewed commit against pull request history prevents reviewers from recording findings against foreign commits. |
+| D3 | **Reviewer identity and interim trust model.** The recorder verifies reviewer provenance using check-run and workflow-run validation. A verdict block is accepted only when the comment author is an authorized reviewer App (`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`), `reviewed-head` exists in pull request commits, and the referenced `<!-- run-id:<n> -->` matches an authentic workflow run verified via `GET /repos/<repo>/actions/runs/<run_id>` (matching `head_sha`, workflow path `.github/workflows/unattended.yml`, event `pull_request`, and conclusion `success`). Residual risk: a pull request branch workflow run can name its own run ID; what it cannot forge is the run being a main-ref run, which the run-from-main architecture in #251 and #265 closes. | Validating the Actions run ID, head SHA, workflow path, and conclusion provides machine-checked provenance preventing forged review comments from unassociated runs. Formal secret isolation moves to main-only Environments under #251 and #265. |
+| D4 | **Single in-place consensus ledger comment and emitted wire format.** The consensus ledger exists as exactly one pull request comment authored by Themis. The recorder finds this comment by paginating pull request comments to exhaustive depth. If absent, it creates the comment via `POST /repos/<repo>/issues/<pr>/comments`. If present, it updates the comment via `PATCH /repos/<repo>/issues/comments/<id>`. The emitted comment body matches `scripts/ci/tests/merge_gate_test.sh:236-247` and `scripts/ci/merge_gate.sh:265-271` byte for byte: <br>`### Findings ledger for #<pr>`<br>`<!-- consensus-ledger:<pr> -->`<br>`<!-- reviewed-head:argus:<40-hex> -->`<br>`<!-- reviewed-head:atlas:<40-hex> -->`<br>`<!-- ledger-row:<id>:<severity>:<status>:<peer> -->`<br>`<!-- consensus-ledger-end -->`<br>followed by the human-readable markdown table. The `reviewed-head:argus:<40-hex>` and `reviewed-head:atlas:<40-hex>` lines are included only when that reviewer's verdict for the current head commit was accepted. Finding IDs carry `@<Dn>` when cited in the review. | `scripts/ci/merge_gate.sh:262` selects the earliest matching comment via `sort_by(.id) \| .[0]`. In-place updates preserve comment identity while ensuring downstream parsers read the exact markers and ledger rows required by the merge gate. |
+| D5 | **Authoritative four-tier enum, loud refusal, and high demotion.** The authoritative severity enum is `security`, `high`, `normal`, `suggestion`. This replaces `low` outright in `scripts/ci/merge_gate.sh:28,271` and `scripts/ci/tests/merge_gate_test.sh` in the implementing pull request without a transition period. The regular expression in `scripts/ci/merge_gate.sh:271` is updated to `^<!-- ledger-row:([A-Za-z0-9-@]+:(security\|high\|normal\|suggestion):(open\|fixed\|withdrawn):(pending\|agree\|dispute\|none)) -->$`. Any finding specifying a severity outside these four values fails validation loudly: the recorder logs `finding <id>: severity <x> is not one of security\|high\|normal\|suggestion` and refuses the entire verdict block without updating the ledger. Any finding marked `high` that lacks a sibling `<!-- failure-scenario:<id> -->` marker is demoted by the recorder to `normal` on the ledger row, with an explanatory note added to the ledger table: `[demoted from high: missing failure_scenario marker]`. | Settling on `suggestion` eliminates naming drift. Immediate loud refusal prevents invalid severities from entering ledger state. Mechanical demotion enforces concrete failure scenarios without manual intervention. |
+| D6 | **Round derivation and admissibility funnel.** The recorder extracts the review round number from `<!-- round:<n> -->` and verifies it against prior rounds. In Round 1, all severity tiers are admissible. In Rounds 2 and 3, new findings are accepted only if classified as `security` or valid `high`; new `normal` or `suggestion` findings are recorded as late informational notes (`[late finding: inadmissible after round 1]`) and do not create tracking rows. Beyond Round 3, only new `security` findings are accepted; other new findings are recorded with `[late finding: inadmissible after round 3]` and do not create blocking rows. | The round funnel prevents late non-critical findings from prolonging review cycles indefinitely, converting an informal guideline into an enforced mechanical gate. |
+| D7 | **Peer consensus column and status transitions.** Argus findings use namespace `R<round>-<n>`; Atlas findings use namespace `AT-R<round>-<n>`. Peer states are `pending`, `agree`, `dispute`, `none`. `security` rows initialize with `peer=pending` and require explicit peer concurrence to reach `peer=agree`. In accordance with `REVIEW.md:258-260`, security findings require dual agreement twice: once on finding existence and once on fix verification. `high` rows carry `peer=none` unless explicitly disputed. An explicit dispute on any blocking row sets `peer=dispute`. Finding status transitions to `fixed` only when verified by the discovering reviewer on a newer commit, or to `withdrawn` when retracted by that reviewer. Pull request authors cannot close findings through author assertions. | Requiring two-party verification for security findings protects critical trust paths. Restricting finding resolution to the reporting reviewer prevents unilateral dismissal by authors. |
+| D8 | **Label derivation by Themis and round counter ownership.** The recorder derives pull request labels from ledger state and updates them using the Themis token, adhering to the taxonomy in issue #4 (`scripts/setup/issues/04-label-taxonomy.md`): `argus:findings` (open blocking rows exist), `argus:suggestions` (open non-blocking rows exist), `consensus:agreed` (no open security rows awaiting peer, all security agreed, no dispute), `consensus:pending` (open security row awaiting peer verdict), `consensus:disputed` (dispute on any blocking row), `review:merge-ready` (no open blocking rows, consensus agreed, reviewed head matches pull request head), `review:verifying` (open blocking rows exist and pull request head is newer than reviewed head), and the round counter `review:1`, `review:2`, `review:3` (set from highest accepted round at head; exactly one present). A ledger lacking a head marker earns neither head-pinned label, and a failed head probe freezes both per `REVIEW.md:346-348`. `status:review-stuck` remains written by `scripts/ci/escalate.sh` when `scripts/ci/merge_gate.sh:442-451` triggers on `review:3`; this completes the hand-off from `scripts/ci/lifecycle_advance.sh:56-57`. Labels are provisioned by `scripts/setup/bootstrap_tracker.sh --labels-only`. | Managing the round counter in the recorder ensures the merge gate's round-cap escalation operates as designed. Decoupling visual indicators from merge evaluation ensures the gate inspects ledger evidence directly. |
+| D9 | **Owner retier verb.** Repository maintainers can override finding severities by posting `@argus retier <id> <severity>` or `@atlas retier <id> <severity>`. The recorder processes retier commands only from accounts with `admin` or `write` collaborator permissions, verified via `gh api repos/<repo>/collaborators/<user>/permission`. Commands from bot accounts or unauthorized users are ignored. An accepted retier command updates row severity, recalculates derived labels, and annotates the ledger table with `[retiered to <severity> by @<user>]`. | Human authority retains final arbitration over disputed or misclassified findings. Restricting retier parsing to verified human collaborators blocks unauthorized severity manipulation. |
 | D10 | **Treatment of unformatted comments and legacy reviews.** Comments lacking structured verdict markers are ignored by the recorder. Pull requests containing historical reviews without marker blocks (such as PR #280 and PR #283) remain in the state lacking a consensus ledger until a reviewer posts a compliant verdict block or a fresh review cycle runs. | Permitting non-compliant comments to pass unparsed preserves unstructured conversational comments and prevents unexpected build failures on older pull requests. |
 | D11 | **Disposition of issue #238 gates.** Issue #238 retains ownership of G1 (pre-dispatch diff verification of repair claims) and G2 (convergence rate escalation). The recorder provides the ledger rows, round tracking, and open blocking tallies that G2 evaluates. G1 operates as an intake gate in `.github/workflows/unattended.yml`, while G2 operates within `scripts/ci/escalate.sh`. | Preserving G1 and G2 in issue #238 avoids overloading the recorder script and maintains modular responsibility between review execution, state recording, and escalation. |
 | D12 | **Implementation scope boundary.** The implementing pull request may touch `scripts/ci/review_recorder.sh`, `scripts/ci/tests/review_recorder_test.sh`, `.github/workflows/merge-gate.yml`, `REVIEW.md`, `personas/skills/review-protocol.md`, `scripts/ci/merge_gate.sh`, `scripts/ci/tests/merge_gate_test.sh`, `scripts/setup/bootstrap_tracker.sh`, `scripts/setup/issues/04-label-taxonomy.md`, and `docs/SPEC.md`. It may not touch `.github/workflows/unattended.yml`, `.github/workflows/lifecycle.yml`, `scripts/ops/post.sh`, `personas/**` (outside `review-protocol.md`), `scripts/ci/escalate.sh`, or `scripts/ci/lifecycle_advance.sh`. | Clean scope boundaries prevent merge conflicts with concurrent issues and protect autonomous lifecycle advance workflows from unintended edits. |
 
 ## Acceptance
 
-- **AT-1 (D1)** `bash scripts/ci/tests/review_recorder_test.sh` executes
-  hermetically with a stubbed `gh` capturing API writes, exercising parser
-  scenarios and exit codes without network dependencies.
-- **AT-2 (D2)** The parser extracts finding ID, severity, status, and peer
-  values from valid `<!-- finding:... -->` tags, ignoring surrounding
-  markdown headings and explanatory body text.
-- **AT-3 (D2, D3)** When `reviewed-head` matches a commit in the pull request
-  commit history, the verdict is processed; an unlisted commit SHA causes the
-  recorder to log a rejection and refuse updates.
-- **AT-4 (D4)** When no consensus ledger comment exists, the recorder posts a
-  new comment via `POST /repos/<repo>/issues/<pr>/comments`; on subsequent
-  executions, it modifies the comment via `PATCH /repos/<repo>/issues/comments/<id>`,
-  preserving the comment ID.
-- **AT-5 (D5)** High findings outside the five items in `REVIEW.md:102-111` or
-  lacking a concrete `failure_scenario` are demoted to `normal` on wire rows
-  and annotated in the markdown table.
-- **AT-6 (D6)** New `normal` and `suggestion` findings in Round 2 or Round 3
-  are recorded as non-blocking; new non-security findings beyond Round 3 are
-  demoted to `normal`.
-- **AT-7 (D7)** A `security` row remains `peer=pending` until explicit peer
-  agreement is parsed; both finding validity and fix verification require
-  dual explicit agreement before reaching clean state.
-- **AT-8 (D9)** An explicit `@argus retier <id> <severity>` comment by a user
-  holding write permissions updates row severity; identical comments from bot
-  identities or read-only users are ignored.
-- **AT-9 (D8)** Derived labels (`argus:findings`, `argus:suggestions`,
-  `consensus:*`, `review:merge-ready`, `review:verifying`) are synchronized via
-  `gh issue edit` to match computed ledger state.
-- **AT-10 (D5)** `bash scripts/ci/tests/merge_gate_test.sh` passes with
-  consensus ledger fixtures containing `suggestion` rows, confirming parser
-  alignment.
-- **AT-11 (D8)** `bash scripts/setup/bootstrap_tracker.sh --labels-only`
-  idempotently provisions all seven review and consensus labels with designated
-  colors and descriptions.
-- **AT-12 (D12)** `bash scripts/ci/spec_check.sh origin/main` and
-  `bash scripts/ci/sanitize_check.sh` pass cleanly on the implementation branch.
-- **AT-13 (D9)** An accepted retier command adds an audit annotation
-  `[retiered to <severity> by @<user>]` to the ledger table while preserving
-  the finding description and identifier.
-- **AT-14 (D7)** A security finding with peer agreement, followed by a fix
-  attempt on a newer commit, requires the discovering reviewer to mark status
-  as `fixed` and the peer to post agreement on the fix before clearance.
+- **AT-1 (D1)** Run `bash scripts/ci/tests/review_recorder_test.sh`: passes with
+  exit code 0, exercising parser execution, idempotency short-circuiting, and
+  API calls against a hermetic test stub.
+- **AT-2 (D2)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_marker_parsing`:
+  passes with exit code 0, verifying extraction of verdict, run-id, round,
+  finding lines (including Decision-ID `@<Dn>` tags), and sibling `failure-scenario`
+  markers.
+- **AT-3 (D2, D3)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_provenance_validation`:
+  passes with exit code 0, confirming acceptance of matching App logins, commit
+  SHAs, and successful `unattended.yml` workflow runs, and refusal of unlisted
+  commits or invalid run IDs.
+- **AT-4 (D4)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_ledger_comment_lifecycle`:
+  passes with exit code 0, confirming `POST` creation on initial review and
+  in-place `PATCH` on subsequent reviews, preserving comment ID.
+- **AT-5 (D5)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_high_failure_scenario_demotion`:
+  passes with exit code 0, asserting that a `high` finding lacking a sibling
+  `failure-scenario` marker is demoted to `normal` on the wire row with ledger
+  table note `[demoted from high: missing failure_scenario marker]`.
+- **AT-6 (D5)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_non_enum_severity_refusal`:
+  passes with exit code 0, verifying that an invalid severity such as `critical`
+  or legacy `low` outputs `finding <id>: severity <x> is not one of security|high|normal|suggestion`
+  and causes the recorder to exit with non-zero status.
+- **AT-7 (D6)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_round_funnel`:
+  passes with exit code 0, confirming that new non-blocking findings in Round 2
+  or 3 and new non-security findings beyond Round 3 do not create blocking rows.
+- **AT-8 (D7)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_security_dual_agreement`:
+  passes with exit code 0, proving a security finding requires explicit peer
+  concurrence on both finding validity and fix verification before clearance
+  per `REVIEW.md:258-260`.
+- **AT-9 (D9)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_owner_retier`:
+  passes with exit code 0, verifying that an authorized maintainer comment
+  `@argus retier <id> <severity>` updates finding severity with audit note
+  `[retiered to <severity> by @<user>]` while unauthorized commands are ignored.
+- **AT-10 (D8)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_label_sync`:
+  passes with exit code 0, asserting derived labels (`argus:findings`,
+  `argus:suggestions`, `consensus:*`, `review:merge-ready`, `review:verifying`,
+  and `review:1..3`) synchronize via `gh issue edit`.
+- **AT-11 (D5)** Run `bash scripts/ci/tests/merge_gate_test.sh`: passes with
+  exit code 0, confirming that `merge_gate.sh` processes consensus ledger
+  fixtures using `suggestion` and rejects legacy `low`.
+- **AT-12 (D8)** Run `bash scripts/setup/bootstrap_tracker.sh --labels-only`:
+  exits 0 and outputs provisioning confirmation for all seven review and
+  consensus labels (`argus:findings`, `argus:suggestions`, `consensus:agreed`,
+  `consensus:pending`, `consensus:disputed`, `review:merge-ready`,
+  `review:verifying`).
+- **AT-13 (D4)** Run `bash scripts/ci/tests/review_recorder_test.sh -k test_merge_gate_round_trip`:
+  passes with exit code 0, asserting that a recorder-emitted ledger fed to
+  `scripts/ci/merge_gate.sh` under its test stub evaluates conjuncts 3, 4, 5,
+  and 11 as true.
+- **AT-14 (D4)** Live run: one `Merge Gate` workflow execution on a pull request
+  with both accepted reviewer verdict blocks evaluating conjuncts 3, 4, 5, and 11
+  true, cited by Actions run ID, listed under NOT RUN until #64 acceptance 20.
+- **AT-15 (D12)** Run `bash scripts/ci/spec_check.sh origin/main && bash scripts/ci/sanitize_check.sh`:
+  exits 0 with no diff errors or sanitized term violations.
 
 ## Concerns
 
@@ -102,18 +114,18 @@ and persona definitions under `personas/**` (outside
   current state. Pagination to exhaustive depth guarantees that an existing
   comment is located reliably.
 - **Severity enum drift.** `REVIEW.md:88` specifies `suggestion` while
-  `scripts/ci/merge_gate.sh:28,271` uses `low`. Reconciling this drift requires
-  an interface change in `merge_gate.sh:271` to accept `suggestion`. The
-  implementation PR must update this regex and its associated tests in
-  `merge_gate_test.sh` simultaneously. During transition, accepting both
-  `suggestion` and `low` maintains backward compatibility with older branches.
+  `scripts/ci/merge_gate.sh:28,271` previously used `low`. The implementing
+  pull request updates `merge_gate.sh:28,271` and test fixtures in
+  `merge_gate_test.sh` to enforce `suggestion` outright without a transition
+  period.
 - **Reviewer secret isolation and interim trust.** Reviewer credentials
   currently reside in repository secrets accessible to pull request branch
-  workflows. The interim mitigation verifies comment author logins and
-  cross-references `reviewed-head` against pull request commit history. Full
-  isolation is achieved when reviewer keys migrate to main-only Environments
-  under #251 and #265. The recorder wire format remains unchanged when that
-  architecture lands.
+  workflows. The interim mitigation verifies comment author logins,
+  cross-references `reviewed-head` against pull request commit history, and
+  validates Actions run provenance via `<!-- run-id:<n> -->`. Residual risk: a
+  pull request branch run can name its own run ID; what it cannot forge is the
+  run being a main-ref run, which the run-from-main design in #251 and #265
+  closes.
 - **Separation of recorder mechanics from G1/G2 gates.** Issue #238 defines
   G1 (pre-dispatch diff verification) and G2 (convergence rate escalation). The
   recorder provides the ledger rows and round counts required by G2, but
@@ -127,14 +139,16 @@ and persona definitions under `personas/**` (outside
   on conversational threads.
 - **Label synchronization idempotency.** Label derivation must synchronize
   labels without conflicting with manual operator interventions. The recorder
-  reconciles the seven derived labels on each execution, adding required labels
-  and removing stale labels while preserving unrelated issue labels such as
-  `hold` or `bootstrap`.
-- **Serialized execution and gate concurrency.** The recorder executes inside
-  `.github/workflows/merge-gate.yml` in a job preceding `gate`. Because both
-  jobs share the `merge-gate` concurrency group, recording completes before
-  merge gating begins, avoiding race conditions between ledger generation and
-  merge evaluation.
+  reconciles derived labels on each execution, adding required labels and
+  removing stale labels while preserving unrelated issue labels such as `hold`
+  or `bootstrap`.
+- **Serialized execution and job ordering.** The recorder executes inside
+  `.github/workflows/merge-gate.yml` in a `record` job preceding `gate` (`gate`
+  specifies `needs: record`). Both jobs run under `environment: themis` and
+  share `concurrency: group: merge-gate`. Idempotency guards skip execution
+  when `github.event.sender.login` is Themis, and skip `PATCH` requests when
+  the rendered body matches current comment content, preventing self-trigger
+  loops.
 - **Comment payload volume.** GitHub issue comments have a size limit of
   65,536 characters. For pull requests with long review histories, the ledger
   table displays open findings and active disputes in detail while compacting
@@ -147,6 +161,8 @@ and persona definitions under `personas/**` (outside
 - Moving reviewer App credentials to main-only GitHub Environments (#251).
 - Convergence rate escalation logic and pre-dispatch diff verification (#238).
 - Modifying autonomous loop merge predicates or escalation scripts (#64).
+- The single post-merge follow-up issue filing and closing the ledger upon pull
+  request merge (#148).
 
 ## Operator decisions
 
