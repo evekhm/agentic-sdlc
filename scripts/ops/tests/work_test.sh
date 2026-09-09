@@ -1378,6 +1378,7 @@ fi
 pass "D4: work.sh opens no CLI log and names no home directory"
 
 banner "#172 agy post-hoc budget ceiling enforcement"
+sed -i 's/"gemini-3.8-flash-high"/"gemini-1.5-pro-002"/' "$T/.agents/agents/daedalus/agent.json"
 printf '%s\n' '{"status":"SUCCESS","response":"WORK-RESULT: ok test","model":"gemini-1.5-pro-002","usage":{"input_tokens":1000000,"output_tokens":0,"cache_read_tokens":0}}' > "$WORK/agy_cost_1.25.json"
 
 : > "$LAUNCHES"; : > "$WRITES"
