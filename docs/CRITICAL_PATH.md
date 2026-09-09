@@ -12,13 +12,30 @@ file is the live ordering under it. The advisor seat owns both; update
 this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line.
 
-Status line: 2026-09-08, revision six (~20:15 UTC): step 3's PR #257 hit
-Argus's round-3 cap at head `b5d978ca` with a `security` row still open
-(R1-1) and one partly-fixed with an open residual (R1-2), plus four
-open `high` rows (two new this round). Per REVIEW.md's funnel an open
-`security` row at round 3 escalates to a human; Argus writes no more
-labels and no merge from here. Atlas has not re-reviewed past round 1's
-`900b4408` head. Live `gh issue list` state always beats this file.
+Status line: 2026-09-09, revision seven (~17:51 UTC, main at
+`696f516`): step 3's PR #257
+(the #64 implementation) merged 05:35 UTC as `d61875c` after seven
+review rounds, the last of them driven from a Claude Fable session;
+spec amendment r4 (PR #281, `8525d61`) added D31, which names the
+merge actor's App `Themis`, and the operator provisioned it; P2,
+branch protection on `main`, was applied 05:48 UTC. The #267 recorder
+merged as PR #292 (`80b741c`, 12:14 UTC) and the #251 chain as PR #294
+(`dc0010b`, 14:33 UTC). Flip PR #297 merged 16:42 UTC (`6c7d71c`), so
+`config/execution.yaml` now carries `loop.autonomous_merge: true`.
+No autonomous merge has fired yet, for the two reasons filed as #298
+at 14:57 UTC: the merge gate's own skipped `pull_request`-event jobs
+make conjunct 2 false on every head, and the runner reviewers refuse
+a Refs-only pull request. Both fail closed. #298 itself walks the
+ladder by hand-dispatched work.sh rungs in a separate session: intent
+PR #300 merged 17:10 UTC, spec PR #301 merged 17:33 UTC (`697665b`).
+Open behind #298: spec amendments #295, #288 and #291, each claimed
+under the athena App by wave 8 at 17:47 UTC and carrying intent:new
+plus in-progress while the plan rung writes the intent, and post-merge
+findings #293 and #296. PR #280 (the #265 spec) merged 17:42 UTC as
+`696f516`, and the 265p watcher launched daedalus on the #265 plan
+rung (claim 17:43 UTC, issue at status:build); Argus's two open `high`
+rows R3-1 and R3-2 carried into that rung as required tasks. Live
+`gh issue list` state always beats this file.
 
 ## Fast path to the demo (operator directive, 2026-09-08 06:40 UTC)
 
@@ -73,7 +90,9 @@ order:
    escalates to a human — Argus writes no more labels and no merge from
    here; Atlas has not re-reviewed past round 1's `900b4408` head.
    Cheapest fixes named by Argus: R3-1 (one line of indentation) and
-   R3-2 (one `if` guard).
+   R3-2 (one `if` guard). **Outcome, 2026-09-09:** rounds 4 through 7
+   ran post-cap from a Claude Fable session with both runner reviewers
+   co-signing each head, and PR #257 merged 05:35 UTC as `d61875c`.
 4. #251 + #252, the end-to-end chain after #64. Retired: the #147
    label-trigger slice — the merged #64 spec D16 reads "No second
    workflow, no `issues: labeled` trigger, no new event" and flips
@@ -99,6 +118,10 @@ order:
    only), first hop stays a human dispatch of athena. Delivery: one PR
    after the #64 implementation merges, `ops/waves/launch.sh 251`
    (prompt `ops/waves/w4-251-odyssey.txt`), merged on smoke.
+   **Outcome, 2026-09-09:** PR #294 merged 14:33 UTC as `dc0010b`, and
+   the gaps it left were filed as spec amendments #295 (poller intake
+   gated on `loop.autonomous_merge`) and #288 (D16 dispatch
+   consumption), with post-merge findings on #296.
 5. Demo run: the operator launches one rung by hand with the one-line
    prompt ("work issue #98"), and from there the loop carries it: PR,
    runner reviews, #64 merge, advancer flips the label, the runner
@@ -219,8 +242,8 @@ whichever merges second rebases.
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | 6 | #147 | `mode:autonomous` and per-issue override labels honored by work.sh, unattended.yml and the driver. The switch itself. | open, intent:new |
-| 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | PR #232 open (evekhm-odyssey-bot, odyssey/108-ci-spend-ceiling), head 77501a8 after three follow-ups (ceiling header, the docs/SPEC.md twin, the measured-run count). Verifier escalated 06:18 (comment 5580232140); advisor ruling: merges after the B1 clause fix, a rebase and real reviews, and the 8.00 ceiling is the operator's number (not objected to). Three overrun data live on it: 2.75 (argus on PR #233, run 34186361378), 2.28 (argus on PR #221) and 2.33 (argus on PR #235, run 34194196957) against the declared 2.0; across six measured argus runs the ceiling has never bound. Argus refused the PR at 06:26 because #108 is intent:new with no review stage to derive (the #82 class), so under the #221 precedent the verifier's own review under the argus seat (#204 D15) is the review of record |
-| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at `status:implementing`; plan PR #235 merged. Implementation PR #257 open, escalated to a human at round 3 (keystone paragraph above). #151 closed; PR #228 merged 05:45 UTC 2026-09-08 |
+| 7 | #108 | Budget guard and unattended queue driver. Buildable now that #172 gave agy a post-hoc ceiling. | PR #232 open (evekhm-odyssey-bot, odyssey/108-ci-spend-ceiling), head 77501a8 after three follow-ups (ceiling header, the docs/SPEC.md twin, the measured-run count). Verifier escalated 06:18 (comment 5580232140); advisor ruling: merges after the B1 clause fix, a rebase and real reviews, and the 8.00 ceiling is the operator's number (not objected to). Three overrun data live on it: 2.75 (argus on PR #233, run 34186361378), 2.28 (argus on PR #221) and 2.33 (argus on PR #235, run 34194196957) against the declared 2.0; across six measured argus runs the ceiling has never bound. Argus refused the PR at 06:26 because #108 is intent:new with no review stage to derive (the #82 class), so under the #221 precedent the verifier's own review under the argus seat (#204 D15) is the review of record. **Correction 2026-09-09:** PR #232 merged 2026-09-08 06:42 UTC as `3d7825d`; #108 itself is still open at intent:new |
+| 8 | #64 with #151 | Reviewer-consensus merge. The merge gate and escalation scripts do not exist yet; #151 amendment r1 (PR #228) resolves R3-1 and R3-2. | #64 at `status:implementing`; plan PR #235 merged. Implementation PR #257 open, escalated to a human at round 3 (keystone paragraph above). #151 closed; PR #228 merged 05:45 UTC 2026-09-08. **Correction 2026-09-09:** PR #257 merged 05:35 UTC as `d61875c` and #64 is at status:in-review; the flip PR #297 (`6c7d71c`, 16:42 UTC) set `loop.autonomous_merge: true`, and #298 holds the two conditions still blocking a first autonomous merge |
 | 9 | #148 | A deterministic closer after review. Removes the last by-hand step. Today's by-hand closes (#207 at status:in-review with its PR merged) are exactly what it removes. | open, intent:new |
 
 ## Gate 3: issues dispatch-ready by construction
@@ -229,7 +252,7 @@ Needed for the demo story, not for the mechanism.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
-| 10 | #117 | Typed intake: issue forms and deterministic triage on open. | plan PR #202 open at review:3, status:review-stuck since the round-3 escalation; unreviewable unattended until #239 lands. The G1/G2 gates its stall produced were orphaned when #8 closed as superseded and now live on #238 |
+| 10 | #117 | Typed intake: issue forms and deterministic triage on open. | plan PR #202 open at review:3, status:review-stuck since the round-3 escalation; unreviewable unattended until #239 lands. The G1/G2 gates its stall produced were orphaned when #8 closed as superseded and now live on #238. **Correction 2026-09-09:** PR #202 merged 2026-09-08 06:46 UTC as `eb2aa19`; #117 is at status:implementing |
 | 11 | #82 | Repair path through the one command. Today every bug fix gets zero unattended review by construction: both reviewers refused PR #214 with "cannot derive a stage for #169", and it merged knowingly unreviewed. Moved here from gate 1: it does not block 1a or 1b, but it is the coverage hole after them. Confirmed again 2026-09-08 on PR #237 (the #216 fix, bug label only) and PR #232 (#108 at intent:new): reviewer checks green, no review posted. | open, intent:new |
 | 12 | #89 | `/work <n>` drives the whole ladder from one session. | open, intent:new |
 
@@ -249,6 +272,8 @@ Needed for the demo story, not for the mechanism.
   lib/github.sh, work_test.sh, docs/SPEC.md). Deterministic checks
   green; reviewer checks green with no review posted (#82 class).
   Verifier queue after #235 and #232.
+  **Correction 2026-09-09:** PR #237 merged 2026-09-08 06:44 UTC as
+  `dfe7d56` and #216 is closed.
 - **#236** — filed by the verifier 2026-09-08 06:20. work.sh now holds
   two prompt literals (#207 added REVIEW_PROMPT at
   scripts/ops/work.sh:598) and the #43 D2 guard in
@@ -290,6 +315,8 @@ tracker"; the advisor's recommendation is stated where it has one.
   not hardcoded, and the overlap with #64 (the unattended loop)
   stated in the intent. Waiting on the operator's go; recorded here
   as pending, not deferred.
+  **Correction 2026-09-09:** the operator gave the go; #259 is
+  claimed and at status:spec.
 - **nestor's harness pin on #199** (plan T3): post it on the issue
   before the implementation dispatch. The seat runs on claude /
   claude-fable-5-1 today; the pin is the operator's config call.

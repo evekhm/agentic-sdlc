@@ -659,3 +659,20 @@ and #239 is the next gate-2 blocker. Standing seats: #199 at
 status:implementing awaiting the harness-pin decision; #204 spec PR
 #211 open. Systemic trackers open: #191, #181, #168, #82, #198, #147,
 #148.
+
+Status snapshot (2026-09-09, ~17:51 UTC, main at `696f516`): #64
+merged as PR #257
+(`d61875c`, 05:35 UTC) after seven rounds, amendment r4 (PR #281)
+named the merge actor's App `Themis`, and branch protection on `main`
+went on at 05:48 UTC. The #267 recorder merged as PR #292 (`80b741c`),
+the #251 chain as PR #294 (`dc0010b`), and flip PR #297 (`6c7d71c`,
+16:42 UTC) set `loop.autonomous_merge: true`, so gate 3 is armed in
+config and blocked on #298 (filed 14:57 UTC): the gate's own skipped
+`pull_request`-event jobs make conjunct 2 false on every head, and the
+runner reviewers refuse a Refs-only pull request. Both fail closed and
+no autonomous merge has fired. #298 walks the ladder by hand (intent
+PR #300 17:10 UTC, spec PR #301 `697665b` 17:33 UTC). Open: #295,
+#288 and #291, each claimed by wave 8 at 17:47 UTC with the plan rung
+writing the intent, plus #293, #296, #147 and #148. PR #280 merged
+17:42 UTC as `696f516` and daedalus holds the #265 plan rung from
+17:43 UTC, carrying Argus's two open `high` rows as required tasks.
