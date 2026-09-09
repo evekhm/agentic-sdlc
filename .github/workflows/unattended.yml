@@ -139,14 +139,19 @@ jobs:
 
                 # Query timeline for existing grants on this PR
                 EXISTING="$(gh api "repos/$GITHUB_REPO/issues/$PR_NUMBER/timeline" --paginate 2>/dev/null \
-                  | jq -r '.[] | select(.event == "labeled" and .label.name == "deep-review") | .event' 2>/dev/null || true)"
+                  | jq -r --arg rung "$RUNG" '[.[] | select(.event == "labeled" and .label.name == "deep-review")] | if length > 1 then (.[0:-1][] | (.rung // $rung)) else empty end' 2>/dev/null || true)"
 
                 # Run check-grant
-                if ! python3 scripts/ops/execution.py --check-grant --pr "$PR_NUMBER" --rung "$RUNG" --existing-grants $EXISTING; then
-                  echo "Grant check failed; suppressing dispatch"
+                CHECK_ERR="$(python3 scripts/ops/execution.py --check-grant --pr "$PR_NUMBER" --rung "$RUNG" --existing-grants $EXISTING 2>&1)" || CHECK_STATUS=$?
+                if [ "${CHECK_STATUS:-0}" -ne 0 ]; then
+                  echo "Grant check failed; deleting label, posting refusal comment, suppressing dispatch"
+                  gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" 2>/dev/null || true
+                  REFUSAL_MSG="${CHECK_ERR:-Refused: PR #$PR_NUMBER already received a deep-review grant on the '$RUNG' rung. Policy allows at most one deep-review grant per PR per rung (REVIEW.md, #265). Escalating to human.}"
+                  gh api -X POST "repos/$GITHUB_REPO/issues/$PR_NUMBER/comments" -f body="$REFUSAL_MSG" 2>/dev/null || true
                   : > subscribers.tsv
                 else
-                  # Grant valid: dispatch Argus under deep-review
+                  # Grant valid: delete label and dispatch Argus under deep-review
+                  gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" 2>/dev/null || true
                   python3 scripts/ops/execution.py --subscribers pull_request --action "$PR_ACTION" --labels deep-review > subscribers.tsv
                 fi
               fi

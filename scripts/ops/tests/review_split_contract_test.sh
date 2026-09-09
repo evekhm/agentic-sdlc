@@ -259,6 +259,20 @@ else
     fail "D3 / AT-14: duplicate grant refusal missing or incorrect (got: $out)"
 fi
 
+# Contract assertion (F-1): workflow timeline construction of existing-grants refuses second grant
+timeline_fixture='[
+  {"event": "labeled", "label": {"name": "deep-review"}, "created_at": "2026-09-09T18:00:00Z"},
+  {"event": "unlabeled", "label": {"name": "deep-review"}, "created_at": "2026-09-09T18:00:05Z"},
+  {"event": "labeled", "label": {"name": "deep-review"}, "created_at": "2026-09-09T18:05:00Z"}
+]'
+existing_from_timeline="$(jq -r --arg rung "design" '[.[] | select(.event == "labeled" and .label.name == "deep-review")] | if length > 1 then (.[0:-1][] | (.rung // $rung)) else empty end' <<<"$timeline_fixture")"
+out_tl="$(python3 "$EXEC_PY" --check-grant --pr 100 --rung design --existing-grants $existing_from_timeline 2>&1)" || true
+if [[ "$out_tl" == *"$expected"* ]]; then
+    pass "D3 / AT-14 / F-1: second grant on same rung refused when existing-grants built from timeline fixture"
+else
+    fail "D3 / AT-14 / F-1: second grant on same rung not refused from timeline fixture (got: $out_tl)"
+fi
+
 # --- D4 / AT-15: Diff rules evaluation in execution.py ------------------------------
 banner "D4 / AT-15: execution.py --diff-rules evaluation"
 

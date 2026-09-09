@@ -83,7 +83,7 @@ fi
 [ "$AUTONOMOUS" = "true" ] || AUTONOMOUS=false
 
 # --- the pull request --------------------------------------------------------------
-if ! PR_JSON="$(gh pr view "$TARGET" --json number,state,headRefName,headRefOid,headRepository,baseRefName,body,labels,author,closingIssuesReferences)"; then
+if ! PR_JSON="$(gh pr view "$TARGET" --json number,state,headRefName,headRefOid,headRepository,baseRefName,body,labels,author,closingIssuesReferences,files)"; then
     log "cannot read pull request #$TARGET"
     exit 1
 fi
@@ -93,6 +93,15 @@ PR_STATE="$(prq '.state // "OPEN"')"
 [ "$PR_STATE" = "OPEN" ] || finish "#$PR is $PR_STATE — nothing to evaluate"
 HEAD="$(prq '.headRefOid // ""')"
 PR_LABELS="$(prq '[.labels[]?.name] | .[]')"
+
+PR_PATHS_FILE="${PR_PATHS_FILE:-}"
+GATE_TMP_PATHS=""
+if [ -z "$PR_PATHS_FILE" ]; then
+    GATE_TMP_PATHS="$(mktemp)"
+    prq '.files[]?.path // empty' > "$GATE_TMP_PATHS" 2>/dev/null || true
+    PR_PATHS_FILE="$GATE_TMP_PATHS"
+    trap '[ -z "${GATE_TMP_PATHS:-}" ] || rm -f "$GATE_TMP_PATHS"' EXIT
+fi
 
 # --- which issue this pull request belongs to (#245) -------------------------------
 # GitHub's own closing references first, then every closing keyword and
@@ -276,6 +285,7 @@ else
         sub_args=( "--subscribers" "pull_request" )
         [ -z "$STATUS" ] || sub_args+=( "--status-label" "$STATUS" )
         [ -z "$PR_LABELS" ] || sub_args+=( "--labels" $PR_LABELS )
+        [ -z "$PR_PATHS_FILE" ] || sub_args+=( "--paths-file" "$PR_PATHS_FILE" )
         assigned_personas="$(python3 "$REPO_ROOT/scripts/ops/execution.py" "${sub_args[@]}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ',' | sed 's/,$//' || true)"
         ASSIGNED="${assigned_personas:-argus,atlas}"
     fi
