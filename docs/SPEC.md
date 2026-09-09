@@ -289,13 +289,22 @@ grants only `contents: read`.
 
 ### lifecycle.labels
 Lifecycle state lives in GitHub issue labels (#4,
-`intent/4-labels/`). Five labels are human-facing — `intent:new`,
+`intent/4-labels/`, #267). Five labels are human-facing — `intent:new`,
 `in-progress`, `hold`, `blocked`, `bootstrap` — and the stage is a
 single `status:*` label on the ladder `status:planning` →
 `status:spec` → `status:build` → `status:implementing` →
 `status:in-review`, with **at most one set at a time**. `review:1`,
 `review:2` and `review:3` count reviewer iterations; `review:3`
-escalates to `status:review-stuck`. All 14 are provisioned
+escalates to `status:review-stuck`. Themis derives and synchronizes review
+and consensus labels from the consensus ledger (`scripts/ci/review_recorder.sh`):
+`argus:findings` (open blocking findings: `security` or `high`),
+`argus:suggestions` (open non-blocking observations: `normal` or `suggestion`),
+the consensus axis (`consensus:agreed`, `consensus:pending` for unresolved
+security findings, `consensus:disputed` for disputed findings),
+`review:merge-ready` (agreed consensus at the current head with no open blocking
+findings), and `review:verifying` (pull request head newer than reviewed head with
+open blocking findings). Unmanaged labels such as `bootstrap` are strictly
+preserved during label synchronization. All 21 labels are provisioned
 idempotently by `scripts/setup/bootstrap_tracker.sh`, whose
 `--labels-only` mode runs the label section and exits before anything
 reads or files an issue. `.github/workflows/lifecycle.yml` writes the
@@ -433,27 +442,30 @@ The ladder is written end to end here; `review:1..3` and
 
 ### review.policy
 `REVIEW.md` is the review protocol the reviewer personas compile
-against (PR #14). It defines: four severity tiers
+against (PR #14, #267). It defines: four authoritative severity tiers
 (`security`/`high`/`normal`/`suggestion`) with a closed `high` list
-and a failure-scenario requirement; the three-round funnel (round 1
-full from both reviewers, rounds 2–3 verification with blocking-only
-new findings, security-only past round 3); per-reviewer finding ID
-namespaces (`R<round>-<n>`, `R<issue>-<n>`, `AT-<n>`) stable from
-first appearance; the ledger row fields and the header/trailer
-signature convention; consensus rules (independent round 1, dual
-sign-off on `security` only, evidence arbitrates, verdict format,
-three-exchange dispute cap); consensus keyed to Decision IDs where
-the spec under review has a Decisions table; label derivation from
-ledger state; merge-anytime with one post-merge follow-up issue; and
-the deep-review grant. The two reviewers are deployment-pinned to
+and a mandatory sibling failure-scenario requirement (`<!-- failure-scenario:<id> -->`);
+high findings lacking a concrete failure scenario are mechanically demoted
+by the recorder to `normal` with table note `[demoted from high: missing failure_scenario marker]`.
+Findings with non-enum severities fail validation loudly: the recorder logs the
+refusal, appends `[refused: <id>: invalid severity <x>]`, creates no row, and
+exits 0. Review verdicts are posted as structured blocks
+`<!-- review-verdict:<reviewer>:(clean|findings) -->` ... `<!-- review-verdict-end -->`
+carrying `<!-- reviewed-head:<sha> -->`, `<!-- run-id:<id> -->`, `<!-- round:<n> -->`,
+and finding lines `<!-- finding:<id>:<severity>:<status>:<peer> -->` (admitting Decision-ID
+tags `@<Dn>` matching `[A-Za-z0-9@-]`). The three-round funnel admits all findings in
+round 1; rounds 2–3 admit `security` and `high`, while new `suggestion` findings are recorded
+as non-blocking `normal` tracking rows; past round 3, only `security` findings are admitted,
+and any other new filing is demoted to `normal`. Dual agreement is enforced on `security`:
+starts `pending`, discoverer cannot self-agree, and peer must explicitly agree on finding
+and fix verification. Maintainers (`OWNER`, `MEMBER`, `COLLABORATOR` excluding bots) may retier
+findings via `@(argus|atlas) retier <id> <severity>`, updating severity with note
+`[retiered to <severity> by @<user>]`; unauthorized commands are rejected with
+`[refused: retier by @<user>: unauthorized]`. The two reviewers are deployment-pinned to
 different model families; which family backs which reviewer is a
-`config/` fact and appears nowhere in the policy. The document is
-normative for the ported automation: no recorder, workflow, or
-scheduled sweep exists yet (#8, #9), so every rule is currently
-prompt-enforced with a human backstop; the label names it references
-(findings/suggestions/escalation) now resolve to the concrete
-taxonomy landed in `lifecycle.labels` (#4) — `status:review-stuck` is
-the escalation label.
+`config/` fact and appears nowhere in the policy. The consensus ledger
+is maintained by Themis via `scripts/ci/review_recorder.sh`, deriving
+labels (`lifecycle.labels`) and gate readiness (`loop.autonomous`).
 
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
@@ -977,6 +989,22 @@ is agreed, neither `hold` nor `blocked` is present, the merger is a
 different identity from the author, the target rung outranks every rung
 the loop ledger records, and the ledger's head marker is present. With
 the flag off the same evaluation runs and nothing is written.
+
+Before merge evaluation executes, `.github/workflows/merge-gate.yml` runs
+a dedicated `record` job (`scripts/ci/review_recorder.sh <pr>`) ahead of `gate`
+(`gate` declares `needs: [record]`). Both jobs run under `environment: themis`
+and share `concurrency: group: merge-gate` (#267). The recorder maintains a single
+in-place consensus ledger comment (`<!-- consensus-ledger:<pr> -->`) per pull request:
+initial `POST` on first review, byte-for-byte skip if the rendered body matches
+the existing comment, and in-place `PATCH` on subsequent reviews preserving comment ID.
+The recorder verifies Actions run provenance against the GitHub Actions API:
+run `head_sha` must match `reviewed-head`, workflow path must be `.github/workflows/unattended.yml`,
+`head_repository.full_name` must match repository, and event must be `pull_request` or
+`workflow_dispatch`. Terminal run failure or cancellation (`failure`, `cancelled`) withdraws
+the reviewer's accepted head marker (reverting to previous accepted head or unset), while
+existing findings rows survive. The circuit breaker re-reads `hold` across the pull request
+and all closing issue references before writing; if present, the recorder logs the held
+object and exits 0 without writing.
 
 CI (conjunct 2) is read from the pull request's own `mergeStateStatus`
 rather than reconstructed from a required-checks list: `CLEAN` or
