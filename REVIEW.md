@@ -181,8 +181,8 @@ row, then closes the ledger
   unverifiable applier is refused). Manual dispatch is always
   allowed. A daily run brake and a dispute cap of three exchanges sit
   beside it. The funnel is what the gate was missing: the gate bounds
-  round count, the funnel bounds round *scope*. (Gate automation
-  ports with #8/#9.)
+  round count, the funnel bounds round *scope*. The recorder
+  (`scripts/ci/review_recorder.sh`) enforces the funnel on every review round.
 
 Why both bounds are needed, from the predecessor repo
 (`agentic-experiments-lab`): with an automated fixer as PR author and
@@ -474,8 +474,8 @@ before a prompt describes it in the present tense. The rows marked
   *recorder* label derivation.
 - Decision-ID keying of findings and verdicts — *recorder*, against
   the spec's Decisions table.
-- The single post-merge follow-up issue — *recorder*, on the merge or
-  close event.
+- The single post-merge follow-up issue: *merge actor* (#64 D16), on
+  the merge event.
 - Budget gate, daily brake, dispute cap — deterministic gates that
   run ahead of any model call.
 - Round-1 thoroughness, verification scope discipline, verdict format

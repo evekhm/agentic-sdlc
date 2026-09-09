@@ -458,7 +458,9 @@ round 1; rounds 2–3 admit `security` and `high`, while new `suggestion` findin
 as non-blocking `normal` tracking rows; past round 3, only `security` findings are admitted,
 and any other new filing is demoted to `normal`. Dual agreement is enforced on `security`:
 starts `pending`, discoverer cannot self-agree, and peer must explicitly agree on finding
-and fix verification. Maintainers (`OWNER`, `MEMBER`, `COLLABORATOR` excluding bots) may retier
+and fix verification. Only the discovering reviewer transitions row status to `fixed`; a peer
+reporting `fixed` on an open row records concurrence while status remains `open` until the
+discoverer verifies. Maintainers (`OWNER`, `MEMBER`, `COLLABORATOR` excluding bots) may retier
 findings via `@(argus|atlas) retier <id> <severity>`, updating severity with note
 `[retiered to <severity> by @<user>]`; unauthorized commands are rejected with
 `[refused: retier by @<user>: unauthorized]`. The two reviewers are deployment-pinned to
@@ -1003,8 +1005,8 @@ run `head_sha` must match `reviewed-head`, workflow path must be `.github/workfl
 `workflow_dispatch`. Terminal run failure or cancellation (`failure`, `cancelled`) withdraws
 the reviewer's accepted head marker (reverting to previous accepted head or unset), while
 existing findings rows survive. The circuit breaker re-reads `hold` across the pull request
-and all closing issue references before writing; if present, the recorder logs the held
-object and exits 0 without writing.
+and all linked issues (closing references, body closing and reference mentions, and branch name)
+before writing; if present, the recorder logs the held object and exits 0 without writing.
 
 CI (conjunct 2) is read from the pull request's own `mergeStateStatus`
 rather than reconstructed from a required-checks list: `CLEAN` or
