@@ -1,7 +1,11 @@
 # agentic-sdlc
 
-**TL;DR:** Say what you want. A cast of AI agents turns it into
-reviewed, merged software, then improves the system that made it.
+**TL;DR:** A harness-agnostic software development lifecycle run by
+a cast of AI agents. The process is defined once, independent of any
+vendor, and each role is placed on the coding harness and model that
+fit it best. An idea enters as intent and leaves as reviewed, merged
+software, and every pass through the loop improves the system that
+built it.
 
 An intent goes in. One agent sharpens it into a specification, one
 plans the work, one builds it, two independent reviewers from
