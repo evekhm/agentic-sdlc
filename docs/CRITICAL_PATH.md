@@ -12,7 +12,8 @@ file is the live ordering under it. The advisor seat owns both; update
 this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line.
 
-Status line: 2026-09-09, revision seven (~17:45 UTC): step 3's PR #257
+Status line: 2026-09-09, revision seven (~17:51 UTC, main at
+`696f516`): step 3's PR #257
 (the #64 implementation) merged 05:35 UTC as `d61875c` after seven
 review rounds, the last of them driven from a Claude Fable session;
 spec amendment r4 (PR #281, `8525d61`) added D31, which names the
@@ -27,11 +28,13 @@ make conjunct 2 false on every head, and the runner reviewers refuse
 a Refs-only pull request. Both fail closed. #298 itself walks the
 ladder by hand-dispatched work.sh rungs in a separate session: intent
 PR #300 merged 17:10 UTC, spec PR #301 merged 17:33 UTC (`697665b`).
-Open behind #298: spec amendments #295, #288 and #291 (all
-intent:new), post-merge findings #293 and #296, and PR #280 (the #265
-spec) at Argus's round-3 cap awaiting the operator, where Argus's
-position is that merging loses nothing because the two open `high`
-rows are design-text gaps that resurface at the plan rung. Live
+Open behind #298: spec amendments #295, #288 and #291, each claimed
+under the athena App by wave 8 at 17:47 UTC and carrying intent:new
+plus in-progress while the plan rung writes the intent, and post-merge
+findings #293 and #296. PR #280 (the #265 spec) merged 17:42 UTC as
+`696f516`, and the 265p watcher launched daedalus on the #265 plan
+rung (claim 17:43 UTC, issue at status:build); Argus's two open `high`
+rows R3-1 and R3-2 carried into that rung as required tasks. Live
 `gh issue list` state always beats this file.
 
 ## Fast path to the demo (operator directive, 2026-09-08 06:40 UTC)
