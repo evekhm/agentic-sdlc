@@ -8,18 +8,33 @@ version cite their PR inline.
 
 ## Deployment status
 
-Bootstrap phase (Rung 0–2 of the pinned tracker, issue #12). CI
-enforcement of this spec arrives with `ci.gates` below (#6): from the
-merge of that PR, the drift, sanitization and spec checks run on every
-pull request, so the living-spec rule and the generated-target rule
-are machine-enforced rather than convention-enforced. Making the three
-checks *required* to merge is a branch-protection setting a human
-applies to `main`; until it is applied, a red check is visible but not
-blocking. Every other rule in this file remains convention-enforced.
-During Rung 0, commits landed on `main` directly; this seed entry
-records that state. From this file's first commit forward,
-behavior-bearing changes go through PRs per the tracker workflow in
-AGENTS.md.
+The operator executes the seven-step enablement checklist prior to
+launching the autonomy flip pull request (#251, D6):
+
+1. Verify Themis provisioning:
+   Run `python3 scripts/auth/create_all_apps.py --only themis --check`.
+   Must exit 0 with Environment `themis` present, secrets populated, and
+   closing line `every entry is complete`.
+2. Configure VM supervisor:
+   Copy `scripts/placement/vm-local/poll.sidecar.json` to
+   `~/.gemini/config/sidecars/sdlc-poller/sidecar.json` and enable in
+   `~/.gemini/config/config.json`. Alternatively, copy
+   `scripts/placement/vm-local/poll.service` to
+   `~/.config/systemd/user/poll.service` and run `systemctl --user daemon-reload && systemctl --user enable --now poll.service`.
+3. Verify branch protection on `main`:
+   Run `gh api repos/evekhm/agentic-sdlc/branches/main/protection` and
+   verify required status checks with strict false and enforce_admins false.
+4. Verify execution bindings:
+   Run `python3 scripts/ops/execution.py --check` and verify exit 0.
+5. Preflight vm-local persona credentials:
+   Run `python3 scripts/auth/mint_app_token.py <persona> --require-repo --quiet`
+   for athena, daedalus, and odyssey; all must exit 0.
+6. Submit and merge the autonomy flip pull request:
+   Open the pre-approved autonomy flip pull request setting
+   `loop.autonomous_merge: true` in `config/execution.yaml` with P1 and P2
+   evidence (#64 acceptance 28).
+7. Initiate issue processing:
+   Verify poller intake on target issue or trigger first hop.
 
 ## Capabilities
 
@@ -433,10 +448,19 @@ run-ending error naming the range walk, before a single `gh` call is
 made. The one deliberate exception is the near-miss report's own
 read (D17): it is not a candidate and buys at most one warning, so a
 failed read there stays quiet rather than turning the run red over a
-line that was never going to write anything (#73, PR #111). The
-workflow uses the default `GITHUB_TOKEN` and posts as
+line that was never going to write anything (#73, PR #111). The workflow uses the default `GITHUB_TOKEN` and posts as
 `github-actions[bot]` — infrastructure, not a persona — with
 `issues: write, contents: read, pull-requests: read` and no secrets.
+When an issue advances rungs on the ladder (#251, D1, D8), the
+lifecycle advancer inspects the latest claim comment author login via
+persona identity mappings. If the holder login matches the persona of
+the stage completing the merge (e.g. Athena for intent/spec, Daedalus for
+plan, Odyssey for implement), the advancer releases the claim by
+removing `in-progress` under `GITHUB_TOKEN` before invoking the
+placement adapter for the successor rung. If `in-progress` is held by a
+different persona or a foreign login, dispatch is withheld and
+`in-progress` is preserved. Advancing to the terminal review rung
+(`status:in-review`) likewise releases Odyssey's claim.
 The ladder is written end to end here; `review:1..3` and
 `status:review-stuck` are review state and remain #8/#9's.
 
@@ -852,7 +876,7 @@ was already below five of the six argus reviews measured through
 at $1.16) — which is the general hazard in switching a declared number
 to an enforced one: it was never true, and nothing failed, because
 nothing read it. v1 binds five personas — argus and atlas on
-`pull_request` at `gh-actions`, athena, daedalus and odyssey `manual`
+`pull_request` at `gh-actions`, athena, daedalus and odyssey `ladder`
 at `vm-local`; cassandra carries no binding, because her cadence is
 #11's.
 
@@ -1057,6 +1081,24 @@ token under one job-level `environment: themis`, whose
 deployment-branch policy admits `main` only (D23); that policy is
 unverifiable from inside the loop and is precondition P1, not a
 runtime check (Amendment r2).
+
+Continuous poller and VM supervisor architecture (#251, D2, D4, D5):
+The continuous poller (`scripts/placement/vm-local/poll.sh`), running under
+an Antigravity sidecar (`poll.sidecar.json`) or a systemd user unit
+(`poll.service`), polls the GitHub repository on a configurable interval
+(default 30s) to drive unattended autonomous rungs. When unconsumed
+`dispatch` ledger rows appear on ladder rungs (`status:planning`,
+`status:spec`, `status:build`, `status:implementing`), the poller
+preflights builder credentials, claims the issue under persona identity
+(`CLAIM_ACTOR=<persona> CLAIM_SESSION=poll-<pid> scripts/ops/claim.sh <issue>`),
+and dispatches through `scripts/placement/vm-local/run.sh <issue> --as <persona>`.
+First-hop intake discovers unclaimed `intent:new` issues, claiming and
+dispatching them to Athena without writing loop-ledger rows prior to intent
+merge (D5). Fix rounds on pull requests at `status:in-review` with blocking
+review findings bypass `claim.sh` entirely and acquire a per-PR lock
+(`${TMPDIR:-/tmp}/poll-pr-<pr>.lock`) to serialize executions (D2). If VM
+credentials for a persona are missing during preflight, the poller logs a
+notice and skips that persona's rows without failing or terminating (D4).
 
 ## Agreed, not yet built
 
