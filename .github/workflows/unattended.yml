@@ -34,7 +34,7 @@ name: Unattended personas
 # duplication is a checked derivation, not a second source of truth.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_dispatch:
     inputs:
       number:
@@ -98,6 +98,13 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_PERSONA: ${{ inputs.persona }}
+          PR_ACTION: ${{ github.event.action }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          LABEL_NAME: ${{ github.event.label.name }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GITHUB_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
@@ -105,6 +112,71 @@ jobs:
             binding="$(python3 scripts/ops/execution.py --binding "$INPUT_PERSONA")"
             printf '%s\t%s\n' "$INPUT_PERSONA" "$(awk '{print $2}' <<<"$binding")" \
               > subscribers.tsv
+          elif [ "$EVENT_NAME" = "pull_request" ]; then
+            # Draft PRs skip review dispatch entirely (#265 D2, AT-9)
+            if [ "${IS_DRAFT:-false}" = "true" ] || [ "${{ github.event.pull_request.draft }}" = "true" ]; then
+              echo "PR is draft; skipping review dispatch"
+              : > subscribers.tsv
+            elif [ "$PR_ACTION" = "labeled" ]; then
+              if [ "$LABEL_NAME" != "deep-review" ]; then
+                echo "Label '$LABEL_NAME' is not deep-review; skipping dispatch"
+                : > subscribers.tsv
+              else
+                # Resolve current rung from branch/issue
+                RUNG=""
+                if [[ "$HEAD_REF" =~ ^[a-zA-Z0-9_-]+/([0-9]+)- ]]; then
+                  ISSUE_NUM="${BASH_REMATCH[1]}"
+                  ISSUE_JSON="$(gh api "repos/$GITHUB_REPO/issues/$ISSUE_NUM" 2>/dev/null || true)"
+                  STATUS_LABEL="$(jq -r '.labels[].name' <<<"$ISSUE_JSON" 2>/dev/null | grep '^status:' | head -1 || true)"
+                  case "$STATUS_LABEL" in
+                    status:planning) RUNG="plan" ;;
+                    status:spec) RUNG="design" ;;
+                    status:build) RUNG="build" ;;
+                    status:implementing) RUNG="implement" ;;
+                  esac
+                fi
+                RUNG="${RUNG:-implement}"
+
+                # Query timeline for existing grants on this PR
+                EXISTING="$(gh api "repos/$GITHUB_REPO/issues/$PR_NUMBER/timeline" --paginate 2>/dev/null \
+                  | jq -r '.[] | select(.event == "labeled" and .label.name == "deep-review") | .event' 2>/dev/null || true)"
+
+                # Run check-grant
+                if ! python3 scripts/ops/execution.py --check-grant --pr "$PR_NUMBER" --rung "$RUNG" --existing-grants $EXISTING; then
+                  echo "Grant check failed; suppressing dispatch"
+                  : > subscribers.tsv
+                else
+                  # Grant valid: dispatch Argus under deep-review
+                  python3 scripts/ops/execution.py --subscribers pull_request --action "$PR_ACTION" --labels deep-review > subscribers.tsv
+                fi
+              fi
+            else
+              # General pull_request events: opened, synchronize, reopened, ready_for_review
+              STATUS_LABEL=""
+              if [[ "$HEAD_REF" =~ ^[a-zA-Z0-9_-]+/([0-9]+)- ]]; then
+                ISSUE_NUM="${BASH_REMATCH[1]}"
+                ISSUE_JSON="$(gh api "repos/$GITHUB_REPO/issues/$ISSUE_NUM" 2>/dev/null || true)"
+                STATUS_LABEL="$(jq -r '.labels[].name' <<<"$ISSUE_JSON" 2>/dev/null | grep '^status:' | head -1 || true)"
+              fi
+
+              # Get touched paths and labels from PR
+              PR_JSON="$(gh api "repos/$GITHUB_REPO/pulls/$PR_NUMBER" 2>/dev/null || true)"
+              PR_LABELS="$(jq -r '.labels[].name' <<<"$PR_JSON" 2>/dev/null | tr '\n' ' ' || true)"
+              gh api "repos/$GITHUB_REPO/pulls/$PR_NUMBER/files" --paginate --jq '.[].filename' > pr_files.txt 2>/dev/null || true
+
+              SUBSCRIBER_ARGS=( "--subscribers" "pull_request" "--action" "$PR_ACTION" )
+              if [ -n "$STATUS_LABEL" ]; then
+                SUBSCRIBER_ARGS+=( "--status-label" "$STATUS_LABEL" )
+              fi
+              if [ -s pr_files.txt ]; then
+                SUBSCRIBER_ARGS+=( "--paths-file" "pr_files.txt" )
+              fi
+              if [ -n "$PR_LABELS" ]; then
+                SUBSCRIBER_ARGS+=( "--labels" $PR_LABELS )
+              fi
+
+              python3 scripts/ops/execution.py "${SUBSCRIBER_ARGS[@]}" > subscribers.tsv
+            fi
           else
             python3 scripts/ops/execution.py --subscribers "$EVENT_NAME" > subscribers.tsv
           fi
