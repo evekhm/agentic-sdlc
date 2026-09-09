@@ -270,6 +270,15 @@ else
     CL="$(awk -v m="$CL_MARK" '$0 == m {f = 1} f {print} /<!-- consensus-ledger-end -->/ {f = 0}' <<<"$CL_BODY")"
     ARGUS_HEAD="$(sed -nE 's/^<!-- reviewed-head:argus:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
     ATLAS_HEAD="$(sed -nE 's/^<!-- reviewed-head:atlas:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
+    ASSIGNED="$(sed -nE 's/^<!-- assigned:([a-z,]+) -->$/\1/p' <<<"$CL" | tail -1)"
+    if [ -z "$ASSIGNED" ]; then
+        # Absent-marker fallback (R3-1): resolve assigned set dynamically through execution.py --subscribers
+        sub_args=( "--subscribers" "pull_request" )
+        [ -z "$STATUS" ] || sub_args+=( "--status-label" "$STATUS" )
+        [ -z "$PR_LABELS" ] || sub_args+=( "--labels" $PR_LABELS )
+        assigned_personas="$(python3 "$REPO_ROOT/scripts/ops/execution.py" "${sub_args[@]}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ',' | sed 's/,$//' || true)"
+        ASSIGNED="${assigned_personas:-argus,atlas}"
+    fi
     n_cl_any="$(grep -c 'ledger-row:' <<<"$CL" || true)"
     CTUP="$(sed -nE 's/^<!-- ledger-row:([A-Za-z0-9@-]+:(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none)) -->$/\1/p' <<<"$CL")"
     n_cl_ok="$(grep -c . <<<"$CTUP" || true)"
@@ -280,14 +289,25 @@ else
         DISPUTED="$(awk -F: '$4 == "dispute" {print $1}' <<<"$CTUP")"
         PENDING_SEC="$(awk -F: '$2 == "security" && $4 == "pending" {print $1}' <<<"$CTUP")"
         AT_OPEN="$(awk -F: '$1 ~ /^AT-/ && $3 == "open" {print $1}' <<<"$CTUP")"
-        if [ -n "$ARGUS_HEAD" ]; then C[11]=1; WHY[11]="ledger carries reviewed-head:argus and the head probe read $HEAD"
-        else WHY[11]="the ledger carries no reviewed-head marker"; fi
+        if [ "$ASSIGNED" = "atlas" ]; then
+            C[11]=1; WHY[11]="atlas-only assignment skips argus requirement"
+        elif [ -n "$ARGUS_HEAD" ]; then
+            C[11]=1; WHY[11]="ledger carries reviewed-head:argus and the head probe read $HEAD"
+        else
+            WHY[11]="the ledger carries no reviewed-head marker"
+        fi
         if [ -z "$BLOCKING" ]; then C[4]=1; WHY[4]="blocking set empty"
         else WHY[4]="blocking set: $(tr '\n' ' ' <<<"$BLOCKING")"; fi
         if [ -n "$DISPUTED" ]; then WHY[5]="dispute on: $(tr '\n' ' ' <<<"$DISPUTED")"
         elif [ -n "$PENDING_SEC" ]; then WHY[5]="consensus axis pending on: $(tr '\n' ' ' <<<"$PENDING_SEC")"
         else C[5]=1; WHY[5]="consensus axis agreed, no dispute"; fi
-        if [ "$ARGUS_HEAD" != "$HEAD" ]; then
+        if [ "$ASSIGNED" = "atlas" ]; then
+            if [ "$ATLAS_HEAD" = "$HEAD" ]; then
+                C[3]=1; WHY[3]="atlas recorded at $HEAD (atlas-only assignment)"
+            else
+                WHY[3]="atlas verdict is at ${ATLAS_HEAD:-none}, head is $HEAD"
+            fi
+        elif [ "$ARGUS_HEAD" != "$HEAD" ]; then
             WHY[3]="argus verdict is at ${ARGUS_HEAD:-none}, head is $HEAD"
         elif [ "$ATLAS_HEAD" = "$HEAD" ]; then
             C[3]=1; WHY[3]="argus and atlas both recorded at $HEAD"

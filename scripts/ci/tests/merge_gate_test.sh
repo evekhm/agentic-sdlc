@@ -857,5 +857,20 @@ run "MG-36: exits 0" 123
 has "not a ladder pull request; nothing evaluated, nothing written" "MG-36: unlinked PR skips cleanly"
 not_merged "MG-36"
 
+banner "MG-37 · D5 · single-reviewer Atlas consensus merges when assigned:atlas"
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" atlas)")"
+run "MG-37: exits 0" 123
+has "conjunct (3): true" "MG-37: conjunct (3) reports true for Atlas-only assignment"
+has "conjunct (11): true" "MG-37: conjunct (11) reports true for Atlas-only assignment"
+merged "MG-37: single-reviewer Atlas consensus merges"
+
+banner "MG-38 · D5 · dual-assigned PR requires Argus consensus"
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" argus,atlas)")"
+run "MG-38: exits 0" 123
+has "conjunct (3): false" "MG-38: conjunct (3) reports false when Argus missing"
+not_merged "MG-38: dual-assigned PR does not merge without Argus"
+
 echo
 echo "merge_gate_test.sh: all scenarios passed"
