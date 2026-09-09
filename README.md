@@ -7,10 +7,16 @@ An intent goes in. One agent sharpens it into a specification, one
 plans the work, one builds it, two independent reviewers from
 different model families judge the result, and a maintainer watches
 it run and proposes what comes next. A human sets direction and
-decides escalations. Each role runs wherever it fits best: frontier
-reasoning where judgment shapes the outcome, fast capacity where the
-process has matured. Any role can move between harnesses and model
-families with a one-line change (the [placement
+decides escalations.
+
+The design is **harness-agnostic**. Every agent is written once, in a
+vendor-free source, and compiled for whichever coding harness runs it:
+Claude Code and Antigravity are the two it ships with, and no rule,
+protocol or artifact depends on either. Each role runs wherever it
+fits best: frontier reasoning where judgment shapes the outcome, fast
+capacity where the process has matured. Moving a role to another
+harness or model family is a one-line change, and the process stays
+the same (the [placement
 thesis](#two-harnesses-two-model-families)). The system follows the
 [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
 and builds itself with its own loop.
@@ -267,10 +273,13 @@ or an independent reader
 ## Two harnesses, two model families
 
 A **harness** is the program a persona runs inside: Claude Code
-(Anthropic) or Antigravity (Google, via `agy`). A persona names only a
-tier in a vendor-free source file. The compiler
-[`scripts/sync_agents.py`](scripts/sync_agents.py) emits each harness's
-prompt file; CI fails if a compiled file drifts from its source.
+(Anthropic) or Antigravity (Google, via `agy`). The process owns the
+personas, the protocols and the gates; a harness only executes them.
+A persona names only a tier in a vendor-free source file, and the
+compiler [`scripts/sync_agents.py`](scripts/sync_agents.py) emits each
+harness's prompt file from it; CI fails if a compiled file drifts from
+its source. A third harness is one more compiler target, and the
+personas, the ladder and the review protocol carry over unchanged.
 
 **Pins.** Harness and model are one line per persona in
 [`config/deployments.yaml`](config/deployments.yaml), resolved against
