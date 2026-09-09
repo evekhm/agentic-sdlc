@@ -9,15 +9,17 @@ different model families judge the result, and a maintainer watches
 it run and proposes what comes next. A human sets direction and
 decides escalations.
 
-The design is **harness-agnostic**. Every agent is written once, in a
-vendor-free source, and compiled for whichever coding harness runs it:
-Claude Code and Antigravity are the two it ships with, and no rule,
-protocol or artifact depends on either. Each role runs wherever it
-fits best: frontier reasoning where judgment shapes the outcome, fast
-capacity where the process has matured. Moving a role to another
-harness or model family is a one-line change, and the process stays
-the same (the [placement
-thesis](#two-harnesses-two-model-families)). The system follows the
+This is a **harness-agnostic SDLC**. The process comes first: the
+roles, the protocols, the gates and the artifacts are defined once,
+in vendor-free sources, and none of them depends on a particular
+vendor. Each persona is then assigned its own coding harness and model,
+whichever fits the team's needs and requirements: frontier reasoning
+where judgment shapes the outcome, fast capacity where the process has
+matured, or the platform a team already runs on. Currently supported
+harnesses are Antigravity and Claude Code.
+Reassigning a persona is a one-line change, and the process stays the
+same (the [placement thesis](#two-harnesses-two-model-families)). The
+system follows the
 [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
 and builds itself with its own loop.
 
@@ -26,8 +28,8 @@ and builds itself with its own loop.
 Two kinds of actors appear in this document.
 
 - **A persona** is an AI agent. It has one job, a protocol, its own
-  GitHub account and a model tier. It runs inside a coding harness,
-  Claude Code or Antigravity.
+  GitHub account and a model tier. It runs inside a coding harness of
+  the owner's choosing (currently supported: Antigravity, Claude Code).
 - **The owner** is the human who runs the repository. The owner files
   intent as a plain-language issue, answers the questions the personas
   ask back, and decides escalations.
