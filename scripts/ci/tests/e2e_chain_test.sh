@@ -42,12 +42,16 @@ FIXTURES="$WORK/fixtures"
 WRITES="$WORK/writes.log"
 INVOKES="$WORK/invocations.log"
 LAUNCHES="$WORK/launches.log"
+CLAIMS="$WORK/claims.log"
+MINTS="$WORK/mints.log"
 mkdir -p "$FIXTURES" "$WORK/bin"
 : > "$WRITES"
 : > "$INVOKES"
 : > "$LAUNCHES"
+: > "$CLAIMS"
+: > "$MINTS"
 
-export FIXTURES WRITES INVOKES LAUNCHES
+export FIXTURES WRITES INVOKES LAUNCHES CLAIMS MINTS
 export GITHUB_REPO="evekhm/agentic-sdlc"
 export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
 REAL_GIT="$(command -v git)"
@@ -269,12 +273,29 @@ fi
 # Stub mint_app_token.py
 for arg in "$@"; do
     case "$arg" in
-        *mint_app_token.py)
-            if [ -n "${FAIL_MINT:-}" ]; then
-                echo "error: mint failure simulated" >&2
+        *mint_app_token.py*)
+            echo "mint $*" >> "$MINTS"
+            persona="${@: -1}"
+            for p in "$@"; do
+                case "$p" in
+                    athena|odyssey|daedalus|themis|argus|atlas)
+                        persona="$p"
+                        ;;
+                esac
+            done
+            if [ -n "${FAIL_MINT_PERSONA:-}" ] && [ "$persona" = "$FAIL_MINT_PERSONA" ]; then
+                echo "stub mint: missing private key for $persona" >&2
                 exit 1
             fi
-            echo "stub-token-not-a-credential"
+            if [ "${FAIL_MINT:-0}" = "1" ]; then
+                echo "stub mint: missing private key for $persona" >&2
+                exit 1
+            fi
+            echo "mock-token-$persona"
+            exit 0
+            ;;
+        *execution.py*--spend-ceiling*|*execution.py*--binding*)
+            echo "50.00"
             exit 0
             ;;
     esac
@@ -283,11 +304,11 @@ exec "$REAL_PYTHON3" "$@"
 PYSTUB
 chmod +x "$WORK/bin/python3"
 
-# --- Harness stubs: claude and agy -------------------------------------------
-# Copied from scripts/ops/tests/work_test.sh:138-160
+# --- Harness and dispatch stubs -----------------------------------------------
 cat > "$WORK/bin/claude" <<'CLAUDETESTUB'
 #!/usr/bin/env bash
 echo "claude $*" >> "$LAUNCHES"
+echo "WORK-RESULT: ok"
 exit 0
 CLAUDETESTUB
 chmod +x "$WORK/bin/claude"
@@ -295,14 +316,37 @@ chmod +x "$WORK/bin/claude"
 cat > "$WORK/bin/agy" <<'AGYSTUB'
 #!/usr/bin/env bash
 echo "agy $*" >> "$LAUNCHES"
+echo "WORK-RESULT: ok"
 exit 0
 AGYSTUB
 chmod +x "$WORK/bin/agy"
 
-# Setup synthetic git range for lifecycle tests
+cat > "$WORK/bin/run.sh" <<'RUNSTUB'
+#!/usr/bin/env bash
+echo "run.sh $*" >> "$LAUNCHES"
+exit 0
+RUNSTUB
+chmod +x "$WORK/bin/run.sh"
+
+cat > "$WORK/bin/claim.sh" <<'CLAIMSTUB'
+#!/usr/bin/env bash
+echo "claim.sh $*" >> "$CLAIMS"
+exit 0
+CLAIMSTUB
+chmod +x "$WORK/bin/claim.sh"
+
+# Setup synthetic git ranges for lifecycle tests (Decision B)
 SANDBOX="$WORK/repo"
-mkdir -p "$SANDBOX/personas" "$SANDBOX/intent/999-test"
+mkdir -p "$SANDBOX/personas" "$SANDBOX/scripts/placement/vm-local"
 cp "$REPO/personas/lifecycle.json" "$SANDBOX/personas/lifecycle.json"
+
+cat > "$SANDBOX/scripts/placement/vm-local/run.sh" <<'SANDBOXRUN'
+#!/usr/bin/env bash
+echo "run.sh $*" >> "$LAUNCHES"
+exit 0
+SANDBOXRUN
+chmod +x "$SANDBOX/scripts/placement/vm-local/run.sh"
+
 (
     cd "$SANDBOX" || exit 1
     "$REAL_GIT" init -q .
@@ -311,32 +355,79 @@ cp "$REPO/personas/lifecycle.json" "$SANDBOX/personas/lifecycle.json"
     echo seed > seed.txt
     "$REAL_GIT" add -A
     "$REAL_GIT" commit -qm seed
-    C0="$("$REAL_GIT" rev-parse HEAD)"
+    C_BASE="$("$REAL_GIT" rev-parse HEAD)"
 
+    # Range 1 (intent): adds intent/999-test/intent.md
+    "$REAL_GIT" checkout -qb intent-br "$C_BASE"
+    mkdir -p intent/999-test
     printf '# Intent\n' > intent/999-test/intent.md
     "$REAL_GIT" add -A
     "$REAL_GIT" commit -qm intent
-    C1="$("$REAL_GIT" rev-parse HEAD)"
+    C_INTENT="$("$REAL_GIT" rev-parse HEAD)"
 
+    # Range 2 (spec): adds intent/999-test/spec.md
+    "$REAL_GIT" checkout -qb spec-br "$C_INTENT"
     printf '# Spec\n\n**Issue:** #999 · **Status:** Approved (approval = merge of this PR)\n' \
       > intent/999-test/spec.md
     "$REAL_GIT" add -A
     "$REAL_GIT" commit -qm spec
-    C2="$("$REAL_GIT" rev-parse HEAD)"
+    C_SPEC="$("$REAL_GIT" rev-parse HEAD)"
 
-    echo "$C0" > "$WORK/c0"
-    echo "$C1" > "$WORK/c1"
-    echo "$C2" > "$WORK/c2"
+    # Range 3 (implement-pr): merge commit merging branch odyssey/999-test
+    "$REAL_GIT" checkout -qb odyssey/999-test "$C_SPEC"
+    mkdir -p scripts/ci/tests
+    echo "echo test" > scripts/ci/tests/dummy_test.sh
+    "$REAL_GIT" add -A
+    "$REAL_GIT" commit -qm "imp-code"
+    C_IMP_HEAD="$("$REAL_GIT" rev-parse HEAD)"
+
+    "$REAL_GIT" checkout -qb main-br "$C_SPEC"
+    "$REAL_GIT" merge -qm "merge PR 4242" --no-ff "$C_IMP_HEAD"
+    C_IMP_MERGE="$("$REAL_GIT" rev-parse HEAD)"
+
+    echo "$C_BASE" > "$WORK/c_base"
+    echo "$C_INTENT" > "$WORK/c_intent"
+    echo "$C_SPEC" > "$WORK/c_spec"
+    echo "$C_IMP_HEAD" > "$WORK/c_imp_head"
+    echo "$C_IMP_MERGE" > "$WORK/c_imp_merge"
 )
-C0="$(cat "$WORK/c0")"
-C1="$(cat "$WORK/c1")"
-C2="$(cat "$WORK/c2")"
+C_BASE="$(cat "$WORK/c_base")"
+C_INTENT="$(cat "$WORK/c_intent")"
+C_SPEC="$(cat "$WORK/c_spec")"
+C_IMP_HEAD="$(cat "$WORK/c_imp_head")"
+C_IMP_MERGE="$(cat "$WORK/c_imp_merge")"
+
+get_range() {
+    local kind="$1"
+    case "$kind" in
+        intent)
+            RANGE_BEFORE="$C_BASE"
+            RANGE_AFTER="$C_INTENT"
+            ;;
+        spec)
+            RANGE_BEFORE="$C_INTENT"
+            RANGE_AFTER="$C_SPEC"
+            ;;
+        implement-pr)
+            RANGE_BEFORE="$C_SPEC"
+            RANGE_AFTER="$C_IMP_MERGE"
+            ;;
+        *)
+            echo "unknown range kind: $kind" >&2
+            return 1
+            ;;
+    esac
+}
 
 reset_fixtures() {
     rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable "$FIXTURES"/loop-* "$FIXTURES"/binding-*
     : > "$WRITES"
     : > "$INVOKES"
     : > "$LAUNCHES"
+    : > "$CLAIMS"
+    : > "$MINTS"
+    unset FAIL_MINT_PERSONA
+    unset FAIL_MINT
 }
 
 ADVANCER="$REPO/scripts/ci/lifecycle_advance.sh"
@@ -351,6 +442,8 @@ run_at1() {
     banner "$name (D1): Claim release on ladder advance"
     reset_fixtures
 
+    get_range "intent"
+
     cat > "$FIXTURES/issue-999.json" <<'EOF'
 {
   "number": 999,
@@ -364,13 +457,13 @@ run_at1() {
   ]
 }
 EOF
-    cat > "$FIXTURES/pulls-$C2.json" <<EOF
+    cat > "$FIXTURES/pulls-$RANGE_AFTER.json" <<EOF
 [
   {
     "number": 4242,
     "merged_at": "2026-01-01T00:00:00Z",
     "state": "closed",
-    "merge_commit_sha": "$C2",
+    "merge_commit_sha": "$RANGE_AFTER",
     "base": {"ref": "main"},
     "head": {"ref": "athena/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
     "body": "Fixes #999"
@@ -378,7 +471,7 @@ EOF
 ]
 EOF
     cat > "$FIXTURES/files-4242.json" <<'EOF'
-[{"filename": "intent/999-test/spec.md"}]
+[{"filename": "intent/999-test/intent.md"}]
 EOF
     echo "true" > "$FIXTURES/loop-autonomous_merge"
     echo "10" > "$FIXTURES/loop-max_rung_dispatches_per_issue"
@@ -386,11 +479,20 @@ EOF
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
     local out=""
-    out="$(cd "$SANDBOX" && DRY_RUN=1 bash "$ADVANCER" "$C1" "$C2" 2>&1 || true)"
-    if grep -qF "released claim of athena on #999 (rung plan merged)" <<<"$out"; then
-        pass "AT-1 (D1): lifecycle_advance.sh released claim of athena on #999"
+    out="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
+    local res_line=""
+    res_line="$(grep -E '^--> #999' <<<"$out" || true)"
+    [ -z "$res_line" ] || echo "    $res_line"
+
+    local has_rel=0 has_del=0 has_launch=0
+    grep -qF "released claim of athena on #999 (rung plan merged)" <<<"$out" && has_rel=1
+    grep -qF "DELETE labels 999 in-progress" "$WRITES" && has_del=1
+    grep -qE "999 --as athena" "$LAUNCHES" && has_launch=1
+
+    if [ "$has_rel" -eq 1 ] && [ "$has_del" -eq 1 ] && [ "$has_launch" -eq 1 ]; then
+        pass "AT-1 (D1): lifecycle_advance.sh released claim of athena on #999 and dispatched successor"
     else
-        fail "AT-1 (D1): lifecycle_advance.sh did not print 'released claim of athena on #999 (rung plan merged)'"
+        fail "AT-1 (D1): lifecycle_advance.sh failed claim release (missing DELETE labels 999 in-progress: del=$has_del, rel=$has_rel, launch=$has_launch)"
     fi
 }
 run_at1
@@ -405,6 +507,8 @@ run_at2() {
     banner "$name (D1): Withhold dispatch when claim held by different persona"
     reset_fixtures
 
+    get_range "intent"
+
     cat > "$FIXTURES/issue-999.json" <<'EOF'
 {
   "number": 999,
@@ -418,13 +522,13 @@ run_at2() {
   ]
 }
 EOF
-    cat > "$FIXTURES/pulls-$C2.json" <<EOF
+    cat > "$FIXTURES/pulls-$RANGE_AFTER.json" <<EOF
 [
   {
     "number": 4242,
     "merged_at": "2026-01-01T00:00:00Z",
     "state": "closed",
-    "merge_commit_sha": "$C2",
+    "merge_commit_sha": "$RANGE_AFTER",
     "base": {"ref": "main"},
     "head": {"ref": "athena/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
     "body": "Fixes #999"
@@ -432,7 +536,7 @@ EOF
 ]
 EOF
     cat > "$FIXTURES/files-4242.json" <<'EOF'
-[{"filename": "intent/999-test/spec.md"}]
+[{"filename": "intent/999-test/intent.md"}]
 EOF
     echo "true" > "$FIXTURES/loop-autonomous_merge"
     echo "10" > "$FIXTURES/loop-max_rung_dispatches_per_issue"
@@ -440,25 +544,34 @@ EOF
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
     local out=""
-    out="$(cd "$SANDBOX" && DRY_RUN=1 bash "$ADVANCER" "$C1" "$C2" 2>&1 || true)"
-    if grep -qF "withholding dispatch: in-progress held by odyssey" <<<"$out"; then
+    out="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
+    local res_line=""
+    res_line="$(grep -E '^--> #999' <<<"$out" || true)"
+    [ -z "$res_line" ] || echo "    $res_line"
+
+    if grep -qF "withholding dispatch: in-progress held by odyssey" <<<"$out" \
+       && ! grep -qF "DELETE labels 999 in-progress" "$WRITES" \
+       && [ ! -s "$LAUNCHES" ]; then
         pass "AT-2 (D1): lifecycle_advance.sh withheld dispatch for claim held by different persona"
     else
-        fail "AT-2 (D1): lifecycle_advance.sh did not print 'withholding dispatch: in-progress held by odyssey'"
+        fail "AT-2 (D1): lifecycle_advance.sh did not withhold dispatch or deleted claim"
     fi
 }
 run_at2
 
 # =============================================================================
-# AT-3 (D1): Ladder advance withholds dispatch when in-progress held by foreign login
+# AT-3 (D1): Ladder advance withholds dispatch when in-progress held by foreign login or unparseable
 # =============================================================================
 run_at3() {
     local name="AT-3"
     should_run "$name" || return 0
     TOTAL=$((TOTAL + 1))
-    banner "$name (D1): Withhold dispatch when claim held by foreign login"
+    banner "$name (D1): Withhold dispatch when claim held by foreign login or unparseable"
     reset_fixtures
 
+    get_range "intent"
+
+    # Sub-case A: foreign login
     cat > "$FIXTURES/issue-999.json" <<'EOF'
 {
   "number": 999,
@@ -472,13 +585,13 @@ run_at3() {
   ]
 }
 EOF
-    cat > "$FIXTURES/pulls-$C2.json" <<EOF
+    cat > "$FIXTURES/pulls-$RANGE_AFTER.json" <<EOF
 [
   {
     "number": 4242,
     "merged_at": "2026-01-01T00:00:00Z",
     "state": "closed",
-    "merge_commit_sha": "$C2",
+    "merge_commit_sha": "$RANGE_AFTER",
     "base": {"ref": "main"},
     "head": {"ref": "athena/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
     "body": "Fixes #999"
@@ -486,19 +599,70 @@ EOF
 ]
 EOF
     cat > "$FIXTURES/files-4242.json" <<'EOF'
-[{"filename": "intent/999-test/spec.md"}]
+[{"filename": "intent/999-test/intent.md"}]
 EOF
     echo "true" > "$FIXTURES/loop-autonomous_merge"
     echo "10" > "$FIXTURES/loop-max_rung_dispatches_per_issue"
     echo "50.00" > "$FIXTURES/loop-max_cost_usd_per_issue"
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
-    local out=""
-    out="$(cd "$SANDBOX" && DRY_RUN=1 bash "$ADVANCER" "$C1" "$C2" 2>&1 || true)"
-    if grep -q "withholding dispatch: in-progress held by foreign login" <<<"$out"; then
-        pass "AT-3 (D1): lifecycle_advance.sh withheld dispatch for foreign login"
+    local out_a=""
+    out_a="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
+    local res_line_a=""
+    res_line_a="$(grep -E '^--> #999' <<<"$out_a" || true)"
+    [ -z "$res_line_a" ] || echo "    $res_line_a"
+
+    # Sub-case B: unparseable / missing claim comment
+    reset_fixtures
+    cat > "$FIXTURES/issue-999.json" <<'EOF'
+{
+  "number": 999,
+  "state": "OPEN",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/pulls-$RANGE_AFTER.json" <<EOF
+[
+  {
+    "number": 4242,
+    "merged_at": "2026-01-01T00:00:00Z",
+    "state": "closed",
+    "merge_commit_sha": "$RANGE_AFTER",
+    "base": {"ref": "main"},
+    "head": {"ref": "athena/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
+    "body": "Fixes #999"
+  }
+]
+EOF
+    cat > "$FIXTURES/files-4242.json" <<'EOF'
+[{"filename": "intent/999-test/intent.md"}]
+EOF
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    echo "10" > "$FIXTURES/loop-max_rung_dispatches_per_issue"
+    echo "50.00" > "$FIXTURES/loop-max_cost_usd_per_issue"
+    echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
+
+    local out_b=""
+    out_b="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
+
+    local pass_a=0 pass_b=0
+    if grep -qE "withholding dispatch: in-progress held by (foreign login|foreign-user)" <<<"$out_a" \
+       && ! grep -qF "DELETE labels 999 in-progress" "$WRITES" \
+       && [ ! -s "$LAUNCHES" ]; then
+        pass_a=1
+    fi
+
+    if grep -qE "withholding dispatch: in-progress held without a readable claim|unparseable claim" <<<"$out_b" \
+       && ! grep -qF "DELETE labels 999 in-progress" "$WRITES" \
+       && [ ! -s "$LAUNCHES" ]; then
+        pass_b=1
+    fi
+
+    if [ "$pass_a" -eq 1 ] && [ "$pass_b" -eq 1 ]; then
+        pass "AT-3 (D1): lifecycle_advance.sh withheld dispatch for foreign login and unparseable claim"
     else
-        fail "AT-3 (D1): lifecycle_advance.sh did not print 'withholding dispatch: in-progress held by foreign login'"
+        fail "AT-3 (D1): lifecycle_advance.sh failed foreign login check ($pass_a) or unparseable claim check ($pass_b)"
     fi
 }
 run_at3
@@ -513,6 +677,8 @@ run_at4() {
     banner "$name (D1): Skip claim release when autonomous_merge is false"
     reset_fixtures
 
+    get_range "intent"
+
     cat > "$FIXTURES/issue-999.json" <<'EOF'
 {
   "number": 999,
@@ -526,13 +692,13 @@ run_at4() {
   ]
 }
 EOF
-    cat > "$FIXTURES/pulls-$C2.json" <<EOF
+    cat > "$FIXTURES/pulls-$RANGE_AFTER.json" <<EOF
 [
   {
     "number": 4242,
     "merged_at": "2026-01-01T00:00:00Z",
     "state": "closed",
-    "merge_commit_sha": "$C2",
+    "merge_commit_sha": "$RANGE_AFTER",
     "base": {"ref": "main"},
     "head": {"ref": "athena/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
     "body": "Fixes #999"
@@ -540,7 +706,7 @@ EOF
 ]
 EOF
     cat > "$FIXTURES/files-4242.json" <<'EOF'
-[{"filename": "intent/999-test/spec.md"}]
+[{"filename": "intent/999-test/intent.md"}]
 EOF
     echo "false" > "$FIXTURES/loop-autonomous_merge"
     echo "10" > "$FIXTURES/loop-max_rung_dispatches_per_issue"
@@ -548,13 +714,17 @@ EOF
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
     local out=""
-    out="$(cd "$SANDBOX" && DRY_RUN=1 bash "$ADVANCER" "$C1" "$C2" 2>&1 || true)"
-    if grep -qF "released claim of athena on #999" <<<"$out"; then
+    out="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
+    local res_line=""
+    res_line="$(grep -E '^--> #999' <<<"$out" || true)"
+    [ -z "$res_line" ] || echo "    $res_line"
+
+    if grep -qF "released claim of athena on #999" <<<"$out" || grep -qF "DELETE labels 999 in-progress" "$WRITES"; then
         fail "AT-4 (D1): lifecycle_advance.sh released claim despite autonomous_merge: false"
-    elif grep -q "autonomous_merge is false" <<<"$out" && grep -q "no dispatch for #999 (D18)" <<<"$out" && grep -q "skipping claim release" <<<"$out"; then
+    elif grep -q "autonomous_merge is false" <<<"$out" && grep -q "no dispatch for #999 (D18)" <<<"$out" && [ ! -s "$LAUNCHES" ]; then
         pass "AT-4 (D1): claim release correctly skipped under autonomous_merge: false"
     else
-        fail "AT-4 (D1): lifecycle_advance.sh did not handle claim release skipping under autonomous_merge: false"
+        fail "AT-4 (D1): lifecycle_advance.sh did not print 'autonomous_merge is false' and 'no dispatch for #999 (D18)'"
     fi
 }
 run_at4
@@ -569,6 +739,8 @@ run_at5() {
     banner "$name (D1): Claim release on terminal review rung advance"
     reset_fixtures
 
+    get_range "implement-pr"
+
     cat > "$FIXTURES/issue-999.json" <<'EOF'
 {
   "number": 999,
@@ -582,13 +754,26 @@ run_at5() {
   ]
 }
 EOF
-    cat > "$FIXTURES/pulls-$C2.json" <<EOF
+    cat > "$FIXTURES/pulls-$RANGE_AFTER.json" <<EOF
 [
   {
     "number": 4242,
     "merged_at": "2026-01-01T00:00:00Z",
     "state": "closed",
-    "merge_commit_sha": "$C2",
+    "merge_commit_sha": "$RANGE_AFTER",
+    "base": {"ref": "main"},
+    "head": {"ref": "odyssey/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
+    "body": "Fixes #999"
+  }
+]
+EOF
+    cat > "$FIXTURES/pulls-$C_IMP_HEAD.json" <<EOF
+[
+  {
+    "number": 4242,
+    "merged_at": "2026-01-01T00:00:00Z",
+    "state": "closed",
+    "merge_commit_sha": "$RANGE_AFTER",
     "base": {"ref": "main"},
     "head": {"ref": "odyssey/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
     "body": "Fixes #999"
@@ -604,11 +789,19 @@ EOF
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
     local out=""
-    out="$(cd "$SANDBOX" && DRY_RUN=1 bash "$ADVANCER" "$C1" "$C2" 2>&1 || true)"
-    if grep -qF "released claim of odyssey on #999 (rung implement merged)" <<<"$out"; then
+    out="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
+    local res_line=""
+    res_line="$(grep -E '^--> #999' <<<"$out" || true)"
+    [ -z "$res_line" ] || echo "    $res_line"
+
+    local has_rel=0 has_del=0
+    grep -qF "released claim of odyssey on #999 (rung implement merged)" <<<"$out" && has_rel=1
+    grep -qF "DELETE labels 999 in-progress" "$WRITES" && has_del=1
+
+    if [ "$has_rel" -eq 1 ] && [ "$has_del" -eq 1 ]; then
         pass "AT-5 (D1): lifecycle_advance.sh released claim of odyssey on terminal review rung"
     else
-        fail "AT-5 (D1): lifecycle_advance.sh did not print 'released claim of odyssey on #999 (rung implement merged)'"
+        fail "AT-5 (D1): lifecycle_advance.sh failed claim release (missing DELETE labels 999 in-progress: del=$has_del, rel=$has_rel)"
     fi
 }
 run_at5
@@ -623,21 +816,23 @@ run_at6() {
     banner "$name (D2, #284): Placement adapter invocation passes <issue> --as <persona>"
     reset_fixtures
 
+    get_range "spec"
+
     cat > "$FIXTURES/issue-999.json" <<'EOF'
 {
   "number": 999,
   "state": "OPEN",
-  "labels": [{"name": "status:planning"}],
+  "labels": [{"name": "status:spec"}],
   "comments": []
 }
 EOF
-    cat > "$FIXTURES/pulls-$C2.json" <<EOF
+    cat > "$FIXTURES/pulls-$RANGE_AFTER.json" <<EOF
 [
   {
     "number": 4242,
     "merged_at": "2026-01-01T00:00:00Z",
     "state": "closed",
-    "merge_commit_sha": "$C2",
+    "merge_commit_sha": "$RANGE_AFTER",
     "base": {"ref": "main"},
     "head": {"ref": "athena/999-test", "repo": {"full_name": "evekhm/agentic-sdlc"}},
     "body": "Fixes #999"
@@ -653,11 +848,16 @@ EOF
     echo "ladder vm-local 50.00" > "$FIXTURES/binding-vm-local"
 
     local out=""
-    out="$(cd "$SANDBOX" && DRY_RUN=1 bash "$ADVANCER" "$C1" "$C2" 2>&1 || true)"
-    if grep -qE "scripts/placement/[a-z-]+/run\.sh 999 --as athena" <<<"$out"; then
-        pass "AT-6 (D2, #284): adapter invocation passed 999 --as athena"
+    out="$(cd "$SANDBOX" && bash "$ADVANCER" "$RANGE_BEFORE" "$RANGE_AFTER" 2>&1 || true)"
+    local res_line=""
+    res_line="$(grep -E '^--> #999' <<<"$out" || true)"
+    [ -z "$res_line" ] || echo "    $res_line"
+
+    if grep -q "dispatching daedalus via vm-local for #999" <<<"$out" \
+       && grep -qE "999 --as daedalus" "$LAUNCHES"; then
+        pass "AT-6 (D2, #284): adapter invocation passed 999 --as daedalus without DRY-RUN prefix"
     else
-        fail "AT-6 (D2, #284): adapter invocation argv did not contain '999 --as athena'"
+        fail "AT-6 (D2, #284): adapter invocation did not dispatch daedalus or pass 999 --as daedalus"
     fi
 }
 run_at6
@@ -703,28 +903,89 @@ run_at8() {
     fi
 
     reset_fixtures
+    # Issue 251: status:planning, unclaimed, ledger dispatch row for rung:1 (athena)
+    cat > "$FIXTURES/issue-251.json" <<'EOF'
+{
+  "number": 251,
+  "state": "open",
+  "labels": [{"name": "status:planning"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-themis-app[bot]"},
+      "body": "<!-- loop-ledger:251 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+    }
+  ]
+}
+EOF
     cat > "$FIXTURES/repos_evekhm_agentic-sdlc_issues_251.json" <<'EOF'
 {
   "number": 251,
   "state": "open",
-  "labels": [{"name": "status:spec"}]
+  "labels": [{"name": "status:planning"}]
 }
 EOF
     cat > "$FIXTURES/comments-251.json" <<'EOF'
 [
   {
     "user": {"login": "evekhm-themis-app[bot]"},
-    "body": "<!-- loop-ledger:251 -->\n<!-- loop-ledger-row: dispatch rung:2 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+    "body": "<!-- loop-ledger:251 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+  }
+]
+EOF
+
+    # Issue 252: status:planning, in-progress, held by odyssey
+    cat > "$FIXTURES/issue-252.json" <<'EOF'
+{
+  "number": 252,
+  "state": "open",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-odyssey-app[bot]"},
+      "body": "Claim: odyssey (session-1) stage:plan path:.claude/worktrees/odyssey-252-test"
+    },
+    {
+      "user": {"login": "evekhm-themis-app[bot]"},
+      "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_issues_252.json" <<'EOF'
+{
+  "number": 252,
+  "state": "open",
+  "labels": [{"name": "status:planning"}, {"name": "in-progress"}]
+}
+EOF
+    cat > "$FIXTURES/comments-252.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-odyssey-app[bot]"},
+    "body": "Claim: odyssey (session-1) stage:plan path:.claude/worktrees/odyssey-252-test"
+  },
+  {
+    "user": {"login": "evekhm-themis-app[bot]"},
+    "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
   }
 ]
 EOF
 
     local out="" rc=0
-    out="$(bash "$poll_sh" --once 2>&1)" || rc=$?
-    if [ "$rc" -eq 0 ] && grep -qF "CLAIM_ACTOR=" "$WRITES" 2>/dev/null; then
-        pass "AT-8 (D2): poll.sh --once claimed and dispatched unconsumed row"
+    out="$(RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once 2>&1)" || rc=$?
+
+    local has_mint=0 has_claim=0 has_launch=0 no_claimed_dispatch=0
+    grep -qE "mint_app_token\.py.*athena" "$MINTS" && has_mint=1
+    (grep -qE "POST comment 251.*Claim: athena \(poll-" "$WRITES" || grep -qE "athena.*251" "$CLAIMS") && has_claim=1
+    grep -qE "run\.sh 251 --as athena" "$LAUNCHES" && has_launch=1
+    if ! grep -q "252" "$CLAIMS" && ! grep -qE "POST comment 252" "$WRITES" && ! grep -q "252" "$LAUNCHES"; then
+        no_claimed_dispatch=1
+    fi
+
+    if [ "$rc" -eq 0 ] && [ "$has_mint" -eq 1 ] && [ "$has_claim" -eq 1 ] && [ "$has_launch" -eq 1 ] && [ "$no_claimed_dispatch" -eq 1 ]; then
+        pass "AT-8 (D2): poll.sh --once claimed and dispatched unconsumed row with token mint and claim verification"
     else
-        fail "AT-8 (D2): poll.sh --once failed to claim or dispatch unconsumed ledger row"
+        fail "AT-8 (D2): poll.sh --once failed observables (rc=$rc mint=$has_mint claim=$has_claim launch=$has_launch skipped_claimed=$no_claimed_dispatch)"
     fi
 }
 run_at8
@@ -795,22 +1056,25 @@ run_at12() {
     cat > "$FIXTURES/issue-108.json" <<'EOF'
 {
   "number": 108,
-  "state": "OPEN",
+  "state": "open",
+  "title": "PR 108",
   "labels": [{"name": "status:implementing"}]
 }
 EOF
 
-    # Write fixture with antigravity pin
+    # 1. Antigravity fixture
     cat > "$fixture_dep" <<'EOF'
 personas:
   odyssey:
     harness: antigravity
 EOF
-
-    # Run stub work.sh with fixture deployments
+    : > "$LAUNCHES"
     LAUNCH_OK=1 HEADLESS=1 DRY_RUN=0 DEPLOYMENTS="$fixture_dep" bash "$work_sh" 108 --as odyssey >/dev/null 2>&1 || true
 
-    # Update fixture to claude-code
+    local agy_1=0
+    grep -q "agy" "$LAUNCHES" 2>/dev/null && agy_1=1
+
+    # 2. Update fixture to claude-code
     cat > "$fixture_dep" <<'EOF'
 personas:
   odyssey:
@@ -819,10 +1083,25 @@ EOF
     : > "$LAUNCHES"
     LAUNCH_OK=1 HEADLESS=1 DRY_RUN=0 DEPLOYMENTS="$fixture_dep" bash "$work_sh" 108 --as odyssey >/dev/null 2>&1 || true
 
-    if grep -q "claude -p .* --agent odyssey --output-format json" "$LAUNCHES" 2>/dev/null; then
-        pass "AT-12 (D2): re-pin property verified"
+    local claude_pass=0
+    grep -qE "claude -p .* --agent odyssey --output-format json" "$LAUNCHES" 2>/dev/null && claude_pass=1
+
+    # 3. Restore antigravity fixture
+    cat > "$fixture_dep" <<'EOF'
+personas:
+  odyssey:
+    harness: antigravity
+EOF
+    : > "$LAUNCHES"
+    LAUNCH_OK=1 HEADLESS=1 DRY_RUN=0 DEPLOYMENTS="$fixture_dep" bash "$work_sh" 108 --as odyssey >/dev/null 2>&1 || true
+
+    local agy_2=0
+    grep -q "agy" "$LAUNCHES" 2>/dev/null && agy_2=1
+
+    if [ "$agy_1" -eq 1 ] && [ "$claude_pass" -eq 1 ] && [ "$agy_2" -eq 1 ]; then
+        pass "AT-12 (D2): re-pin property verified (antigravity -> claude-code -> antigravity)"
     else
-        fail "AT-12 (D2): updating fixture deployments.yaml did not invoke 'claude -p ... --agent odyssey --output-format json'"
+        fail "AT-12 (D2): re-pin check failed (agy_1=$agy_1, claude=$claude_pass, agy_2=$agy_2)"
     fi
 }
 run_at12
@@ -869,12 +1148,11 @@ EOF
 
     local out="" rc=0
     out="$(DRY_RUN=1 HEADLESS=1 bash "$work_sh" 108 --as odyssey 2>&1)" || rc=$?
-    if [ "$rc" -eq 2 ] && grep -q "does not own stage review" <<<"$out"; then
-        fail "AT-13 (D2, D8): work.sh rejected fix-round with refusal (h): $out"
-    elif [ "$rc" -eq 0 ] && ! grep -q "does not own stage review" <<<"$out"; then
+    if [ "$rc" -eq 0 ] && ! grep -q "does not own stage review" <<<"$out" \
+       && grep -q "--> odyssey" <<<"$out" && grep -qE "branch:.*odyssey/107-fix" <<<"$out"; then
         pass "AT-13 (D2, D8): work.sh proceeded under fix-round resume protocol"
     else
-        fail "AT-13 (D2, D8): work.sh exited with unexpected status $rc: $out"
+        fail "AT-13 (D2, D8): work.sh did not proceed under resume protocol (rc=$rc): $out"
     fi
 }
 run_at13
@@ -895,20 +1173,58 @@ run_at14() {
     fi
 
     reset_fixtures
-    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_issues_251.json" <<'EOF'
+    cat > "$FIXTURES/issue-251.json" <<'EOF'
 {
   "number": 251,
   "state": "open",
-  "labels": [{"name": "status:planning"}]
+  "labels": [{"name": "status:planning"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-themis-app[bot]"},
+      "body": "<!-- loop-ledger:251 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+    }
+  ]
 }
+EOF
+    cat > "$FIXTURES/comments-251.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-themis-app[bot]"},
+    "body": "<!-- loop-ledger:251 -->\n<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+  }
+]
+EOF
+
+    cat > "$FIXTURES/issue-252.json" <<'EOF'
+{
+  "number": 252,
+  "state": "open",
+  "labels": [{"name": "status:spec"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-themis-app[bot]"},
+      "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:2 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-252.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-themis-app[bot]"},
+    "body": "<!-- loop-ledger:252 -->\n<!-- loop-ledger-row: dispatch rung:2 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+  }
+]
 EOF
 
     local out="" rc=0
-    out="$(FAIL_MINT=1 bash "$poll_sh" --once 2>&1)" || rc=$?
-    if [ "$rc" -eq 0 ] && grep -qF "missing key for athena, skipping its rows" <<<"$out" && [ ! -s "$LAUNCHES" ]; then
-        pass "AT-14 (D4): poll.sh logged missing key notice, skipped launch, and exited 0"
+    out="$(FAIL_MINT_PERSONA="athena" RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once 2>&1)" || rc=$?
+    if [ "$rc" -eq 0 ] && grep -qF "missing key for athena, skipping its rows" <<<"$out" \
+       && ! grep -q "251" "$LAUNCHES" \
+       && grep -qE "run\.sh 252 --as daedalus" "$LAUNCHES"; then
+        pass "AT-14 (D4): poll.sh logged missing key notice, skipped persona rows, and continued remaining rows"
     else
-        fail "AT-14 (D4): poll.sh failed to log 'missing key for <persona>, skipping its rows' or exited non-zero"
+        fail "AT-14 (D4): poll.sh failed missing key handling (rc=$rc)"
     fi
 }
 run_at14
@@ -929,6 +1245,14 @@ run_at15() {
     fi
 
     reset_fixtures
+    cat > "$FIXTURES/issue-300.json" <<'EOF'
+{
+  "number": 300,
+  "state": "open",
+  "labels": [{"name": "intent:new"}],
+  "comments": []
+}
+EOF
     cat > "$FIXTURES/repos_evekhm_agentic-sdlc_issues_300.json" <<'EOF'
 {
   "number": 300,
@@ -941,11 +1265,19 @@ EOF
 EOF
 
     local out="" rc=0
-    out="$(bash "$poll_sh" --once 2>&1)" || rc=$?
-    if [ "$rc" -eq 0 ] && grep -qF "scripts/ops/claim.sh 300" "$INVOKES" 2>/dev/null; then
-        pass "AT-15 (D5): first hop claimed and dispatched open intent:new issue"
+    out="$(RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once 2>&1)" || rc=$?
+
+    local has_claim=0 has_launch=0 no_ledger=0
+    (grep -qE "POST comment 300.*Claim: athena \(poll-" "$WRITES" || grep -qE "athena.*300" "$CLAIMS") && has_claim=1
+    grep -qE "run\.sh 300 --as athena" "$LAUNCHES" && has_launch=1
+    if ! grep -q "loop-ledger" "$WRITES"; then
+        no_ledger=1
+    fi
+
+    if [ "$rc" -eq 0 ] && [ "$has_claim" -eq 1 ] && [ "$has_launch" -eq 1 ] && [ "$no_ledger" -eq 1 ]; then
+        pass "AT-15 (D5): first hop claimed and dispatched open intent:new issue with zero ledger writes"
     else
-        fail "AT-15 (D5): poll.sh did not claim and dispatch open intent:new issue"
+        fail "AT-15 (D5): poll.sh did not claim/dispatch open intent:new issue or wrote ledger row (rc=$rc claim=$has_claim launch=$has_launch no_ledger=$no_ledger)"
     fi
 }
 run_at15
@@ -998,8 +1330,23 @@ run_at20() {
 {
   "number": 108,
   "state": "open",
+  "title": "PR 108",
   "labels": [{"name": "status:in-review"}],
-  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/108"}
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/108"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_108.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/107-fix",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
 }
 EOF
     cat > "$FIXTURES/comments-108.json" <<'EOF'
@@ -1011,12 +1358,37 @@ EOF
 ]
 EOF
 
-    local out="" rc=0
-    out="$(bash "$poll_sh" --once 2>&1)" || rc=$?
-    if [ "$rc" -eq 0 ] && [ ! -s "$WRITES" ]; then
-        pass "AT-20 (D2): fix-round claim bypass and locking verified"
+    local lock_file="${TMPDIR:-/tmp}/poll-pr-108.lock"
+    rm -f "$lock_file"
+
+    local rc1=0
+    RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once >/dev/null 2>&1 || rc1=$?
+
+    local has_launch1=0 no_claim=0
+    grep -qE "run\.sh 108 --as odyssey" "$LAUNCHES" && has_launch1=1
+    if [ ! -s "$CLAIMS" ] && ! grep -qE "POST comment 108.*Claim:" "$WRITES"; then
+        no_claim=1
+    fi
+
+    local launches_first=""
+    launches_first="$(cat "$LAUNCHES")"
+
+    # Simulate active lock
+    touch "$lock_file"
+
+    local rc2=0
+    RUN_SH="$WORK/bin/run.sh" bash "$poll_sh" --once >/dev/null 2>&1 || rc2=$?
+    rm -f "$lock_file"
+
+    local lock_prevented=0
+    if [ "$rc2" -eq 0 ] && [ "$(cat "$LAUNCHES")" = "$launches_first" ]; then
+        lock_prevented=1
+    fi
+
+    if [ "$rc1" -eq 0 ] && [ "$has_launch1" -eq 1 ] && [ "$no_claim" -eq 1 ] && [ "$lock_prevented" -eq 1 ]; then
+        pass "AT-20 (D2): fix-round claim bypass and per-PR lock verified"
     else
-        fail "AT-20 (D2): poll.sh failed fix-round claim bypass or locking"
+        fail "AT-20 (D2): poll.sh failed fix-round claim bypass or locking (rc1=$rc1 launch=$has_launch1 no_claim=$no_claim lock_prevented=$lock_prevented)"
     fi
 }
 run_at20

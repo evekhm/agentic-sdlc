@@ -4,7 +4,7 @@
 - Spec: `intent/251-e2e-chain/spec.md`
 - Author: daedalus
 - Base commit: `4f862c6b8cac5ea82f0792e908aec72fda85ad91`
-- Status: Drafted (Build Rung, Round 2)
+- Status: Drafted (Build Rung, Round 3)
 
 ## Summary
 
@@ -12,6 +12,10 @@ This plan specifies the implementation steps to complete the end-to-end
 autonomous loop chain defined in `intent/251-e2e-chain/spec.md`. The
 changes close the loop between automated ladder advances in GitHub Actions
 and unattended execution on the operator VM.
+
+The implement rung branch MUST be named `odyssey/251-e2e-chain` because
+`lifecycle_advance.sh:27-34` matches candidate pull requests by verifying
+that the head-branch slug equals the intent folder slug (`251-e2e-chain`).
 
 The plan encompasses:
 1. Hermetic contract tests in `scripts/ci/tests/e2e_chain_test.sh` asserting
@@ -141,7 +145,7 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 - **AT-18 (D7, Synthetic validation - operator precondition)**: Dedicated synthetic issue run verification: running `gh api repos/evekhm/agentic-sdlc/issues/<n>/comments --jq '.[].body | select(test("<!-- loop-ledger"))'` shows four `dispatch` rows and one `terminal` row; running `gh run list --workflow lifecycle.yml --branch main --limit 5 --json databaseId,conclusion` and `gh run list --workflow merge-gate.yml --branch main --limit 5 --json databaseId,conclusion` show all conclusions as `success`; and `gh issue view <n> --json labels --jq '.labels[].name'` outputs `status:in-review` with `in-progress` absent.
   - Mapped to: NOT RUN (operator precondition)
 - **AT-19 (D8)**: Pre-merge validation checks exit 0:
-  `BODY_FILE="$(mktemp)"; echo "Spec-impact: none - intent/** only, not a behavior-bearing path" > "$BODY_FILE"; bash scripts/ci/spec_check.sh origin/main "$BODY_FILE"; rm -f "$BODY_FILE"`
+  `BODY_FILE="$(mktemp)"; echo "Spec-impact: none - intent/** only; no behavior changes" > "$BODY_FILE"; bash scripts/ci/spec_check.sh origin/main "$BODY_FILE"; rm -f "$BODY_FILE"`
   and `bash scripts/ci/sanitize_check.sh`.
   - Mapped to: T9 (gates table pre-merge validation checks in Rule 9)
 - **AT-20 (D2)**: Hermetic fix-round claim bypass and locking: Under the stub, executing `scripts/placement/vm-local/poll.sh --once` on a fixture PR authored by odyssey at `status:in-review` with an unconsumed blocking review row launches `scripts/placement/vm-local/run.sh <pr> --as odyssey` and records zero calls to `scripts/ops/claim.sh`; a second `--once` execution while the lock exists launches nothing.
@@ -167,7 +171,8 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 - Acceptance: AT-6
 - Description: In `scripts/ci/lifecycle_advance.sh`, update the placement adapter dispatch
   invocation at line 1073 (dry-run branch) and line 1076 (live execution branch) to append
-  `"$issue" --as "$persona"`.
+  `"$issue" --as "$persona"`. In testing, sandbox scenarios use helper `get_range <kind>`
+  providing three git revision ranges (`intent`, `spec`, `implement-pr`).
 - Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-6 turns green).
 
 ### T3: Lifecycle Claim Release (D1, D8, AT-1 to AT-5)
@@ -178,11 +183,13 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
   claim comment on the issue thread. Derive the claim holder by mapping comment author
   login (`.user.login`) through the persona identity table without parsing unauthenticated comment
   body text. If the mapped claim persona matches the persona owning the completed stage,
-  delete `in-progress` via `gh api -X DELETE` under `GITHUB_TOKEN` before dispatching the successor
-  persona, logging `released claim of <actor> on #<n> (rung <stage> merged)`.
+  delete `in-progress` via `gh api -X DELETE repos/<repo>/issues/<issue>/labels/in-progress` under `GITHUB_TOKEN` before dispatching the successor
+  persona, logging `released claim of <actor> on #<n> (rung <stage> merged)`. The test fixture stub
+  logs this as `DELETE labels <n> in-progress`.
   Upon advancing to the terminal review rung (`status:in-review`), release the claim held by `odyssey`.
   If held by another persona, foreign login, or if unparseable, preserve `in-progress` and withhold
   dispatch. If `loop.autonomous_merge: false` (or key absent), leave `in-progress` intact and skip release.
+  Advancer scenarios in the contract test suite run live without `DRY_RUN=1`.
 - Test: `bash scripts/ci/tests/lifecycle_advance_test.sh` and `e2e_chain_test.sh` (AT-1 to AT-5 turn green).
 
 ### T4: VM-Local Adapter GitHub Actions Delegation (D2, D8, AT-7)
@@ -218,15 +225,20 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
   1. Modes: Supports `--once` for single-tick execution and continuous loop mode with a 30-second sleep interval.
   2. Queue evaluation: Evaluates unconsumed `dispatch` ledger rows in issue threads matching
      `^<!-- loop-ledger-row: dispatch rung:[0-9]+ head-oid:[0-9a-f]{40}`.
+     Poller observables verified by contract tests include token mint via `python3 scripts/auth/mint_app_token.py <persona>`,
+     claim comment creation via `scripts/ops/claim.sh` or logged as `POST comment <n> Claim: <persona> (poll-...`,
+     launch of `run.sh <issue> --as <persona>`, and skipping rows already claimed by another persona.
   3. First hop intake: Scans open, unclaimed `intent:new` issues. Claims via `claim.sh` under minted persona
      token for `athena`, launches `run.sh <issue> --as athena`, and writes zero loop ledger rows (D5).
   4. Mutex and claim handling: Claims an issue before launch via
      `CLAIM_ACTOR=<persona> CLAIM_SESSION=poll-<pid> scripts/ops/claim.sh <n>` under
      `GH_TOKEN="$(python3 scripts/auth/mint_app_token.py <persona>)"` minted per claim.
-     Skips already-claimed issues.
+     Skips already-claimed issues. `poll.sh` never releases a claim; claim release belongs to ladder advance
+     in `lifecycle_advance.sh`. Restart idempotence follows design note P2 (lines 61-67): dead pids allow
+     lock recovery and live pids preserve the active process.
   5. Fix rounds: Consumes blocking review rows on pull requests authored by vm-local personas.
      Launches `run.sh <pr> --as <author persona>`, bypassing `claim.sh`.
-     Guards duplicates via a per-PR lock file released when `run.sh` exits.
+     Guards duplicates via a per-PR lock file at `${TMPDIR:-/tmp}/poll-pr-<number>.lock` released when `run.sh` exits.
      A second `--once` tick while the lock exists launches nothing.
   6. Missing credential handling: Runs preflight `python3 scripts/auth/mint_app_token.py <persona> --require-repo --quiet`.
      If missing or unreadable, logs `missing key for <persona>, skipping its rows` and continues polling remaining personas.
@@ -264,16 +276,18 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
        and documenting P1 and P2 evidence (#64 acceptance 28).
      - Step 7: launch first hop or verify poller intake on target issue.
   2. Update the deployment table row for odyssey at line 841 from `manual` to `ladder`.
-  3. Update `### loop.autonomous` (:953) to document VM poller architecture, consumption of dispatch rows, first-hop intake,
+  3. Update `### lifecycle.labels` (:290) to document lifecycle advancer claim release on ladder transition under `GITHUB_TOKEN`.
+  4. Update `### loop.autonomous` (:953) to document VM poller architecture, consumption of dispatch rows, first-hop intake,
      and fix-round claim bypass.
-  4. Update `### lifecycle.labels` (:290) to document lifecycle advancer claim release on ladder transition under `GITHUB_TOKEN`.
 - Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-17 turns green).
 
 ### T9: Test Suite Folding & Acceptance Validation (D7, D8, AT-19)
 - Files: `scripts/ci/tests/lifecycle_advance_test.sh`, `scripts/ops/tests/work_test.sh`
 - Decisions: D7, D8
 - Acceptance: AT-19
-- Description: At the implement rung, fold acceptance tests into existing test suites:
+- Description: At the implement rung, the branch MUST be `odyssey/251-e2e-chain` to ensure
+  `lifecycle_advance.sh:27-34` matches candidate pull requests against `intent/251-e2e-chain`.
+  Fold acceptance tests into existing test suites:
   - Fold AT-1 through AT-6 into `scripts/ci/tests/lifecycle_advance_test.sh`.
   - Fold AT-12 and AT-13 into `scripts/ops/tests/work_test.sh`.
   - Maintain remaining integration scenarios in `scripts/ci/tests/e2e_chain_test.sh`.
@@ -283,7 +297,7 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 
 ## Corrections
 
-This section documents corrections made in Round 2 addressing review findings:
+### Round 2 Review Findings
 1. Verbatim alignment: Decision rows D1 through D8 and Acceptance criteria AT-1 through AT-20 are restored verbatim
    from `intent/251-e2e-chain/spec.md`.
 2. Path standardization: Standardized on canonical paths from the spec Manifest and D8:
@@ -298,13 +312,37 @@ This section documents corrections made in Round 2 addressing review findings:
 6. Continuous poller architecture: Detailed `--once` and loop execution, first hop intake accounting (zero ledger dispatches),
    claim before launch under minted token, fix-round claim bypass with per-PR locking, and missing key handling.
 
+### Round 3 Review Findings (PR #290 Round 2 Review & Operator Smoke)
+1. `R1-2`: Poller test observable verification. Updated AT-8, AT-14, AT-15, and AT-20 to assert observables in stubs (`$MINTS`, `$WRITES`, `$LAUNCHES`, `$CLAIMS`) without asserting unobservable claim.sh internal path prefixes.
+2. `R2-1`: Per-scenario git ranges and poller observables. Replaced fixed C1..C2 git range with `get_range <kind>` helper supporting three synthetic ranges (`intent`, `spec`, `implement-pr`).
+3. `R2-2`: Dropped requirement for literal substring `skipping claim release`. Asserted `autonomous_merge is false` and `no dispatch for #999 (D18)` while verifying `in-progress` is preserved and zero launches occur.
+4. `R2-3`: Converted advancer scenarios AT-1 through AT-6 to run live without `DRY_RUN=1`. Captured `$LAUNCHES` via sandbox placement runner.
+5. `R2-4`: Created synthetic merge commit (`implement-pr`) in AT-5 with second parent on `odyssey/999-test` modifying `scripts/` to satisfy candidate detection at `lifecycle_advance.sh:27-34`.
+6. `R2-5`: Updated AT-6 to assert `999 --as daedalus` in argv under live execution.
+7. `R1-10.2`: Deleted PR body statement claiming the advancer emits a slug near-miss warning; clarified that ladder advance for #251 is silent because `BEST_STAGE` is set.
+8. `Blocking 1` (AT-20): Removed hollow assertion predicate; asserted launch of `run.sh 108 --as odyssey`, zero claim POSTs, and identical launches on second locked tick.
+9. `Blocking 2` (AT-15): Asserted claim and launch observables for athena on open `intent:new` issue with zero loop-ledger writes.
+10. `Blocking 3` (AT-8): Asserted token mint in `$MINTS`, claim comment POST or record, launch in `$LAUNCHES`, and skip of already-claimed row.
+11. `Blocking 4`: Settled by R2-2.
+12. `Blocking 5`: Settled by R2-3 and R2-5.
+13. `Blocking 6` (AT-12): Asserted `agy` launch before truncation, ran `claude-code` fixture and asserted `claude -p ... --agent odyssey --output-format json`, then restored fixture and asserted `agy` launch again.
+14. `Blocking 7`: Stated in T9 and Summary that the implement rung branch MUST be `odyssey/251-e2e-chain`.
+15. `Blocking 8`: Settled by R1-10.2 (Decision D).
+16. `NB 2` (AT-3): Added second half of `spec.md:111` to AT-3: verifying unparseable claim comment preserves label and withholds dispatch.
+17. `NB 3` (AT-13): Added positive assertion in AT-13 that resume protocol ran (`--> odyssey` and `branch: odyssey/107-fix`).
+18. `NB 4` (T8): Cited `### lifecycle.labels` (:290) and `### loop.autonomous` (:953) at their actual line numbers in document order in T8.
+19. `NB 5` (T6): Stated in T6 that `poll.sh` never releases a claim and documented restart idempotence per design note P2 (lines 61-67).
+20. `NB 7`: Formatted PR body with line 1 as `Refs #251` followed by `## Summary`.
+21. `NB 8`: Quoted full `spec_check.sh` output line with declared reason in PR body.
+22. `NB 9`: Documented pre-existing `work_test.sh` failure at merge base in Gates table and PR body.
+
 ## Gates Table
 
 | Gate / Test Suite | Command | Scope | Rung Status |
 |---|---|---|---|
-| Contract Suite | `bash scripts/ci/tests/e2e_chain_test.sh` | Acceptance AT-1 to AT-10, AT-12 to AT-15, AT-17, AT-20 | FAIL (RED at build rung) |
+| Contract Suite | `bash scripts/ci/tests/e2e_chain_test.sh` | Acceptance AT-1 to AT-10, AT-12 to AT-15, AT-17, AT-20 | FAIL (RED at build rung; 1 passed, 15 failed out of 16 run) |
 | Advancer Suite | `bash scripts/ci/tests/lifecycle_advance_test.sh` | Lifecycle state transitions | PASS |
-| Work Suite | `bash scripts/ops/tests/work_test.sh` | Dispatch and stage resolution | FAIL (pre-existing odyssey pin mismatch #246, fixed in T5) |
+| Work Suite | `bash scripts/ops/tests/work_test.sh` | Dispatch and stage resolution | FAIL (pre-existing failure at merge base: D8 harness print mismatch, fixed in T5) |
 | Claim Suite | `bash scripts/ops/tests/claim_test.sh` | Mutex and claim validation | PASS |
 | Merge Gate Suite | `bash scripts/ci/tests/merge_gate_test.sh` | PR merge gate evaluation | PASS |
 | Sanitize Gate | `bash scripts/ci/sanitize_check.sh` | Security and secret scan | PASS |
