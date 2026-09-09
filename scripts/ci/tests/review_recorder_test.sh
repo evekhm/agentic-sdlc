@@ -137,6 +137,10 @@ case "${1:-} ${2:-}" in
       echo "gh: API error (HTTP 500) fetching issue #$n" >&2
       exit 1
     fi
+    if [ -f "$FX/issue-$n.not_found" ]; then
+      echo "GraphQL: Could not resolve to an issue or pull request with the number of $n. (repository.issue)" >&2
+      exit 1
+    fi
     [ -f "$FX/issue-$n.json" ] && { cat "$FX/issue-$n.json"; exit 0; }
     echo '{"labels":[]}'; exit 0;;
   "pr merge"|"issue edit"|"issue comment")
@@ -1497,6 +1501,40 @@ EOF
   pass "test_python_engine_extraction (D8, AT-291-8)"
 }
 
+# AT-291-12 (Argus R1-2, D2): Non-issue numbers in hold set treated as not held
+test_non_issue_reference_not_held() {
+  reset_state
+  pr_fixture 117 "$H"
+  # PR body referencing non-issue 99991
+  jq '.body = "Refs #99991"' "$FX/pr-117.json" > "$FX/pr-117.json.tmp"
+  mv "$FX/pr-117.json.tmp" "$FX/pr-117.json"
+  touch "$FX/issue-99991.not_found"
+
+  run_fixture 2019 "$ARGUS" "$H" "pull_request" "completed" "success"
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2019 -->
+<!-- round:1 -->
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 117 "$(comment_item "$ARGUS" "$rev_body" 3019)"
+
+  local out
+  out="$(bash "$RECORDER" 117 2>&1)" || { fail "test_non_issue_reference_not_held: recorder failed on non-issue reference"; return 1; }
+
+  echo "$out" | grep -Fq "note: #99991 is not an issue, treating as not held" || {
+    fail "test_non_issue_reference_not_held: missing logged note for non-issue #99991"
+    return 1
+  }
+  [ -s "$WRITES" ] || { fail "test_non_issue_reference_not_held: writes should have proceeded"; return 1; }
+
+  pass "test_non_issue_reference_not_held (Argus R1-2, D2)"
+}
+
 # --- Test Runner ---
 
 TESTS=(
@@ -1516,6 +1554,7 @@ TESTS=(
   test_write_time_hold_reread
   test_hold_probe_fail_closed
   test_python_engine_extraction
+  test_non_issue_reference_not_held
 )
 
 TOTAL=0

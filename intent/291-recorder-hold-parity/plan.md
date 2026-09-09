@@ -98,15 +98,18 @@ Touch: `scripts/ci/review_recorder.sh`
    ```bash
    python3 "$REPO/scripts/ci/review_recorder.py" "$PR" "$REPO" "$PR_JSON" "$WORKDIR" "$RECORDER_LOGIN"
    ```
-2. Refactor hold probing logic in both preflight Guard 2 and write-time Guard 2 to fail closed on API errors (Argus R1-3, D1, D2):
+2. Refactor hold probing logic in both preflight Guard 2 and write-time Guard 2 to fail closed on API errors (Argus R1-3, D1, D2), while treating non-issue numbers scraped from PR body/branch as "not held" with a logged note (Argus R1-2, D2):
    - Preflight Guard 2 (`scripts/ci/review_recorder.sh:57-72`):
      ```bash
      for iss in $ALL_LINKED; do
        if ! iss_json="$(gh issue view "$iss" --json labels 2>&1)"; then
-         echo "error: failed to probe hold status on #$iss; recorder aborts to fail closed" >&2
-         exit 1
-       fi
-       if echo "$iss_json" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
+         if echo "$iss_json" | grep -Eiq "could not resolve to an issue|not found|404"; then
+           echo "note: #$iss is not an issue, treating as not held"
+         else
+           echo "error: failed to probe hold status on #$iss; recorder aborts to fail closed" >&2
+           exit 1
+         fi
+       elif echo "$iss_json" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
          echo "hold present on #$iss, recorder writes nothing"
          exit 0
        fi
@@ -125,20 +128,23 @@ Touch: `scripts/ci/review_recorder.sh`
      ALL_LINKED_LATEST="$(get_linked_issues "$PR_LATEST_JSON")"
      for iss in $ALL_LINKED_LATEST; do
        if ! iss_json="$(gh issue view "$iss" --json labels 2>&1)"; then
-         echo "error: failed to probe hold status on #$iss at write time; recorder aborts to fail closed" >&2
-         exit 1
-       fi
-       if echo "$iss_json" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
+         if echo "$iss_json" | grep -Eiq "could not resolve to an issue|not found|404"; then
+           echo "note: #$iss is not an issue, treating as not held"
+         else
+           echo "error: failed to probe hold status on #$iss at write time; recorder aborts to fail closed" >&2
+           exit 1
+         fi
+       elif echo "$iss_json" | jq -e '.labels[]? | select(.name == "hold")' >/dev/null 2>&1; then
          echo "hold present on #$iss, recorder writes nothing"
          exit 0
        fi
      done
      ```
-3. Maintain the contiguous write sequence executing `COMMENT_ACTION` and `gh issue edit` immediately following the write-time re-read.
+3. Maintain the contiguous write sequence executing `COMMENT_ACTION` and `gh issue edit` immediately following the write-time re-read in the shell entrypoint (governed by D1 write-time guard placement, narrowing D8 write execution per Advisor V-2).
 
 **Decisions:** D1, D2, D3, D8, D10.
-**Acceptance:** AT-291-1, AT-291-2, AT-291-3, AT-291-8, AT-291-9, AT-291-11.
-**Done when:** `scripts/ci/review_recorder.sh` delegates to `review_recorder.py` and fails closed on hold probe errors; all 16 test cases in `scripts/ci/tests/review_recorder_test.sh` turn green.
+**Acceptance:** AT-291-1, AT-291-2, AT-291-3, AT-291-8, AT-291-9, AT-291-11, AT-291-12.
+**Done when:** `scripts/ci/review_recorder.sh` delegates to `review_recorder.py` and fails closed on hold probe errors; all 17 test cases in `scripts/ci/tests/review_recorder_test.sh` turn green.
 
 ## T4 · Living spec updates and cross-reference documentation
 
@@ -150,7 +156,7 @@ Touch: `docs/SPEC.md`, `intent/267-severity-tiered-merge-gate-review-md/spec.md`
 2. Add amendment cross-reference in `intent/267-severity-tiered-merge-gate-review-md/spec.md`:
    - Note that #291 amends #267 D1, D5, D6, D8 to establish hold write-time parity, fail-closed probing, demotion finding ID attribution, withdrawn/dispute exemptions, and Python engine extraction.
 3. In `intent/291-recorder-hold-parity/spec.md`:
-   - Ensure Acceptance section reflects `AT-291-1` through `AT-291-11` with observable re-read and fail-closed probe assertions.
+   - Ensure Acceptance section reflects `AT-291-1` through `AT-291-12` with observable re-read, fail-closed probe assertions, and non-issue reference handling.
    - Fix drifted line pointers for `REVIEW.md:119-122` and `REVIEW.md:166-168` (Argus R1-4).
 
 **Decisions:** D1, D4, D5, D6, D7, D8, D9, D10.
@@ -162,7 +168,7 @@ Touch: `docs/SPEC.md`, `intent/267-severity-tiered-merge-gate-review-md/spec.md`
 Touch: (none)
 
 1. Run verification suite from repository root:
-   - `bash scripts/ci/tests/review_recorder_test.sh` (all 16 tests pass, exit 0).
+   - `bash scripts/ci/tests/review_recorder_test.sh` (all 17 tests pass, exit 0).
    - `bash scripts/ci/tests/merge_gate_test.sh` (all scenarios pass, exit 0).
    - `python3 scripts/sync_agents.py --check` (clean, 0 drift, exit 0).
    - `bash scripts/ci/compiler_roundtrip.sh` (roundtrip clean, exit 0).
@@ -170,7 +176,7 @@ Touch: (none)
    - `bash scripts/ci/spec_check.sh origin/main <pr-body-file>` (PASS, exit 0).
 
 **Decisions:** D1..D10.
-**Acceptance:** AT-291-1..AT-291-11.
+**Acceptance:** AT-291-1..AT-291-12.
 **Done when:** All six verification commands exit 0.
 
 ## Commutability
