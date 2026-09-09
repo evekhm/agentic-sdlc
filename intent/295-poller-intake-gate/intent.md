@@ -35,7 +35,7 @@ At base commit `696f516239efaa8d9c63592354a08fc398b410f4` on 2026-09-09, the imp
 ### 5. Fix-round trigger predicate is author-agnostic
 - **State:** Open in code and in the contract suite.
 - In `scripts/placement/vm-local/poll.sh:157`, the trigger selects `select((.body // "") | contains("review findings: blocking"))` from any comment author. Lines 164-165 restrict recorder markers to `((.user.login // "") == "evekhm-argus-app[bot]" or (.user.login // "") == "evekhm-atlas-app[bot]")`.
-- In `scripts/ci/tests/e2e_chain_test.sh:1584`, the AT-20 fixture defines a comment containing `review findings: blocking` without a reviewer author login.
+- In `scripts/placement/vm-local/poll.sh:157`, the matcher ignores the comment author. In `scripts/ci/tests/e2e_chain_test.sh:1584`, the AT-20 fixture pins `evekhm-argus-app[bot]`, so the suite never covers a non-reviewer author posting the phrase.
 
 ### 6. AT-20 does not test lock contention
 - **State:** Open in the contract suite only.
@@ -59,7 +59,7 @@ At base commit `696f516239efaa8d9c63592354a08fc398b410f4` on 2026-09-09, the imp
 5. **Proposal D8a (Gap 4):** The contract suite remains outside the implement rung's manifest. Contract test defects are repaired by a spec-owner pull request citing the acceptance row, keeping acceptance criteria and implementation separated. Row AT-13 updates to `grep -q -- "--> odyssey"`.
 
 ### Additional proposals
-6. **Proposal for Gap 5:** Restrict fix-round triggers to verified reviewer identities (`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`) and drop the author-agnostic literal phrase `review findings: blocking` from D2 and `poll.sh`. Update the AT-20 test fixture in `scripts/ci/tests/e2e_chain_test.sh` to include a verified reviewer login.
+6. **Proposal for Gap 5:** Restrict fix-round triggers to verified reviewer identities (`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`) and drop the author-agnostic literal phrase `review findings: blocking` from D2 and `poll.sh`. Add an acceptance case to AT-20 where the phrase is posted by an author outside the reviewer set and assert that no fix round is triggered.
 7. **Proposal for Gap 6:** Update AT-20 in `scripts/ci/tests/e2e_chain_test.sh` to clear the consumption key before tick 2, or introduce a separate test row that tests lock contention directly.
 8. **Proposal for Gap 7:** Update D1 text in `intent/251-e2e-chain/spec.md` to describe claim holder derivation as `(.author.login // .user.login // "")`, matching `scripts/ci/lifecycle_advance.sh:1076`.
 
