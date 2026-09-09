@@ -55,6 +55,11 @@ case "$NUMBER" in
 esac
 [ -n "$PERSONA" ] || die "usage: run.sh <number> --as <persona>"
 
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    echo "$PLACEMENT: delegating #$NUMBER execution to operator VM poller"
+    exit 0
+fi
+
 # The binding, from the ONE reader (D2). An adapter that parsed the
 # YAML itself would be a second schema.
 binding="$(python3 "$REPO_ROOT/scripts/ops/execution.py" --binding "$PERSONA")" \
