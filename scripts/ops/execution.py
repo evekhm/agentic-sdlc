@@ -52,7 +52,7 @@ PLACEMENT_DIR = REPO_ROOT / "scripts" / "placement"
 UNATTENDED_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "unattended.yml"
 
 TRIGGERS = ("repo-event", "scheduled", "manual", "ladder")
-BINDING_KEYS = {"trigger", "events", "placement", "max_cost_usd"}
+BINDING_KEYS = {"trigger", "events", "placement", "max_cost_usd", "assigned_when"}
 
 
 def fail(message: str) -> NoReturn:
@@ -97,6 +97,54 @@ def is_persona_source(name: str) -> bool:
     except yaml.YAMLError:
         return False
     return isinstance(data, dict) and data.get("kind") == "persona"
+
+
+def get_known_status_labels() -> set:
+    lifecycle_path = PERSONAS_DIR / "lifecycle.json"
+    if lifecycle_path.is_file():
+        try:
+            import json
+            data = json.loads(lifecycle_path.read_text())
+            labels = {stage["label"] for stage in data.get("stages", []) if "label" in stage}
+            if labels:
+                return labels
+        except Exception:
+            pass
+    return {"status:planning", "status:spec", "status:build", "status:implementing", "status:in-review"}
+
+
+def path_matches_pattern(path_str: str, pattern: str) -> bool:
+    import fnmatch
+    from pathlib import PurePath
+    if fnmatch.fnmatch(path_str, pattern):
+        return True
+    try:
+        if PurePath(path_str).match(pattern):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def matches_any_path_pattern(path_str: str, patterns: list) -> bool:
+    for pat in patterns:
+        if path_matches_pattern(path_str, pat):
+            return True
+    return False
+
+
+def collect_paths(paths_args: list | None, paths_file: str | None) -> list:
+    result: list = []
+    if paths_args:
+        result.extend(paths_args)
+    if paths_file:
+        pf = Path(paths_file)
+        if pf.is_file():
+            for line in pf.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    result.append(line)
+    return result
 
 
 def adapter_of(placement: str) -> Path:
@@ -185,6 +233,50 @@ def check(config: dict) -> None:
                 "only repo-event subscribes to an event"
             )
 
+        assigned_when = binding.get("assigned_when")
+        if assigned_when is not None:
+            if trigger != "repo-event" or "pull_request" not in (events or []):
+                fail(
+                    f"ERROR: assigned_when allowed only for pull_request repo-events; "
+                    f"persona '{name}' has trigger '{trigger}' and events {events}"
+                )
+            if not isinstance(assigned_when, dict):
+                fail(f"ERROR: persona '{name}' assigned_when must be a mapping")
+            allowed_aw_keys = {"status_labels", "paths", "labels", "open_ledger_tiers"}
+            unknown_aw = sorted(set(assigned_when) - allowed_aw_keys)
+            if unknown_aw:
+                fail(f"ERROR: unknown key in assigned_when: {', '.join(unknown_aw)}")
+            if "status_labels" in assigned_when:
+                sl = assigned_when["status_labels"]
+                if not isinstance(sl, list):
+                    fail("ERROR: status_labels in assigned_when must be a list")
+                known_labels = get_known_status_labels()
+                for label in sl:
+                    if label not in known_labels:
+                        fail(f"ERROR: unknown status label: {label}")
+            if "open_ledger_tiers" in assigned_when:
+                olt = assigned_when["open_ledger_tiers"]
+                if not isinstance(olt, list):
+                    fail("ERROR: open_ledger_tiers in assigned_when must be a list")
+                allowed_tiers = {"security", "high", "normal", "suggestion"}
+                for tier in olt:
+                    if tier not in allowed_tiers:
+                        fail(f"ERROR: unknown severity tier: {tier}")
+            if "paths" in assigned_when:
+                paths_list = assigned_when["paths"]
+                if not isinstance(paths_list, list):
+                    fail("ERROR: paths in assigned_when must be a list")
+                for p in paths_list:
+                    if not isinstance(p, str) or not p:
+                        fail(f"ERROR: invalid path pattern in assigned_when: {p!r}")
+            if "labels" in assigned_when:
+                labels_list = assigned_when["labels"]
+                if not isinstance(labels_list, list):
+                    fail("ERROR: labels in assigned_when must be a list")
+                for l in labels_list:
+                    if not isinstance(l, str) or not l:
+                        fail(f"ERROR: invalid label in assigned_when: {l!r}")
+
         # Declared, not enforced (Argus R1-4): this gate checks the
         # number is sane and the adapter prints it, so the budget is
         # stated once and legible in the run log. Nothing meters spend
@@ -227,20 +319,126 @@ def check(config: dict) -> None:
     )
 
 
-def subscribers(config: dict, event: str) -> None:
+def subscribers(
+    config: dict,
+    event: str,
+    status_label: str | None = None,
+    paths: list | None = None,
+    labels: list | None = None,
+    open_ledger: list | None = None,
+    action: str | None = None,
+    draft: bool = False,
+) -> None:
     """`<persona>\t<placement>` per repo-event binding carrying `event`.
 
     The dispatcher's whole input. Sorted, so a workflow's step order is
     a property of the config and not of a dict's iteration order.
     """
+    if draft:
+        return
+
+    paths = paths or []
+    labels = labels or []
+    open_ledger = open_ledger or []
+    known_labels = get_known_status_labels()
+
     bindings = config.get("personas", {})
     for name in sorted(bindings):
         binding = bindings[name]
         if binding.get("trigger") != "repo-event":
             continue
         events = binding.get("events") or []
-        if event in events:
+        if event not in events:
+            continue
+
+        assigned_when = binding.get("assigned_when")
+        if assigned_when is None:
+            # Unconditional subscriber (e.g. atlas)
             print(f"{name}\t{binding.get('placement')}")
+            continue
+
+        # Conditional subscriber (e.g. argus)
+        # 1. Missing or unresolvable status label fails closed to dual assignment (AT-11)
+        if not status_label or status_label not in known_labels:
+            print(f"{name}\t{binding.get('placement')}")
+            continue
+
+        # 2. Status label matches assigned_when.status_labels (AT-4)
+        aw_status_labels = assigned_when.get("status_labels", [])
+        if status_label in aw_status_labels:
+            print(f"{name}\t{binding.get('placement')}")
+            continue
+
+        # 3. Path matches any assigned_when.paths pattern (AT-5)
+        aw_paths = assigned_when.get("paths", [])
+        if any(matches_any_path_pattern(p, aw_paths) for p in paths):
+            print(f"{name}\t{binding.get('placement')}")
+            continue
+
+        # 4. Label matches assigned_when.labels (AT-6)
+        aw_labels = assigned_when.get("labels", [])
+        if any(l in aw_labels for l in labels):
+            print(f"{name}\t{binding.get('placement')}")
+            continue
+
+        # 5. Open ledger tier matches assigned_when.open_ledger_tiers (AT-7)
+        aw_tiers = assigned_when.get("open_ledger_tiers", [])
+        if any(t in aw_tiers for t in open_ledger):
+            print(f"{name}\t{binding.get('placement')}")
+            continue
+
+
+def check_grant(pr: str | None, rung: str | None, existing_grants: list | None = None) -> None:
+    if not pr or not rung:
+        fail("--check-grant requires --pr and --rung")
+    existing: list = []
+    if existing_grants:
+        for item in existing_grants:
+            for part in item.replace(",", " ").split():
+                existing.append(part.strip())
+    if rung in existing:
+        sys.exit(
+            f"Refused: PR #{pr} already received a deep-review grant on the '{rung}' rung. "
+            f"Policy allows at most one deep-review grant per PR per rung (REVIEW.md, #265). "
+            f"Escalating to human."
+        )
+
+
+def diff_rules(
+    config: dict,
+    lines: int | None = None,
+    files: int | None = None,
+    paths: list | None = None,
+) -> None:
+    paths = paths or []
+    # DEEP-2: Lines > 400 or Files > 12
+    if lines is not None and lines > 400:
+        print("deep-review")
+        return
+    if (files is not None and files > 12) or len(paths) > 12:
+        print("deep-review")
+        return
+
+    # DEEP-1: Trust-bearing paths
+    tb_patterns = [
+        ".github/workflows/**",
+        "scripts/auth/**",
+        "scripts/ops/**",
+        "scripts/ci/**",
+        "scripts/sync_agents.py",
+        "scripts/setup/**",
+        "personas/**",
+        "config/**",
+        "REVIEW.md",
+        "AGENTS.md",
+    ]
+    argus_aw = config.get("personas", {}).get("argus", {}).get("assigned_when", {})
+    if isinstance(argus_aw, dict) and "paths" in argus_aw and isinstance(argus_aw["paths"], list):
+        tb_patterns = argus_aw["paths"]
+
+    if any(matches_any_path_pattern(p, tb_patterns) for p in paths):
+        print("deep-review")
+        return
 
 
 def binding_line(config: dict, persona: str) -> None:
@@ -272,13 +470,49 @@ def main() -> None:
     mode.add_argument("--subscribers", metavar="EVENT", help="repo-event bindings for EVENT")
     mode.add_argument("--binding", metavar="PERSONA", help="one persona's binding, one line")
     mode.add_argument("--loop", metavar="KEY", help="print a value from the loop block")
+    mode.add_argument("--check-grant", action="store_true", help="validate deep-review grant cap")
+    mode.add_argument("--diff-rules", action="store_true", help="evaluate diff thresholds and trust-bearing paths")
+
+    # Options for --subscribers and --diff-rules
+    parser.add_argument("--status-label", help="status:* label on the PR or linked issue")
+    parser.add_argument("--paths", nargs="*", default=[], help="paths touched")
+    parser.add_argument("--paths-file", help="file containing touched paths")
+    parser.add_argument("--labels", nargs="*", default=[], help="labels present on the PR")
+    parser.add_argument("--open-ledger", nargs="*", default=[], help="open ledger severity tiers")
+    parser.add_argument("--action", help="workflow pull_request action")
+    parser.add_argument("--draft", action="store_true", help="PR is a draft")
+
+    # Options for --check-grant
+    parser.add_argument("--pr", help="pull request number for grant check")
+    parser.add_argument("--rung", help="current lifecycle rung for grant check")
+    parser.add_argument("--existing-grants", nargs="*", default=[], help="rungs where grant was already given")
+
+    # Options for --diff-rules
+    parser.add_argument("--lines", type=int, help="lines changed")
+    parser.add_argument("--files", type=int, help="files changed")
+
     args = parser.parse_args()
 
     config = load()
     if args.check:
         check(config)
     elif args.subscribers:
-        subscribers(config, args.subscribers)
+        all_paths = collect_paths(args.paths, args.paths_file)
+        subscribers(
+            config,
+            args.subscribers,
+            status_label=args.status_label,
+            paths=all_paths,
+            labels=args.labels,
+            open_ledger=args.open_ledger,
+            action=args.action,
+            draft=args.draft,
+        )
+    elif args.check_grant:
+        check_grant(pr=args.pr, rung=args.rung, existing_grants=args.existing_grants)
+    elif args.diff_rules:
+        all_paths = collect_paths(args.paths, args.paths_file)
+        diff_rules(config, lines=args.lines, files=args.files, paths=all_paths)
     elif args.loop:
         loop_value(config, args.loop)
     else:

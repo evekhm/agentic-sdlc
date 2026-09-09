@@ -284,5 +284,97 @@ has "no loop block" "D20: the failure names the missing block"
 run 1 "D20: --loop fails the same way" -- "$CHECK" --loop autonomous_merge
 has "no loop block" "D20: --loop names the missing block"
 
+banner "assigned_when schema checks (#265)"
+write_config "$T" <<'YAML'
+personas:
+  argus:
+    trigger: repo-event
+    events: [pull_request]
+    placement: gh-actions
+    max_cost_usd: 8.00
+    assigned_when:
+      unknown_field: true
+      status_labels: [status:implementing]
+YAML
+run 1 "assigned_when: unknown subkey exits 1" -- "$CHECK" --check
+has "ERROR: unknown key in assigned_when" "error names unknown key"
+
+write_config "$T" <<'YAML'
+personas:
+  argus:
+    trigger: repo-event
+    events: [pull_request]
+    placement: gh-actions
+    max_cost_usd: 8.00
+    assigned_when:
+      status_labels: [status:invalid-stage]
+YAML
+run 1 "assigned_when: unknown status label exits 1" -- "$CHECK" --check
+has "ERROR: unknown status label" "error names unknown status label"
+
+write_config "$T" <<'YAML'
+personas:
+  argus:
+    trigger: repo-event
+    events: [pull_request]
+    placement: gh-actions
+    max_cost_usd: 8.00
+    assigned_when:
+      open_ledger_tiers: [critical]
+YAML
+run 1 "assigned_when: unknown severity tier exits 1" -- "$CHECK" --check
+has "ERROR: unknown severity tier" "error names unknown severity tier"
+
+write_config "$T" <<'YAML'
+personas:
+  odyssey:
+    trigger: manual
+    placement: vm-local
+    max_cost_usd: 1.00
+    assigned_when:
+      status_labels: [status:implementing]
+YAML
+run 1 "assigned_when: on manual trigger exits 1" -- "$CHECK" --check
+has "ERROR: assigned_when allowed only for pull_request repo-events" "error explains constraint"
+
+banner "--subscribers filter flags (#265)"
+OUT="$(python3 "$EXEC_PY" --subscribers pull_request --status-label status:spec --paths docs/foo.md)"
+[ "$OUT" = "$(printf 'atlas\tgh-actions')" ] || fail "doc PR did not assign only atlas"
+pass "--subscribers: doc PR assigns atlas only"
+
+OUT="$(python3 "$EXEC_PY" --subscribers pull_request --status-label status:implementing --paths src/code.py)"
+[ "$OUT" = "$(printf 'argus\tgh-actions\natlas\tgh-actions')" ] || fail "code PR did not assign both"
+pass "--subscribers: code PR assigns both argus and atlas"
+
+OUT="$(python3 "$EXEC_PY" --subscribers pull_request --paths src/code.py)"
+[ "$OUT" = "$(printf 'argus\tgh-actions\natlas\tgh-actions')" ] || fail "missing status-label did not fail closed"
+pass "--subscribers: missing status-label fails closed to dual assignment"
+
+OUT="$(python3 "$EXEC_PY" --subscribers pull_request --draft --status-label status:implementing --paths src/code.py)"
+[ -z "$OUT" ] || fail "draft PR did not emit empty"
+pass "--subscribers: draft PR suppresses subscribers"
+
+banner "--check-grant (#265)"
+run 1 "--check-grant duplicate grant refused" -- "$EXEC_PY" --check-grant --pr 100 --rung design --existing-grants design
+has "Refused: PR #100 already received a deep-review grant" "error explains grant policy"
+run 0 "--check-grant fresh grant accepted" -- "$EXEC_PY" --check-grant --pr 100 --rung build --existing-grants design
+
+banner "--diff-rules (#265)"
+OUT="$(python3 "$EXEC_PY" --diff-rules --lines 401 --paths src/code.py)"
+[ "$OUT" = "deep-review" ] || fail "lines > 400 did not emit deep-review"
+pass "--diff-rules: lines > 400 emits deep-review"
+
+OUT="$(python3 "$EXEC_PY" --diff-rules --files 13 --paths src/code.py)"
+[ "$OUT" = "deep-review" ] || fail "files > 12 did not emit deep-review"
+pass "--diff-rules: files > 12 emits deep-review"
+
+OUT="$(python3 "$EXEC_PY" --diff-rules --lines 50 --paths scripts/auth/mint_app_token.py)"
+[ "$OUT" = "deep-review" ] || fail "trust-bearing path did not emit deep-review"
+pass "--diff-rules: trust-bearing path emits deep-review"
+
+OUT="$(python3 "$EXEC_PY" --diff-rules --lines 50 --files 5 --paths intent/265-review-split/spec.md)"
+[ -z "$OUT" ] || fail "doc path under threshold did not emit empty"
+pass "--diff-rules: doc path under threshold emits empty"
+
 echo
 echo "execution_test.sh: all scenarios passed"
