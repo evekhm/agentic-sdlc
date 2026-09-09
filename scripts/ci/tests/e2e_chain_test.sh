@@ -52,7 +52,7 @@ mkdir -p "$FIXTURES" "$WORK/bin"
 : > "$CLAIMS"
 : > "$MINTS"
 
-export FIXTURES WRITES INVOKES LAUNCHES CLAIMS MINTS
+export WORK FIXTURES WRITES INVOKES LAUNCHES CLAIMS MINTS
 export GITHUB_REPO="evekhm/agentic-sdlc"
 export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
 REAL_GIT="$(command -v git)"
@@ -171,7 +171,7 @@ if [ "$cmd" = "issue" ] || [ "$cmd" = "pr" ] || [ "$cmd" = "search" ]; then
         elif [ -f "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${target}.json" ]; then
             content="$(cat "$FIXTURES/repos_evekhm_agentic-sdlc_issues_${target}.json")"
         else
-            content="$("$REAL_JQ" -nc --argjson n "$target" '{number: $n, state: "OPEN", labels: [], comments: []}')"
+            content="$("$REAL_JQ" -nc --argjson n "$target" '{number: $n, state: "open", labels: [], comments: []}')"
         fi
         if [ -n "$json_fields" ]; then
             fields_expr="$(echo "$json_fields" | sed 's/,/, /g')"
@@ -272,7 +272,7 @@ if [ "$cmd" = "api" ]; then
                 cat "$FIXTURES/issue-$n.json"
                 exit 0
             fi
-            "$REAL_JQ" -nc --argjson n "$n" '{number: $n, state: "OPEN", labels: [], comments: []}'
+            "$REAL_JQ" -nc --argjson n "$n" '{number: $n, state: "open", labels: [], comments: []}'
             exit 0
             ;;
         repos/*/commits/*/pulls)
@@ -338,9 +338,14 @@ if [ "${2:-}" = "--loop" ] && [ -f "$FIXTURES/loop-${3:-}" ]; then
     cat "$FIXTURES/loop-$3"
     exit 0
 fi
-if [ "${2:-}" = "--binding" ] && [ -f "$FIXTURES/binding-${3:-}" ]; then
-    cat "$FIXTURES/binding-$3"
-    exit 0
+if [ "${2:-}" = "--binding" ]; then
+    if [ -f "$FIXTURES/binding-${3:-}" ]; then
+        cat "$FIXTURES/binding-$3"
+        exit 0
+    elif [ -f "$FIXTURES/binding-vm-local" ]; then
+        cat "$FIXTURES/binding-vm-local"
+        exit 0
+    fi
 fi
 # Stub mint_app_token.py
 for arg in "$@"; do
@@ -402,6 +407,12 @@ chmod +x "$WORK/bin/run.sh"
 
 cat > "$WORK/bin/claim.sh" <<'CLAIMSTUB'
 #!/usr/bin/env bash
+if [ ! -f "$WORK/.first_claim_checked" ]; then
+    touch "$WORK/.first_claim_checked"
+    if grep -qE 'gh (issue list.*(--label|-l)|api.*repos/[^/]+/[^/]+/issues\?.*labels=)' "$INVOKES" 2>/dev/null; then
+        touch "$WORK/.first_claim_had_list_query"
+    fi
+fi
 echo "claim.sh CLAIM_ACTOR=${CLAIM_ACTOR:-} CLAIM_SESSION=${CLAIM_SESSION:-} $*" >> "$CLAIMS"
 issue="${1:-}"
 issue="${issue#\#}"
@@ -419,11 +430,19 @@ chmod +x "$WORK/bin/claim.sh"
 SANDBOX="$WORK/repo"
 mkdir -p "$SANDBOX/personas" "$SANDBOX/scripts"
 cp "$REPO/personas/lifecycle.json" "$SANDBOX/personas/lifecycle.json"
+cp "$REPO"/personas/*.yaml "$SANDBOX/personas/"
+cp -r "$REPO/scripts/ci" "$SANDBOX/scripts/"
 cp -r "$REPO/scripts/ops" "$SANDBOX/scripts/"
 cp -r "$REPO/scripts/placement" "$SANDBOX/scripts/"
 
 cat > "$SANDBOX/scripts/ops/claim.sh" <<'SANDBOXCLAIM'
 #!/usr/bin/env bash
+if [ ! -f "$WORK/.first_claim_checked" ]; then
+    touch "$WORK/.first_claim_checked"
+    if grep -qE 'gh (issue list.*(--label|-l)|api.*repos/[^/]+/[^/]+/issues\?.*labels=)' "$INVOKES" 2>/dev/null; then
+        touch "$WORK/.first_claim_had_list_query"
+    fi
+fi
 echo "claim.sh CLAIM_ACTOR=${CLAIM_ACTOR:-} CLAIM_SESSION=${CLAIM_SESSION:-} $*" >> "$CLAIMS"
 issue="${1:-}"
 issue="${issue#\#}"
@@ -518,6 +537,7 @@ get_range() {
 
 reset_fixtures() {
     rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable "$FIXTURES"/loop-* "$FIXTURES"/binding-*
+    rm -f "$WORK/.first_claim_checked" "$WORK/.first_claim_had_list_query"
     : > "$WRITES"
     : > "$INVOKES"
     : > "$LAUNCHES"
@@ -527,7 +547,7 @@ reset_fixtures() {
     unset FAIL_MINT
 }
 
-ADVANCER="$REPO/scripts/ci/lifecycle_advance.sh"
+ADVANCER="$SANDBOX/scripts/ci/lifecycle_advance.sh"
 
 # =============================================================================
 # AT-1 (D1): Ladder rung transition releases claim when claim author login matches completing stage persona
@@ -1459,23 +1479,36 @@ EOF
     out="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
 
     local has_claim=0 single_launch=0 no_ledger=0 clean_worktree=0
-    grep -qE 'claim\.sh CLAIM_ACTOR=athena CLAIM_SESSION=poll-[0-9]+ 300( |$)' "$CLAIMS" && has_claim=1
-    if [ "$(wc -l < "$LAUNCHES")" -eq 1 ] && grep -qE '^run\.sh 300 --as athena$' "$LAUNCHES"; then
-        single_launch=1
+    local launch_in_discovery=0 has_list_query=0
+    local launched_num=""
+    if [ "$(wc -l < "$LAUNCHES")" -eq 1 ]; then
+        launched_num="$(awk '{print $2}' "$LAUNCHES" 2>/dev/null || true)"
+        if [ -n "$launched_num" ] && grep -qE "^run\.sh $launched_num --as athena$" "$LAUNCHES"; then
+            single_launch=1
+        fi
+    fi
+    if [ -n "$launched_num" ] && "$REAL_JQ" -e --argjson n "$launched_num" '.[] | select(.number == $n)' "$FIXTURES/issue-list.json" >/dev/null 2>&1; then
+        launch_in_discovery=1
+    fi
+    if [ -n "$launched_num" ] && grep -qE "claim\.sh CLAIM_ACTOR=athena CLAIM_SESSION=poll-[0-9]+ $launched_num( |$)" "$CLAIMS"; then
+        has_claim=1
+    fi
+    if [ -f "$WORK/.first_claim_had_list_query" ] && grep -qE 'gh (issue list.*(--label|-l)|api.*repos/[^/]+/[^/]+/issues\?.*labels=)' "$INVOKES"; then
+        has_list_query=1
     fi
     if ! grep -q "loop-ledger" "$WRITES"; then
         no_ledger=1
     fi
-    local repo_status=""
-    repo_status="$("$REAL_GIT" -C "$REPO" status --porcelain | grep -vE '(scripts/placement/vm-local/poll\.sh|intent/251-e2e-chain/plan\.md|scripts/ci/tests/e2e_chain_test\.sh)' || true)"
-    if [ -z "$repo_status" ] && ! ls -d "$REPO/.claude/worktrees/athena-300"* >/dev/null 2>&1; then
+    local sandbox_status=""
+    sandbox_status="$("$REAL_GIT" -C "$SANDBOX" status --porcelain 2>/dev/null || true)"
+    if [ -z "$sandbox_status" ] && ! ls -d "$REPO/.claude/worktrees/"*300* >/dev/null 2>&1; then
         clean_worktree=1
     fi
 
-    if [ "$rc" -eq 0 ] && [ "$has_claim" -eq 1 ] && [ "$single_launch" -eq 1 ] && [ "$no_ledger" -eq 1 ] && [ "$clean_worktree" -eq 1 ]; then
-        pass "AT-15 (D5): first hop claimed and dispatched open intent:new issue with single launch, zero ledger writes, and clean worktree"
+    if [ "$rc" -eq 0 ] && [ "$has_claim" -eq 1 ] && [ "$single_launch" -eq 1 ] && [ "$launch_in_discovery" -eq 1 ] && [ "$has_list_query" -eq 1 ] && [ "$no_ledger" -eq 1 ] && [ "$clean_worktree" -eq 1 ]; then
+        pass "AT-15 (D5): first hop claimed and dispatched discovered open intent:new issue with single launch, zero ledger writes, and clean worktree"
     else
-        fail "AT-15 (D5): poll.sh did not claim/dispatch open intent:new issue or wrote ledger row (rc=$rc claim=$has_claim launch=$single_launch no_ledger=$no_ledger clean=$clean_worktree)"
+        fail "AT-15 (D5): poll.sh did not claim/dispatch discovered open intent:new issue or wrote ledger row (rc=$rc claim=$has_claim launch=$single_launch in_disc=$launch_in_discovery list_query=$has_list_query no_ledger=$no_ledger clean=$clean_worktree)"
     fi
 }
 run_at15

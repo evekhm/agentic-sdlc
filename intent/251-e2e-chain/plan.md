@@ -4,7 +4,7 @@
 - Spec: `intent/251-e2e-chain/spec.md`
 - Author: daedalus
 - Base commit: `4f862c6b8cac5ea82f0792e908aec72fda85ad91`
-- Status: Drafted (Build Rung, Round 3)
+- Status: Drafted (Build Rung, Round 5)
 
 ## Summary
 
@@ -123,7 +123,7 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 - **AT-7 (D2)**: Executing `GITHUB_ACTIONS=true scripts/placement/vm-local/run.sh 251 --as athena` prints `delegating #251 execution to operator VM poller` and exits 0.
   - Mapped to: T1, T4; verified by `scripts/ci/tests/e2e_chain_test.sh`
 - **AT-8 (D2)**: Executing `bash -n scripts/placement/vm-local/poll.sh` exits 0. In a mock ledger test, executing `scripts/placement/vm-local/poll.sh --once` finds unconsumed rows, invokes `CLAIM_ACTOR=<persona> CLAIM_SESSION=poll-<pid> scripts/ops/claim.sh <n>` under minted token, verifies the posted claim comment carries `.user.login` matching the persona App identity, and skips already-claimed rows.
-  - Mapped to: T1, T6; verified by `scripts/ci/tests/e2e_chain_test.sh`
+  - Mapped to: T1, T6; verified by `scripts/ci/tests/e2e_chain_test.sh` (the `claim.sh` stub posts nothing, so verification of posted claim comment `.user.login` is owned by `scripts/ops/tests/claim_test.sh` against real `claim.sh`).
 - **AT-9 (D2)**: Running `python3 -m json.tool scripts/placement/vm-local/poll.sidecar.json >/dev/null` exits 0, and `jq -e '.command and .args and .env and (.restart_policy == "always")' scripts/placement/vm-local/poll.sidecar.json` prints `true`.
   - Mapped to: T1, T7; verified by `scripts/ci/tests/e2e_chain_test.sh`
 - **AT-10 (D2)**: Running `grep -E '^(Type=simple|Restart=always|ExecStart=)' scripts/placement/vm-local/poll.service` outputs matching unit configuration lines and exits 0.
@@ -243,7 +243,7 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
      Passes `--as "$persona"` to all adapter invocations.
   9. Test harness interception: In test suites, `scripts/ops` and `scripts/placement` are copied into the sandbox environment,
      with `claim.sh` intercepted by a test stub recording `claim.sh CLAIM_ACTOR=... CLAIM_SESSION=... <n>` to `$CLAIMS`,
-     preserving worktree cleanliness.
+     preserving worktree cleanliness. Because the `claim.sh` stub posts nothing, verification of posted claim comment `.user.login` is owned by `scripts/ops/tests/claim_test.sh` against real `claim.sh`.
 - Test: `bash scripts/ci/tests/e2e_chain_test.sh` (AT-8, AT-14, AT-15, AT-20 turn green).
 
 ### T7: Supervisor Unit Configurations (D2, D8, AT-9, AT-10)
@@ -349,6 +349,15 @@ The Acceptance Criteria below are taken verbatim from `intent/251-e2e-chain/spec
 10. `Smoke NB 3`: Sandbox interception. Copied `scripts/ops` and `scripts/placement` into `$SANDBOX/scripts`, placed claim stub at `$SANDBOX/scripts/ops/claim.sh`, ran `poll.sh` from sandbox, and asserted worktree cleanliness.
 11. `Smoke NB 4`: AT-17 section check. Added check for `grep -qF "## Deployment status"` in living spec.
 12. `Smoke NB 5`: Plan synthetic git range documentation. Documented three synthetic git ranges used by `get_range`.
+
+### Round 5 Review Findings (Operator Decisions A-G, Smoke S1-S3, NB 1, 3, 4, 6, Argus R4-1)
+1. `Decision A (S1, Argus R4-1)`: Sandbox persona copy. Copied `personas/*.yaml` alongside `lifecycle.json` into `$SANDBOX/personas/` so the canonical stage owner resolution in `lifecycle_advance.sh` functions within the sandbox environment.
+2. `Decision B (S2)`: Work discovery observables and case matching. Changed synthesized fallback issue JSON in `gh` stub to lowercase `"state": "open"`. Updated both test and sandbox `claim.sh` stubs to verify that a list query (`gh issue list --label` or `gh api repos/.../issues?labels=`) occurs in `$INVOKES` before the first claim. In AT-15, verified single launch, confirmed the launched issue number is present in `issue-list.json`, and confirmed discovery preceded claim.
+3. `Decision C (S3)`: Sandbox lifecycle advancer execution. Copied `scripts/ci` into `$SANDBOX/scripts/ci` and set `ADVANCER="$SANDBOX/scripts/ci/lifecycle_advance.sh"` so `REPO_ROOT` points to `$SANDBOX`. The placement runner stub at `$SANDBOX/scripts/placement/vm-local/run.sh` captures adapter dispatches into `$LAUNCHES`.
+4. `Decision D (Smoke NB 4)`: AT-8 and AT-14 alignment. Aligned plan and suite on Decision B: in AT-8, issue 252 is already claimed and exits 1 with zero launch. Dispatch of 252 as daedalus belongs to AT-14 under a failed athena token mint.
+5. `Decision E (Smoke NB 3)`: Claim comment login verification ownership. The test stub for `claim.sh` records invocations to `$CLAIMS` without posting comments. Verification of `.user.login` on posted claim comments is owned by `scripts/ops/tests/claim_test.sh` against real `claim.sh`.
+6. `Decision F (Smoke NB 6)`: AT-15 cleanliness check. Replaced the repository status whitelist with `git status --porcelain` on `$SANDBOX` (asserting clean status) and verified that no `.claude/worktrees/*300*` exists under the repository.
+7. `Decision G (Smoke NB 1)`: Status round update. Updated plan header status line from Round 3 to Round 5.
 
 ## Gates Table
 
