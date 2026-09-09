@@ -57,11 +57,19 @@ for iss in $ALL_CLOSING; do
   fi
 done
 
-# Run the python engine to derive ledger state and actions
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+# Resolve recorder login via GraphQL viewer query (S3, D30)
+VIEWER_QUERY='query { viewer { login } }'
+RECORDER_LOGIN="$(gh api graphql -f query="$VIEWER_QUERY" 2>/dev/null | jq -r '.data.viewer.login // empty' || true)"
+if [ -z "$RECORDER_LOGIN" ]; then
+  echo "cannot resolve recorder login via GraphQL viewer" >&2
+  exit 1
+fi
 
-python3 - "$PR" "$REPO" "$PR_JSON" "$TMPDIR" <<'PYEOF'
+# Run the python engine to derive ledger state and actions
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+python3 - "$PR" "$REPO" "$PR_JSON" "$WORKDIR" "$RECORDER_LOGIN" <<'PYEOF'
 import sys
 import json
 import re
@@ -70,7 +78,8 @@ import subprocess
 pr = sys.argv[1]
 repo = sys.argv[2]
 pr_json_str = sys.argv[3]
-tmpdir = sys.argv[4]
+workdir = sys.argv[4]
+recorder_login = sys.argv[5]
 
 pr_data = json.loads(pr_json_str)
 pr_head = pr_data.get("headRefOid", "")
@@ -82,9 +91,16 @@ for c in pr_data.get("commits", []):
 # If valid_commits is empty, query commits API
 if not valid_commits:
     try:
-        res = subprocess.run(["gh", "api", f"repos/{repo}/pulls/{pr}/commits"], capture_output=True, text=True)
+        res = subprocess.run(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls/{pr}/commits"], capture_output=True, text=True)
         if res.returncode == 0 and res.stdout.strip():
-            c_data = json.loads(res.stdout)
+            raw_c_data = json.loads(res.stdout)
+            c_data = []
+            if isinstance(raw_c_data, list):
+                for item in raw_c_data:
+                    if isinstance(item, list):
+                        c_data.extend(item)
+                    else:
+                        c_data.append(item)
             for c in c_data:
                 if isinstance(c, dict) and "sha" in c:
                     valid_commits.add(c["sha"])
@@ -97,11 +113,17 @@ if not pr_head and valid_commits:
 # Fetch comments
 comments = []
 try:
-    res = subprocess.run(["gh", "api", f"repos/{repo}/issues/{pr}/comments"], capture_output=True, text=True)
+    res = subprocess.run(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/issues/{pr}/comments"], capture_output=True, text=True)
     if res.returncode == 0 and res.stdout.strip():
-        comments = json.loads(res.stdout)
-        if not isinstance(comments, list):
-            comments = [comments]
+        raw_comments = json.loads(res.stdout)
+        if isinstance(raw_comments, list):
+            for item in raw_comments:
+                if isinstance(item, list):
+                    comments.extend(item)
+                else:
+                    comments.append(item)
+        elif isinstance(raw_comments, dict):
+            comments = [raw_comments]
 except Exception as e:
     print(f"Error fetching comments: {e}", file=sys.stderr)
 
@@ -116,10 +138,18 @@ audit_notes = []
 
 for c in comments:
     body = c.get("body", "")
-    if f"<!-- consensus-ledger:{pr} -->" in body or "<!-- consensus-ledger:" in body:
-        existing_comment_id = c.get("id")
-        existing_body = body
-        break
+    c_user = c.get("user", {})
+    c_login = c_user.get("login", "")
+    c_id = c.get("id")
+    if "<!-- consensus-ledger:" in body:
+        if c_login == recorder_login and f"<!-- consensus-ledger:{pr} -->" in body:
+            if existing_comment_id is None:
+                existing_comment_id = c_id
+                existing_body = body
+            else:
+                audit_notes.append(f"[ignored: ledger marker in comment {c_id} by @{c_login}]")
+        else:
+            audit_notes.append(f"[ignored: ledger marker in comment {c_id} by @{c_login}]")
 
 if existing_body:
     for line in existing_body.splitlines():
@@ -136,14 +166,14 @@ if existing_body:
             rows[fid] = {"severity": sev, "status": st, "peer": pr_val}
             initial_existing_row_ids.add(fid)
 
-accepted_heads = {}
-last_accepted_heads = {}
+prev_ledger_heads = {}
 if prev_argus_head:
-    accepted_heads["argus"] = prev_argus_head
-    last_accepted_heads["argus"] = prev_argus_head
+    prev_ledger_heads["argus"] = prev_argus_head
 if prev_atlas_head:
-    accepted_heads["atlas"] = prev_atlas_head
-    last_accepted_heads["atlas"] = prev_atlas_head
+    prev_ledger_heads["atlas"] = prev_atlas_head
+
+accepted_heads = dict(prev_ledger_heads)
+last_accepted_heads = {}
 
 max_round = 1
 
@@ -162,7 +192,9 @@ for c in comments:
         rsev = rm.group(2)
         is_authorized = (author_assoc in ("OWNER", "MEMBER", "COLLABORATOR") and user_type != "Bot")
         if is_authorized:
-            if rfid in rows:
+            if rsev not in ("security", "high", "normal", "suggestion"):
+                audit_notes.append(f"[refused: retier by @{author_login}: invalid severity {rsev}]")
+            elif rfid in rows:
                 rows[rfid]["severity"] = rsev
                 audit_notes.append(f"[retiered to {rsev} by @{author_login}]")
         else:
@@ -238,8 +270,10 @@ for c in comments:
     # Terminal conclusion failure or cancelled causes withdrawal
     if run_status == "completed" and run_concl in ("failure", "cancelled"):
         audit_notes.append(f"[run {run_id} ended {run_concl}; verdict withdrawn]")
-        if reviewer in last_accepted_heads:
+        if reviewer in last_accepted_heads and last_accepted_heads[reviewer] != reviewed_head:
             accepted_heads[reviewer] = last_accepted_heads[reviewer]
+        elif reviewer in prev_ledger_heads and prev_ledger_heads[reviewer] != reviewed_head:
+            accepted_heads[reviewer] = prev_ledger_heads[reviewer]
         else:
             accepted_heads.pop(reviewer, None)
         continue
@@ -305,7 +339,11 @@ for c in comments:
                 rows[fid] = {"severity": fsev, "status": fst, "peer": "pending"}
             else:
                 if reviewer == discoverer:
-                    rows[fid]["status"] = fst
+                    if rows[fid]["status"] != "fixed" and fst == "fixed":
+                        rows[fid]["status"] = "fixed"
+                        rows[fid]["peer"] = "pending"
+                    else:
+                        rows[fid]["status"] = fst
                 else:
                     if fpr == "agree":
                         if fst == "fixed" or rows[fid]["status"] == "fixed":
@@ -431,8 +469,8 @@ managed_labels = {
 to_add = sorted([l for l in desired_labels if l not in current_labels])
 to_remove = sorted([l for l in managed_labels if l in current_labels and l not in desired_labels])
 
-# Write action plan to files in tmpdir
-with open(f"{tmpdir}/new_body.md", "w") as f:
+# Write action plan to files in workdir
+with open(f"{workdir}/new_body.md", "w") as f:
     f.write(new_body + "\n")
 
 action_plan = {
@@ -441,12 +479,12 @@ action_plan = {
     "to_add": to_add,
     "to_remove": to_remove
 }
-with open(f"{tmpdir}/action_plan.json", "w") as f:
+with open(f"{workdir}/action_plan.json", "w") as f:
     json.dump(action_plan, f)
 PYEOF
 
 # Read action plan
-PLAN_JSON="$TMPDIR/action_plan.json"
+PLAN_JSON="$WORKDIR/action_plan.json"
 COMMENT_ACTION="$(jq -r '.comment_action' "$PLAN_JSON")"
 COMMENT_ID="$(jq -r '.existing_comment_id // empty' "$PLAN_JSON")"
 TO_ADD="$(jq -r '.to_add | join(",")' "$PLAN_JSON")"
@@ -455,9 +493,9 @@ TO_REMOVE="$(jq -r '.to_remove | join(",")' "$PLAN_JSON")"
 if [ "${DRY_RUN:-0}" != "1" ]; then
   # Execute comment write if needed
   if [ "$COMMENT_ACTION" = "POST" ]; then
-    gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$TMPDIR/new_body.md"
+    gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$WORKDIR/new_body.md"
   elif [ "$COMMENT_ACTION" = "PATCH" ] && [ -n "$COMMENT_ID" ]; then
-    gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" -F "body=@$TMPDIR/new_body.md"
+    gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" -F "body=@$WORKDIR/new_body.md"
   fi
 
   # Execute label updates if needed
