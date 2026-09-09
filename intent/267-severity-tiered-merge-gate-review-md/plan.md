@@ -12,7 +12,7 @@ The current build rung branch is `daedalus/267-severity-recorder-plan`. The impl
 
 ## The calls this plan makes
 
-**P1 · Consensus ledger bridge and gate sequencing:** The recorder executes in `.github/workflows/merge-gate.yml` inside a new `record` job placed prior to the `gate` job (`gate` declares `needs: record`). Both jobs run under `environment: themis` and share concurrency group `merge-gate`. On pull request events, `evaluate` runs read-only with `DRY_RUN=1`. On review and push events, `record` re-derives the ledger and updates the single consensus ledger comment in place.
+**P1 · Consensus ledger bridge and gate sequencing:** The recorder executes in `.github/workflows/merge-gate.yml` inside a new `record` job placed prior to the `gate` job (`gate` declares `needs: [record]`). Both jobs run under `environment: themis` and share concurrency group `merge-gate`. On review and push events, `record` re-derives the ledger and updates the single consensus ledger comment in place. The `record` job runs under condition `if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)` and uses the same per-event TARGET resolution as `gate` (`merge-gate.yml:123-135`). An empty target logs an informative message and exits 0.
 
 **P2 · Review protocol structured blocks and closed high list:** Reviewers emit structured verdict blocks containing verdict, head commit OID, Actions run ID, round number, finding tuples, and failure scenario markers. Clean reviews emit zero finding rows between round and verdict trailer (AT-R1-6). High findings require an immediate sibling `failure-scenario` marker; findings lacking this marker are demoted mechanically to `normal` with an audit note. Evaluating whether high findings belong to the closed list in `REVIEW.md:102-111` is a reviewer duty documented in `personas/skills/review-protocol.md`.
 
@@ -30,30 +30,32 @@ Touch: `scripts/ci/tests/review_recorder_test.sh`
 
 1. Deliver hermetic test suite `scripts/ci/tests/review_recorder_test.sh` modeled after `scripts/ci/tests/merge_gate_test.sh`.
 2. Implement argument parsing supporting `-k <filter>` and `--filter <filter>` to select individual scenarios.
-3. Stub external tools (`claude`, `gemini`, `agy`, `curl`) to fail if invoked. Stub `gh` to intercept reads and record writes under `$WRITES`.
-4. Implement test functions for each acceptance test:
-   - `test_marker_parsing` (AT-2, D2)
+3. Stub external tools (`claude`, `gemini`, `agy`, `curl`) to fail if invoked. Stub `gh` to intercept reads and record writes under `$WRITES`, supporting flag forms `--input <file>`, `-F body=@<file>`, `--field body=@<file>`, `-f body=<text>`, and `--body-file <file>`.
+4. Implement 13 test scenarios covering the 14 acceptance criteria:
+   - `test_marker_parsing` (AT-2, D2, D10)
    - `test_provenance_validation` (AT-3, D2, D3)
-   - `test_ledger_comment_lifecycle` (AT-4, D4)
+   - `test_ledger_comment_lifecycle` (AT-4, D1, D4)
    - `test_high_failure_scenario_demotion` (AT-5, D5)
    - `test_non_enum_severity_refusal` (AT-6, D5)
    - `test_round_funnel` (AT-7, D6)
    - `test_security_dual_agreement` (AT-8, D7)
    - `test_owner_retier` (AT-9, D9)
-   - `test_label_sync` (AT-10, D8)
+   - `test_label_sync` (AT-10, D5, D7, D8)
    - `test_merge_gate_round_trip` (AT-13, D4, D5)
    - `test_atlas_carry_forward` (AT-16, D4, D7)
    - `test_provenance_workflow_dispatch` (AT-17, D3)
    - `test_wire_format_assigned` (AT-18, D4)
-5. Contract tests execute against `scripts/ci/review_recorder.sh`. Tests are committed RED at base because `scripts/ci/review_recorder.sh` does not exist yet.
+5. Contract tests execute against `scripts/ci/review_recorder.sh`. Tests are committed RED at base because `scripts/ci/review_recorder.sh` does not exist yet. Other acceptance criteria are checked separately: AT-11 via the regex one-liner and `merge_gate_test.sh`, AT-12 during provisioning, AT-14 during live execution (NOT RUN), and AT-15 via `spec_check.sh` and `sanitize_check.sh`.
 
-**Decisions:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D11, D12.
+**Decisions:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12.
 **Acceptance:** AT-1, AT-2, AT-3, AT-4, AT-5, AT-6, AT-7, AT-8, AT-9, AT-10, AT-13, AT-16, AT-17, AT-18.
 **Done when:** Test suite runs locally via `bash scripts/ci/tests/review_recorder_test.sh` and reports 13 failed tests out of 13 run due to missing implementation script.
 
-## T2 · Review protocol and compiled persona updates [DEEP-7]
+## T2 · Review protocol and compiled persona updates
 
 Touch: `REVIEW.md`, `personas/skills/review-protocol.md`, `.claude/**`, `.agents/**`
+
+Review protocol changes carry risk of reviewer instruction drift if compiler sync is skipped.
 
 1. **`REVIEW.md`**:
    - Update severity table and definitions around lines 79-100 to document `suggestion` as the authoritative non-defect improvement tier, eliminating legacy references to `low`.
@@ -81,12 +83,12 @@ Touch: `REVIEW.md`, `personas/skills/review-protocol.md`, `.claude/**`, `.agents
 **Acceptance:** AT-2, AT-5, AT-6, AT-7, AT-8, AT-9, AT-15.
 **Done when:** `REVIEW.md` and `personas/skills/review-protocol.md` are updated, and `python3 scripts/sync_agents.py --check` passes with zero drift.
 
-## T3 · Label taxonomy provisioning and documentation [DEEP-3, DEEP-5]
+## T3 · Label taxonomy provisioning
 
-Touch: `scripts/setup/issues/04-label-taxonomy.md`, `scripts/setup/bootstrap_tracker.sh`
+Touch: `scripts/setup/bootstrap_tracker.sh`
 
-1. **`scripts/setup/issues/04-label-taxonomy.md`**:
-   - Add entries for consensus and review labels with color codes and descriptions:
+1. **`scripts/setup/bootstrap_tracker.sh`**:
+   - Add `ensure_label` invocations in `bootstrap_tracker.sh` around lines 102-124 for the seven review and consensus labels named in AT-12:
      - `argus:findings` (`#d93f0b`): Open blocking findings (security or high) on the pull request
      - `argus:suggestions` (`#c5def5`): Open non-blocking findings (normal or suggestion) on the pull request
      - `consensus:agreed` (`#0e8a16`): All security findings agreed and no disputes on blocking rows
@@ -94,16 +96,12 @@ Touch: `scripts/setup/issues/04-label-taxonomy.md`, `scripts/setup/bootstrap_tra
      - `consensus:disputed` (`#b60205`): Active dispute on one or more blocking findings
      - `review:merge-ready` (`#0e8a16`): No open blocking findings, consensus agreed, reviewed at current head
      - `review:verifying` (`#1d76db`): Open blocking findings exist and pull request head is newer than reviewed head
-     - `review:1` (`#c5def5`): Review round 1 completed
-     - `review:2` (`#bfdadc`): Review round 2 completed
-     - `review:3` (`#d4c5f9`): Review round 3 completed (round cap)
-2. **`scripts/setup/bootstrap_tracker.sh`**:
-   - Add `ensure_label` invocations for all ten review and consensus labels in `bootstrap_tracker.sh` around lines 102-124.
-   - Support `--labels-only` invocation for dry-run and provisioning verification.
+   - Round labels `review:1` through `review:3` already exist at `bootstrap_tracker.sh:121-124` and remain untouched.
+2. Support `--labels-only` invocation for dry-run and provisioning verification.
 
 **Decisions:** D8, D12.
 **Acceptance:** AT-10, AT-12.
-**Done when:** `bash scripts/setup/bootstrap_tracker.sh --labels-only` executes and confirms provisioning of all ten labels.
+**Done when:** `scripts/setup/bootstrap_tracker.sh` provisions the seven labels and AT-12 is supported under `--labels-only`.
 
 ## T4 · Merge gate severity enum and regex update
 
@@ -115,19 +113,21 @@ Touch: `scripts/ci/merge_gate.sh`, `scripts/ci/tests/merge_gate_test.sh`
      `^<!-- ledger-row:([A-Za-z0-9-]+:(security|high|normal|low):(open|fixed|withdrawn):(pending|agree|dispute|none)) -->$`
      to:
      `^<!-- ledger-row:([A-Za-z0-9@-]+:(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none)) -->$`.
-   - Update line 273 error log message to reflect `suggestion`.
 2. **`scripts/ci/tests/merge_gate_test.sh`**:
-   - Update `consensus_ledger` helper around line 236 to accommodate `@<Dn>` tags and `suggestion`.
-   - Update scenario MG-13e around line 518 to verify refusal of legacy `low`.
+   - Update `consensus_ledger` helper at `scripts/ci/tests/merge_gate_test.sh:236-243` to emit `<!-- assigned:argus,atlas -->` directly after `<!-- consensus-ledger:$pr -->`, ensuring `merge_gate.sh` parses it cleanly.
+   - Update `consensus_ledger` helper to accommodate `@<Dn>` tags and `suggestion`.
+   - Update scenario MG-13e at `scripts/ci/tests/merge_gate_test.sh:527` to verify refusal of legacy `low`.
    - Add scenario asserting acceptance of `suggestion` and Decision-tagged IDs (`R1-1@D4`).
 
-**Decisions:** D5, D12.
+**Decisions:** D4, D5, D12.
 **Acceptance:** AT-11, AT-13, AT-18.
 **Done when:** Pattern test in AT-11 passes and `bash scripts/ci/tests/merge_gate_test.sh` passes all scenarios.
 
-## T5 · Consensus ledger recorder implementation [DEEP-3, DEEP-5]
+## T5 · Consensus ledger recorder implementation
 
 Touch: `scripts/ci/review_recorder.sh`
+
+Concurrency between multiple webhook events requires careful state ordering and atomic writes.
 
 1. Create `scripts/ci/review_recorder.sh` with executable permissions (`chmod +x`).
 2. Implement invocation contract: accepts `<pr-number>` argument, respects `DRY_RUN` environment variable, reads repository context.
@@ -136,6 +136,7 @@ Touch: `scripts/ci/review_recorder.sh`
 4. Implement comment pagination and extraction:
    - Fetch comments via `gh api repos/<repo>/issues/<pr>/comments`.
    - Identify existing consensus ledger comment authored by Themis.
+   - Ignore unformatted human comments and bot comments lacking structured blocks without error (D10).
    - Filter and parse structured review verdict blocks from authorized reviewer logins (`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`).
 5. Implement provenance validation:
    - Query `gh api repos/<repo>/actions/runs/<run_id>` for cited run IDs.
@@ -165,19 +166,22 @@ Touch: `scripts/ci/review_recorder.sh`
      followed by markdown table and notes.
 10. Update ledger comment:
     - If comment unchanged byte for byte, skip API write.
-    - If ledger comment exists, update via `gh api -X PATCH repos/<repo>/issues/comments/<id>`.
-    - If absent, create via `gh api -X POST repos/<repo>/issues/<pr>/comments`.
+    - If ledger comment exists, update via `gh api -X PATCH repos/<repo>/issues/comments/<id> -F body=@<file>`.
+    - If absent, create via `gh api -X POST repos/<repo>/issues/<pr>/comments -F body=@<file>`.
 11. Synchronize labels:
     - Calculate derived labels (`argus:findings`, `argus:suggestions`, `consensus:*`, `review:merge-ready`, `review:verifying`, `review:1..3`).
+    - Reconcile derived labels on each execution, adding required labels and removing stale labels while preserving unrelated issue labels such as `hold` or `bootstrap`.
     - Apply updates via `gh issue edit <pr> --add-label ... --remove-label ...`.
 
 **Decisions:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12.
 **Acceptance:** AT-1, AT-2, AT-3, AT-4, AT-5, AT-6, AT-7, AT-8, AT-9, AT-10, AT-13, AT-16, AT-17, AT-18.
 **Done when:** All scenarios in `scripts/ci/tests/review_recorder_test.sh` turn green.
 
-## T6 · Merge gate workflow integration [DEEP-5]
+## T6 · Merge gate workflow integration
 
 Touch: `.github/workflows/merge-gate.yml`
+
+Workflow modifications must avoid unintended trigger amplification across concurrent events.
 
 1. Update workflow triggers to match all five events:
    - `pull_request` (types: `[opened, synchronize, reopened]`)
@@ -189,10 +193,11 @@ Touch: `.github/workflows/merge-gate.yml`
    - Environment: `themis`
    - Concurrency group: `merge-gate`
    - Condition: `if: github.event_name != 'pull_request' && (github.event_name != 'issue_comment' || github.event.issue.pull_request)`
+   - TARGET resolution: resolve TARGET using the identical per-event logic as `gate` (`merge-gate.yml:123-135`). If TARGET is empty, log an informative message and exit 0.
    - Mint Themis App installation token via `actions/create-github-app-token`.
-   - Run `bash scripts/ci/review_recorder.sh "${{ github.event.issue.number || github.event.pull_request.number }}"`.
+   - Run `bash scripts/ci/review_recorder.sh "$TARGET"`.
 3. Update `gate` job dependencies:
-   - Set `needs: [record]` (or `needs: [evaluate, record]` conditional on event).
+   - Set `needs: [record]` only.
    - Ensure `gate` executes evaluation against updated ledger state.
 
 **Decisions:** D1, D12.
@@ -216,22 +221,20 @@ Touch: `docs/SPEC.md`
 
 ## T8 · Gates check and test verification
 
-Touch: `.github/workflows/ci-gates.yml`
+Touch: (none; contract tests run in no CI workflow at this rung, tracked by #246)
 
-1. Wire contract test execution into `.github/workflows/ci-gates.yml`:
-   - Add test runner step `run: bash scripts/ci/tests/review_recorder_test.sh` inside the CI execution job.
+1. Contract tests are verified locally and run in no CI workflow at this rung. Adding them to CI workflows is tracked under issue #246.
 2. Execute the verification suite locally from the repository root:
    - `bash scripts/ci/tests/review_recorder_test.sh`
    - `bash scripts/ci/tests/merge_gate_test.sh`
-   - `bash scripts/setup/bootstrap_tracker.sh --labels-only`
    - `python3 scripts/sync_agents.py --check`
    - `bash scripts/ci/compiler_roundtrip.sh`
    - `bash scripts/ci/sanitize_check.sh`
    - `bash scripts/ci/spec_check.sh origin/main <body-file>`
 
 **Decisions:** D1, D5, D8, D10, D12.
-**Acceptance:** AT-1, AT-11, AT-12, AT-15.
-**Done when:** All CI gates and local check scripts pass green.
+**Acceptance:** AT-1, AT-11, AT-15.
+**Done when:** All specified local check scripts pass.
 
 ## Commutability
 
@@ -251,8 +254,8 @@ Commands to run from the root of the tree:
 | # | Command | Expected | Proves |
 |---|---|---|---|
 | 1 | `bash scripts/ci/tests/review_recorder_test.sh` | exit 0 | AT-1..AT-10, AT-13, AT-16..AT-18 |
-| 2 | `bash scripts/ci/tests/merge_gate_test.sh` | exit 0 | AT-11, AT-13, AT-18 |
-| 3 | `bash scripts/setup/bootstrap_tracker.sh --labels-only` | exit 0 | AT-12 |
+| 2 | `printf '%s\n' '<!-- ledger-row:R1-1@D4:high:open:none -->' \| sed -nE 's/^<!-- ledger-row:([A-Za-z0-9@-]+:(security\|high\|normal\|suggestion):(open\|fixed\|withdrawn):(pending\|agree\|dispute\|none)) -->$/OK[\1]/p'` | `OK[R1-1@D4:high:open:none]` | AT-11 regex compatibility |
+| 3 | `bash scripts/ci/tests/merge_gate_test.sh` | exit 0 | AT-11, AT-13, AT-18 |
 | 4 | `python3 scripts/sync_agents.py --check` | exit 0 | AT-15, compiler drift check |
 | 5 | `bash scripts/ci/compiler_roundtrip.sh` | exit 0 | compiler roundtrip integrity |
 | 6 | `bash scripts/ci/sanitize_check.sh` | exit 0, `PASS` | repository cleanliness |
@@ -262,4 +265,26 @@ Done when: All seven verification commands exit 0.
 
 ## NOT RUN list
 
+- **AT-12 (D8):** `bash scripts/setup/bootstrap_tracker.sh --labels-only` requires repository write access to provision GitHub labels. Moved to NOT RUN for local test runs until deployment or provisioning execution.
 - **AT-14 (D4):** Live execution of `Merge Gate` workflow on an Actions runner evaluating conjuncts 3, 4, 5, and 11 as true, cited by Actions run ID. Listed under NOT RUN until issue #64 acceptance 20, because executing live Actions runs requires real pull request merge events on GitHub infrastructure.
+
+## Corrections
+
+Round 1 review and smoke review findings addressed in Round 2:
+
+- **R1-1 / AT-R1-1 (D2 comment format):** Standardized review verdict structured blocks to use `<!-- review-verdict:<reviewer>:<verdict> -->` and `<!-- reviewed-head:<oid> -->`, eliminating obsolete `<!-- reviewer:argus -->` markers.
+- **R1-2 / AT-R1-3 (D3 Actions run provenance):** Added workflow path and head repository verification to test fixtures; split provenance validation into an accepting case and four specific refusal checks; added marker withdrawal scenarios on failed or cancelled workflow runs.
+- **R1-3 / AT-R1-5 (D4 merge gate round-trip):** Invoked `scripts/ci/merge_gate.sh` directly within the test suite under hermetic stubs, asserting conjuncts 3, 4, 5, 11 and WHY[3] carry-forward text.
+- **R1-4 / AT-R1-6.2 (D7 security dual agreement):** Added negative tests ensuring author cannot self-agree on security findings, and unauthenticated comments claiming fixes are ignored.
+- **R1-5 (D8 label synchronization):** Added assertions that label synchronization preserves unrelated labels such as `hold` while updating `review:1..3`. Restored label preservation clause in plan T5.11 verbatim from `spec.md:160-164`.
+- **R1-6 / AT-R1-6.1 (D6 round funnel):** Added test fixtures for rounds 2, 3, and 4 verifying non-blocking normal tracking rows, high finding admission in round 3, and demotion beyond round 3.
+- **R1-7 / Smoke blocking 2 (D12 CI gates workflow):** Dropped `.github/workflows/ci-gates.yml` from T8; documented that contract tests run in no CI workflow at this rung, tracked under issue #246.
+- **R1-8 / Smoke blocking 3 (D8 label provisioning):** Scoped T3 label provisioning to the seven labels named in AT-12; noted that `review:1..3` exist in `bootstrap_tracker.sh` and are untouched; moved AT-12 to NOT RUN.
+- **R1-9 (D1 single comment lifecycle):** Implemented skip guard when sender is Themis, and byte-identical PATCH suppression.
+- **R1-10 (D10 unformatted comments):** Added scenario mixing unformatted human and bot comments with structured review blocks, ensuring graceful handling without error. Added D10 to T1 decisions.
+- **R1-11 (D5 suggestions and D7 disputes):** Verified suggestion, dispute, and withdrawn rows through the parse-to-ledger path.
+- **R1-12 (gh stub flag handling):** Expanded stub to support `--input <file>`, `-F body=@<file>`, `--field body=@<file>`, `-f body=<text>`, and `--body-file <file>`. Cites Decisions and Acceptance IDs in test failure output.
+- **AT-R1-2 (D9 maintainer retier):** Retier authorization verifies `author_association` in `OWNER, MEMBER, COLLABORATOR`.
+- **Smoke blocking 1 (T4 wire format):** Added step to T4 updating `consensus_ledger` in `merge_gate_test.sh:236-243` with `<!-- assigned:argus,atlas -->`.
+- **Smoke blocking 4 (T6 target resolution and needs):** Updated T6 to set `needs: [record]` only, match per-event TARGET resolution from `gate`, and exit 0 on empty target.
+- **Smoke non-blocking:** Deleted invalid line 273 error log message step in T4; corrected citation to `merge_gate_test.sh:527`; removed `[DEEP-n]` tags and replaced with risk sentences; added AT-11 sed one-liner to gates table; updated T1 done-when.
