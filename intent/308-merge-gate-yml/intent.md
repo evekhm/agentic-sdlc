@@ -1,6 +1,6 @@
 # Intent: Per-Pull-Request Concurrency for Merge Gate and Recorder Cancellation Isolation
 
-**Issue:** #308 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #308 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted (acceptance = merge of PR #315)
 
 ## Problem
 
