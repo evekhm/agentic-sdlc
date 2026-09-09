@@ -5,7 +5,7 @@
 #   bash scripts/ci/tests/e2e_chain_test.sh [-k <pattern>]
 #
 # Hermetic contract test suite covering Decisions D1 through D8 and Acceptance
-# Criteria AT-1 through AT-20 (the sixteen executable scenarios).
+# Criteria AT-1 through AT-22 (the eighteen executable scenarios).
 #
 # Stub helpers copied from:
 # - scripts/ci/tests/lifecycle_advance_test.sh:57-63, 73-178, 187-195
@@ -119,17 +119,17 @@ for a in "$@"; do
 done
 
 cmd="${args[0]:-}"
-label_filter=""
+label_filters=()
 json_fields=""
 jq_expr=""
 for (( idx=0; idx<${#args[@]}; idx++ )); do
     case "${args[$idx]}" in
         --label|-l)
             idx=$((idx + 1))
-            label_filter="${args[$idx]:-}"
+            label_filters+=("${args[$idx]:-}")
             ;;
         --label=*)
-            label_filter="${args[$idx]#--label=}"
+            label_filters+=("${args[$idx]#--label=}")
             ;;
         --json)
             idx=$((idx + 1))
@@ -187,9 +187,9 @@ if [ "$cmd" = "issue" ] || [ "$cmd" = "pr" ] || [ "$cmd" = "search" ]; then
         else
             [ -f "$FIXTURES/issue-list.json" ] && content="$(cat "$FIXTURES/issue-list.json")"
         fi
-        if [ -n "$label_filter" ]; then
-            content="$("$REAL_JQ" --arg l "$label_filter" '[.[] | select(.labels | if type == "array" then any(.[]; (.name // .) == $l) else false end)]' <<<"$content")"
-        fi
+        for lf in "${label_filters[@]}"; do
+            content="$("$REAL_JQ" --arg l "$lf" '[.[] | select(.labels | if type == "array" then any(.[]; (.name // .) == $l) else false end)]' <<<"$content")"
+        done
         if [ -n "$json_fields" ]; then
             fields_expr="$(echo "$json_fields" | sed 's/,/, /g')"
             content="$("$REAL_JQ" -c "[.[] | {$fields_expr}]" <<<"$content")"
@@ -302,9 +302,9 @@ if [ "$cmd" = "api" ]; then
             else
                 [ -f "$FIXTURES/issue-list.json" ] && content="$(cat "$FIXTURES/issue-list.json")"
             fi
-            if [ -n "$label_filter" ]; then
-                content="$("$REAL_JQ" --arg l "$label_filter" '[.[] | select(.labels | if type == "array" then any(.[]; (.name // .) == $l) else false end)]' <<<"$content")"
-            fi
+            for lf in "${label_filters[@]}"; do
+                content="$("$REAL_JQ" --arg l "$lf" '[.[] | select(.labels | if type == "array" then any(.[]; (.name // .) == $l) else false end)]' <<<"$content")"
+            done
             output_json "$content"
             ;;
         */issues/*/labels/in-progress|repos/*/issues/*/labels/in-progress)
@@ -431,6 +431,7 @@ SANDBOX="$WORK/repo"
 mkdir -p "$SANDBOX/personas" "$SANDBOX/scripts"
 cp "$REPO/personas/lifecycle.json" "$SANDBOX/personas/lifecycle.json"
 cp "$REPO"/personas/*.yaml "$SANDBOX/personas/"
+cp -r "$REPO/config" "$SANDBOX/"
 cp -r "$REPO/scripts/ci" "$SANDBOX/scripts/"
 cp -r "$REPO/scripts/ops" "$SANDBOX/scripts/"
 cp -r "$REPO/scripts/placement" "$SANDBOX/scripts/"
@@ -1307,7 +1308,7 @@ EOF
     local out="" rc=0
     out="$(DRY_RUN=1 HEADLESS=1 bash "$work_sh" 108 --as odyssey 2>&1)" || rc=$?
     if [ "$rc" -eq 0 ] && ! grep -q "does not own stage review" <<<"$out" \
-       && grep -q "--> odyssey" <<<"$out" && grep -qE "branch:.*odyssey/107-fix" <<<"$out"; then
+       && grep -q -- "--> odyssey" <<<"$out" && grep -qE "branch:.*odyssey/107-fix" <<<"$out"; then
         pass "AT-13 (D2, D8): work.sh proceeded under fix-round resume protocol"
     else
         fail "AT-13 (D2, D8): work.sh did not proceed under resume protocol (rc=$rc): $out"
@@ -1331,6 +1332,8 @@ run_at14() {
     fi
 
     reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+
     cat > "$FIXTURES/issue-251.json" <<'EOF'
 {
   "number": 251,
@@ -1437,12 +1440,14 @@ run_at15() {
     fi
 
     reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+
     cat > "$FIXTURES/issue-300.json" <<'EOF'
 {
   "number": 300,
   "title": "Issue 300",
   "state": "open",
-  "labels": [{"name": "intent:new"}],
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
   "comments": []
 }
 EOF
@@ -1451,7 +1456,7 @@ EOF
   "number": 300,
   "title": "Issue 300",
   "state": "open",
-  "labels": [{"name": "intent:new"}]
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}]
 }
 EOF
     cat > "$FIXTURES/comments-300.json" <<'EOF'
@@ -1465,7 +1470,7 @@ EOF
     "number": 300,
     "title": "Issue 300",
     "state": "open",
-    "labels": [{"name": "intent:new"}],
+    "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
     "comments": []
   }
 ]
@@ -1542,13 +1547,13 @@ run_at17() {
 run_at17
 
 # =============================================================================
-# AT-20 (D2): Fix-round claim bypass and per-PR lock duplicate prevention
+# AT-20 (D2, D5, D6, D7): Fix-round claim bypass, POLL_STATE_DIR lock, reviewer-only comment
 # =============================================================================
 run_at20() {
     local name="AT-20"
     should_run "$name" || return 0
     TOTAL=$((TOTAL + 1))
-    banner "$name (D2): Fix-round claim bypass and per-PR lock"
+    banner "$name (D2, D5, D6, D7): Fix-round claim bypass and per-PR lock"
     local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
 
     if [ ! -f "$poll_sh" ]; then
@@ -1557,6 +1562,20 @@ run_at20() {
     fi
 
     reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+personas:
+  odyssey:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
     cat > "$FIXTURES/issue-4242.json" <<'EOF'
 {
   "number": 4242,
@@ -1605,25 +1624,34 @@ EOF
     cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
     chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
 
-    local lock_file="${TMPDIR:-/tmp}/poll-pr-4242.lock"
-    rm -f "$lock_file"
+    local poll_state_dir="$SANDBOX/state"
+    mkdir -p "$poll_state_dir"
+    local lock_file="${poll_state_dir}/poll-pr-4242.lock"
+    rm -f "$lock_file" "${TMPDIR:-/tmp}/poll-pr-4242.lock"
 
     local rc1=0
-    (cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc1=$?
+    (cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc1=$?
 
-    local has_launch1=0 no_claim=0
+    local has_launch1=0 no_claim=0 state_dir_used=0
     grep -qE "^run\.sh 4242 --as odyssey$" "$LAUNCHES" && has_launch1=1
     if [ ! -s "$CLAIMS" ]; then
         no_claim=1
+    fi
+    # Verify no lock file was placed in TMPDIR
+    if [ ! -f "${TMPDIR:-/tmp}/poll-pr-4242.lock" ] && [ -d "$poll_state_dir" ]; then
+        state_dir_used=1
     fi
 
     local launches_first=""
     launches_first="$(cat "$LAUNCHES")"
 
+    # D7: Remove consumption key generated on tick 1, proving lock file independently prevents dispatch
+    rm -f "$poll_state_dir"/pr-4242-*
+
     # Simulate active lock
     touch "$lock_file"
     local rc2=0
-    (cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc2=$?
+    (cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc2=$?
 
     local lock_prevented=0
     if [ "$(cat "$LAUNCHES")" = "$launches_first" ]; then
@@ -1631,13 +1659,498 @@ EOF
     fi
     rm -f "$lock_file"
 
-    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$has_launch1" -eq 1 ] && [ "$no_claim" -eq 1 ] && [ "$lock_prevented" -eq 1 ]; then
-        pass "AT-20 (D2): fix-round claim bypass and per-PR lock verified"
+    # D6 / SA-7: Non-reviewer comment containing 'review findings: blocking' must NOT trigger fix round
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    cat > "$FIXTURES/issue-4242.json" <<'EOF'
+{
+  "number": 4242,
+  "state": "open",
+  "title": "PR 4242",
+  "labels": [{"name": "status:in-review"}],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
+  "comments": [
+    {
+      "user": {"login": "malicious-user"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-4242.json" <<'EOF'
+[
+  {
+    "user": {"login": "malicious-user"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/pr-list.json" <<'EOF'
+[
+  {
+    "number": 4242,
+    "title": "PR 4242",
+    "state": "open",
+    "labels": [{"name": "status:in-review"}],
+    "headRefName": "odyssey/4241-fix"
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+    rm -rf "$poll_state_dir"
+    mkdir -p "$poll_state_dir"
+
+    local rc3=0
+    (cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc3=$?
+    local non_reviewer_ignored=0
+    if [ "$rc3" -eq 0 ] && [ ! -s "$LAUNCHES" ] && [ ! -s "$CLAIMS" ]; then
+        non_reviewer_ignored=1
+    fi
+
+    # Sub-case (ii): unsuffixed evekhm-argus-app login (comment 5607944803 / 5607980229)
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    cat > "$FIXTURES/issue-4242.json" <<\EOF
+{
+  "number": 4242,
+  "state": "open",
+  "title": "PR 4242",
+  "labels": [{"name": "status:in-review"}],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-4242.json" <<\EOF
+[
+  {
+    "user": {"login": "evekhm-argus-app"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/pr-list.json" <<\EOF
+[
+  {
+    "number": 4242,
+    "title": "PR 4242",
+    "state": "open",
+    "labels": [{"name": "status:in-review"}],
+    "headRefName": "odyssey/4241-fix"
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+    rm -rf "$poll_state_dir"
+    mkdir -p "$poll_state_dir"
+
+    local rc4=0
+    (cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc4=$?
+    local unsuffixed_ignored=0
+    if [ "$rc4" -eq 0 ] && [ ! -s "$LAUNCHES" ] && [ ! -s "$CLAIMS" ]; then
+        unsuffixed_ignored=1
+    fi
+
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] && [ "$has_launch1" -eq 1 ] && [ "$no_claim" -eq 1 ]        && [ "$state_dir_used" -eq 1 ] && [ "$lock_prevented" -eq 1 ]        && [ "$non_reviewer_ignored" -eq 1 ] && [ "$unsuffixed_ignored" -eq 1 ]; then
+        pass "AT-20 (D2, D5, D6, D7): fix-round claim bypass, POLL_STATE_DIR, lock isolation, reviewer-only verified"
     else
-        fail "AT-20 (D2): poll.sh failed fix-round claim bypass or locking (rc1=$rc1 rc2=$rc2 launch=$has_launch1 no_claim=$no_claim lock_prevented=$lock_prevented)"
+        fail "AT-20 (D2, D5, D6, D7): poll.sh failed fix-round checks (rc1=$rc1 rc2=$rc2 launch=$has_launch1 no_claim=$no_claim state_dir=$state_dir_used lock_prev=$lock_prevented non_rev=$non_reviewer_ignored unsuff=$unsuffixed_ignored)"
     fi
 }
 run_at20
+
+# =============================================================================
+# AT-21 (D2): Master autonomy gate idles all poller queues when loop.autonomous_merge is false
+# =============================================================================
+run_at21() {
+    local name="AT-21"
+    should_run "$name" || return 0
+    TOTAL=$((TOTAL + 1))
+    banner "$name (D2): Master autonomy gate idles all queues when autonomous_merge is false"
+    local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
+
+    if [ ! -f "$poll_sh" ]; then
+        fail "AT-21 (D2): scripts/placement/vm-local/poll.sh does not exist"
+        return 0
+    fi
+
+    reset_fixtures
+
+    # Set loop.autonomous_merge to false
+    echo "false" > "$FIXTURES/loop-autonomous_merge"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: false
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+  max_concurrent_first_hops: 1
+personas:
+  athena:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+  daedalus:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+  odyssey:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
+    # Set up candidate work across all three queues to ensure nothing is dispatched:
+    # 1. Fix-round candidate PR 4242
+    cat > "$FIXTURES/pr-list.json" <<'EOF'
+[
+  {
+    "number": 4242,
+    "title": "PR 4242",
+    "state": "open",
+    "labels": [{"name": "status:in-review"}],
+    "headRefName": "odyssey/4241-fix"
+  }
+]
+EOF
+    cat > "$FIXTURES/issue-4242.json" <<'EOF'
+{
+  "number": 4242,
+  "state": "open",
+  "title": "PR 4242",
+  "labels": [{"name": "status:in-review"}],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-4242.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+
+    # 2. First-hop candidate issue 300
+    cat > "$FIXTURES/issue-300.json" <<'EOF'
+{
+  "number": 300,
+  "title": "Issue 300",
+  "state": "open",
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/comments-300.json" <<'EOF'
+[]
+EOF
+
+    # 3. Ledger dispatch candidate issue 251
+    cat > "$FIXTURES/issue-251.json" <<'EOF'
+{
+  "number": 251,
+  "title": "Issue 251",
+  "state": "open",
+  "labels": [{"name": "status:planning"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-themis-app[bot]"},
+      "body": "<!-- loop-ledger:251 -->
+<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-251.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-themis-app[bot]"},
+    "body": "<!-- loop-ledger:251 -->
+<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+  }
+]
+EOF
+
+    # Combined issue list
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 300,
+    "title": "Issue 300",
+    "state": "open",
+    "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+    "comments": []
+  },
+  {
+    "number": 251,
+    "title": "Issue 251",
+    "state": "open",
+    "labels": [{"name": "status:planning"}],
+    "comments": [
+      {
+        "user": {"login": "evekhm-themis-app[bot]"},
+        "body": "<!-- loop-ledger:251 -->
+<!-- loop-ledger-row: dispatch rung:1 head-oid:4f862c6b8cac5ea82f0792e908aec72fda85ad91 pr:none event:local cost:2.00 -->"
+      }
+    ]
+  }
+]
+EOF
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local out="" rc=0
+    out="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
+
+    local has_notice=0 zero_dispatches=0 zero_claims=0
+    grep -q "poll\.sh: autonomous_merge is not true; idling queues" <<<"$out" && has_notice=1
+    [ ! -s "$LAUNCHES" ] && zero_dispatches=1
+    [ ! -s "$CLAIMS" ] && zero_claims=1
+
+    if [ "$rc" -eq 0 ] && [ "$has_notice" -eq 1 ] && [ "$zero_dispatches" -eq 1 ] && [ "$zero_claims" -eq 1 ]; then
+        pass "AT-21 (D2): master autonomy gate idled all queues when autonomous_merge is false"
+    else
+        fail "AT-21 (D2): master autonomy gate failed (rc=$rc notice=$has_notice dispatches=$zero_dispatches claims=$zero_claims out='$out')"
+    fi
+}
+run_at21
+
+# =============================================================================
+# AT-22 (D3, D4): First-hop intake filter and fleet concurrency ceiling
+# =============================================================================
+run_at22() {
+    local name="AT-22"
+    should_run "$name" || return 0
+    TOTAL=$((TOTAL + 1))
+    banner "$name (D3, D4): First-hop intake filter and fleet ceiling"
+    local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
+
+    if [ ! -f "$poll_sh" ]; then
+        fail "AT-22 (D3, D4): scripts/placement/vm-local/poll.sh does not exist"
+        return 0
+    fi
+
+    # Subtest (a): intent:new without intake:auto is skipped
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    echo "1" > "$FIXTURES/loop-max_concurrent_first_hops"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+  max_concurrent_first_hops: 1
+personas:
+  athena:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
+    cat > "$FIXTURES/issue-301.json" <<'EOF'
+{
+  "number": 301,
+  "title": "Issue 301",
+  "state": "open",
+  "labels": [{"name": "intent:new"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 301,
+    "title": "Issue 301",
+    "state": "open",
+    "labels": [{"name": "intent:new"}],
+    "comments": []
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local out_a="" rc_a=0
+    out_a="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc_a=$?
+    local sub_a=0
+    if [ "$rc_a" -eq 0 ] && [ ! -s "$LAUNCHES" ] && [ ! -s "$CLAIMS" ]; then
+        sub_a=1
+    fi
+
+    # Subtest (b): intent:new with intake:auto is claimed and dispatched when below ceiling
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    echo "1" > "$FIXTURES/loop-max_concurrent_first_hops"
+    cat > "$FIXTURES/issue-302.json" <<'EOF'
+{
+  "number": 302,
+  "title": "Issue 302",
+  "state": "open",
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 302,
+    "title": "Issue 302",
+    "state": "open",
+    "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+    "comments": []
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
+
+    local out_b="" rc_b=0
+    out_b="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc_b=$?
+    local sub_b=0
+    if [ "$rc_b" -eq 0 ] && grep -qE "run\.sh 302 --as athena" "$LAUNCHES" && grep -qE 'claim\.sh CLAIM_ACTOR=athena.*302' "$CLAIMS"; then
+        sub_b=1
+    fi
+
+    # Subtest (c) & (d): Author normalization (GraphQL & REST shapes) and fleet ceiling enforcement
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    echo "1" > "$FIXTURES/loop-max_concurrent_first_hops"
+    # Issue 302 candidate for intake
+    cat > "$FIXTURES/issue-302.json" <<'EOF'
+{
+  "number": 302,
+  "title": "Issue 302",
+  "state": "open",
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+  "comments": []
+}
+EOF
+    # Issue 501 active in-progress with GraphQL author shape (.author.login without [bot])
+    cat > "$FIXTURES/issue-501.json" <<'EOF'
+{
+  "number": 501,
+  "title": "Issue 501",
+  "state": "open",
+  "labels": [{"name": "in-progress"}, {"name": "status:planning"}],
+  "comments": [
+    {
+      "author": {"login": "evekhm-athena-app"},
+      "body": "Claim: athena (sess-501) stage:plan"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 302,
+    "title": "Issue 302",
+    "state": "open",
+    "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+    "comments": []
+  },
+  {
+    "number": 501,
+    "title": "Issue 501",
+    "state": "open",
+    "labels": [{"name": "in-progress"}, {"name": "status:planning"}],
+    "comments": [
+      {
+        "author": {"login": "evekhm-athena-app"},
+        "body": "Claim: athena (sess-501) stage:plan"
+      }
+    ]
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
+
+    local out_c="" rc_c=0
+    out_c="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc_c=$?
+    local sub_c=0
+    if [ "$rc_c" -eq 0 ] && grep -q "first-hop intake concurrency limit reached" <<<"$out_c" && ! grep -q "302" "$LAUNCHES"; then
+        sub_c=1
+    fi
+
+    # REST author shape (.user.login with [bot])
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    echo "1" > "$FIXTURES/loop-max_concurrent_first_hops"
+    cat > "$FIXTURES/issue-302.json" <<'EOF'
+{
+  "number": 302,
+  "title": "Issue 302",
+  "state": "open",
+  "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-502.json" <<'EOF'
+{
+  "number": 502,
+  "title": "Issue 502",
+  "state": "open",
+  "labels": [{"name": "in-progress"}, {"name": "status:planning"}],
+  "comments": [
+    {
+      "user": {"login": "evekhm-athena-app[bot]"},
+      "body": "Claim: athena (sess-502) stage:plan"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/issue-list.json" <<'EOF'
+[
+  {
+    "number": 302,
+    "title": "Issue 302",
+    "state": "open",
+    "labels": [{"name": "intent:new"}, {"name": "intake:auto"}],
+    "comments": []
+  },
+  {
+    "number": 502,
+    "title": "Issue 502",
+    "state": "open",
+    "labels": [{"name": "in-progress"}, {"name": "status:planning"}],
+    "comments": [
+      {
+        "user": {"login": "evekhm-athena-app[bot]"},
+        "body": "Claim: athena (sess-502) stage:plan"
+      }
+    ]
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/pr-list.json"
+
+    local out_d="" rc_d=0
+    out_d="$(cd "$SANDBOX" && RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc_d=$?
+    local sub_d=0
+    if [ "$rc_d" -eq 0 ] && grep -q "first-hop intake concurrency limit reached" <<<"$out_d" && ! grep -q "302" "$LAUNCHES"; then
+        sub_d=1
+    fi
+
+    if [ "$sub_a" -eq 1 ] && [ "$sub_b" -eq 1 ] && [ "$sub_c" -eq 1 ] && [ "$sub_d" -eq 1 ]; then
+        pass "AT-22 (D3, D4): first-hop intake filter and fleet concurrency ceiling verified"
+    else
+        fail "AT-22 (D3, D4): failed intake filter or ceiling (sub_a=$sub_a sub_b=$sub_b sub_c=$sub_c sub_d=$sub_d)"
+    fi
+}
+run_at22
 
 # =============================================================================
 # Summary
