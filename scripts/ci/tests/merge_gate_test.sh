@@ -857,6 +857,64 @@ run "MG-36: exits 0" 123
 has "not a ladder pull request; nothing evaluated, nothing written" "MG-36: unlinked PR skips cleanly"
 not_merged "MG-36"
 
+banner "MG-37 · D1 D2 D3 · AT-1 · intent:new issue with intent.md merges autonomously"
+mk_green; issue_fixture 456 intent:new
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456)" 2026-01-03T00:00:00Z 700)"
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Intent\n\nProblem and outcome.\n' > "$FX/tree/intent/456-thing/intent.md"
+run "MG-37: intent:new issue with intent.md merges autonomously" 123
+has "conjunct (9): true" "MG-37 (D1, D2): intent.md present at HEAD passes conjunct 9"
+has "conjunct (10): true" "MG-37 (D1, D3): rung 1 > highest merged rung 0 passes conjunct 10"
+merged "MG-37 (D1, D2, D3): and the intent PR merges autonomously"
+
+banner "MG-38 · D1 D2 · AT-2 · intent:new issue with absent intent.md fails conjunct 9"
+mk_green; issue_fixture 456 intent:new
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456)" 2026-01-03T00:00:00Z 700)"
+mkdir -p "$FX/tree/intent/456-thing"
+run "MG-38: intent:new issue with absent intent.md fails conjunct 9" 123
+has "conjunct (9): false" "MG-38 (D1, D2): missing intent.md fails conjunct 9"
+has "intent/456-thing/intent.md is absent at $HEAD" "MG-38 (D1, D2): names the missing artifact"
+not_merged "MG-38 (D1, D2): missing intent artifact does not merge"
+
+banner "MG-39 · D1 D3 · AT-3 · intent:new with HIGHEST_MERGED_RANK >= 1 fails conjunct 10"
+mk_green; issue_fixture 456 intent:new
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Intent\n\nProblem and outcome.\n' > "$FX/tree/intent/456-thing/intent.md"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:2 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:5.00")" 2026-01-03T00:00:00Z 700)"
+run "MG-39: intent:new with HIGHEST_MERGED_RANK >= 1 fails conjunct 10" 123
+has "conjunct (9): true" "MG-39 (D1, D2): intent.md present passes conjunct 9"
+has "conjunct (10): false" "MG-39 (D1, D3): rung 1 <= highest merged rung fails conjunct 10"
+has "rung 1 is not above highest merged rung 1 (D14)" "MG-39 (D3): names the D14 monotonicity failure"
+no_writes "MG-39 (D3): failed monotonicity performs zero writes"
+
+banner "MG-40 · D1 D5 · AT-4 · issue with neither status nor intent:new fails conjuncts 9 and 10"
+mk_green; issue_fixture 456 bug
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Intent\n\nProblem and outcome.\n' > "$FX/tree/intent/456-thing/intent.md"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456)" 2026-01-03T00:00:00Z 700)"
+run "MG-40: issue with neither status nor intent:new fails conjuncts 9 and 10" 123
+has "conjunct (9): false" "MG-40 (D1, D5): unranked label fails conjunct 9"
+has "conjunct (10): false" "MG-40 (D1, D5): unranked label fails conjunct 10"
+has "#456 carries no ranked status label (none)" "MG-40 (D1, D5): names the unranked status label reason"
+no_writes "MG-40 (D5): unranked issue performs zero writes"
+
+banner "MG-41 · D4 · AT-5 · intent:new exceeding budget records refusal:budget 1"
+mk_green; issue_fixture 456 intent:new
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:1 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:60.00")" 2026-01-03T00:00:00Z 700)"
+run "MG-41: intent:new exceeding budget records refusal:budget 1" 123
+wrote "refusal:budget 1" "MG-41 (D4): records refusal:budget at rung 1"
+not_merged "MG-41 (D4): over-budget intent PR does not merge"
+
+banner "MG-42 · D5 · AT-6 · issue with both status:spec and intent:new evaluates as status:spec"
+mk_green; issue_fixture 456 status:spec intent:new
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Spec\n\n**Status:** Approved (approval = merge of this PR)\n**Open questions:** none\n' > "$FX/tree/intent/456-thing/spec.md"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:2 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:5.00")" 2026-01-03T00:00:00Z 700)"
+run "MG-42: issue with both status:spec and intent:new evaluates as status:spec" 123
+has "conjunct (9): true" "MG-42 (D5): spec.md passes conjunct 9 under status:spec"
+has "conjunct (10): true" "MG-42 (D5): rung 2 > highest merged rung 1 passes conjunct 10"
+merged "MG-42 (D5): and merges autonomously under status:spec"
+
 echo
 banner "MG-37 · D3 D4 · foreign reviewer check run atlas via gh-actions failing fails conjunct (2)"
 mk_green
