@@ -317,12 +317,14 @@ def provision_system(name: str, entry: dict, slug: str) -> bool:
     #    and nothing else (spec P1): that is what keeps a workflow file on
     #    any other branch from minting the key.
     policies_path = f"{env_path}/deployment-branch-policies"
+    add = json.dumps({"name": "main", "type": "branch"})
     listing = gh_json(["api", policies_path])
     policies = listing.get("branch_policies", []) if isinstance(listing, dict) else None
     if policies is None:
         ok = False
         print("  branch policy: could not read the current policies")
-        manual.append(f"gh api {policies_path}")
+        manual.append(f"gh api {policies_path}  # confirm main is the only policy")
+        manual.append(f"echo '{add}' | gh api --method POST {policies_path} --input -  # if main is missing")
     else:
         others = [p["name"] for p in policies if not (p.get("name") == "main" and p.get("type") == "branch")]
         if others:
@@ -397,7 +399,7 @@ def check_row(name: str, entry: dict) -> tuple[dict[str, str], bool]:
     """
     kind = entry_kind(entry)
     slug = app_slug(entry)
-    row: dict = {c: "-" for c in CHECK_COLUMNS}
+    row: dict[str, str] = {c: "-" for c in CHECK_COLUMNS}
     row["name"] = name
     row["kind"] = kind
     row["slug"] = slug
@@ -424,19 +426,19 @@ def check_row(name: str, entry: dict) -> tuple[dict[str, str], bool]:
     present = {s["name"] for s in secrets.get("secrets", [])} if isinstance(secrets, dict) else set()
     row["sec:app_id"] = "yes" if entry["secrets"]["app_id"] in present else "no"
     row["sec:key"] = "yes" if entry["secrets"]["private_key"] in present else "no"
-    row["complete"] = all(row[c] == "yes" for c in ("app", "key", "env", "policy", "sec:app_id", "sec:key"))
-    return row
+    return row, all(row[c] == "yes" for c in ("app", "key", "env", "policy", "sec:app_id", "sec:key"))
 
 
 def run_check(entries: dict) -> int:
-    rows = [check_row(name, entry) for name, entry in entries.items()]
+    results = [check_row(name, entry) for name, entry in entries.items()]
+    rows = [row for row, _ in results]
     widths = {c: max(len(c), *(len(r[c]) for r in rows)) for c in CHECK_COLUMNS}
     print("  ".join(c.ljust(widths[c]) for c in CHECK_COLUMNS))
     print("  ".join("-" * widths[c] for c in CHECK_COLUMNS))
     for row in rows:
         print("  ".join(row[c].ljust(widths[c]) for c in CHECK_COLUMNS))
 
-    incomplete = [r["name"] for r in rows if not r["complete"]]
+    incomplete = [row["name"] for row, complete in results if not complete]
     print()
     if incomplete:
         print(f"incomplete: {', '.join(incomplete)}")
