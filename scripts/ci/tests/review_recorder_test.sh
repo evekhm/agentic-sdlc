@@ -1535,6 +1535,153 @@ EOF
   pass "test_non_issue_reference_not_held (Argus R1-2, D2)"
 }
 
+# AT-354-1..4, AT-354-7 (D1, D2, D4, D8): Symmetric syntax matrix and shared base ID
+test_failure_scenario_symmetric_syntax_matrix() {
+  reset_state
+  pr_fixture 118 "$H"
+  run_fixture 2020 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2020 -->
+<!-- round:1 -->
+<!-- finding:R1-1@D7:high:open:none -->
+<!-- failure-scenario:R1-1 -->
+<!-- finding:R1-2@D7:high:open:none -->
+<!-- failure-scenario:R1-2@D7 -->
+<!-- finding:R1-3:high:open:none -->
+<!-- failure-scenario:R1-3 -->
+<!-- finding:R1-4:high:open:none -->
+<!-- failure-scenario:R1-4@D7 -->
+<!-- finding:R1-5@D1:high:open:none -->
+<!-- finding:R1-5@D2:high:open:none -->
+<!-- failure-scenario:R1-5 -->
+Verifying symmetric failure-scenario marker syntax and shared base ID presence
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 118 "$(comment_item "$ARGUS" "$rev_body" 3018)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_failure_scenario_symmetric_syntax_matrix: $RECORDER does not exist (D1, D2, D4, D8)"
+    return 1
+  fi
+
+  bash "$RECORDER" 118 || { fail "test_failure_scenario_symmetric_syntax_matrix: recorder execution failed"; return 1; }
+
+  # Suffix finding + bare marker (AT-354-1, D1, D2)
+  grep -q "ledger-row:R1-1@D7:high:open:none" "$WRITES" || { fail "test_failure_scenario_symmetric_syntax_matrix: suffixed finding with bare marker demoted (D1, D2, AT-354-1)"; return 1; }
+
+  # Suffix finding + suffixed marker (AT-354-2, D1, D2)
+  grep -q "ledger-row:R1-2@D7:high:open:none" "$WRITES" || { fail "test_failure_scenario_symmetric_syntax_matrix: suffixed finding with suffixed marker demoted (D1, D2, AT-354-2)"; return 1; }
+
+  # Bare finding + bare marker (AT-354-3, D1, D2)
+  grep -q "ledger-row:R1-3:high:open:none" "$WRITES" || { fail "test_failure_scenario_symmetric_syntax_matrix: bare finding with bare marker demoted (D1, D2, AT-354-3)"; return 1; }
+
+  # Bare finding + suffixed marker (AT-354-4, D1, D2)
+  grep -q "ledger-row:R1-4:high:open:none" "$WRITES" || { fail "test_failure_scenario_symmetric_syntax_matrix: bare finding with suffixed marker demoted (D1, D2, AT-354-4)"; return 1; }
+
+  # Shared base ID multiple findings satisfied by single marker (AT-354-7, D4)
+  grep -q "ledger-row:R1-5@D1:high:open:none" "$WRITES" || { fail "test_failure_scenario_symmetric_syntax_matrix: shared base ID finding R1-5@D1 demoted (D4, AT-354-7)"; return 1; }
+  grep -q "ledger-row:R1-5@D2:high:open:none" "$WRITES" || { fail "test_failure_scenario_symmetric_syntax_matrix: shared base ID finding R1-5@D2 demoted (D4, AT-354-7)"; return 1; }
+
+  # Zero demotion audit notes for properly paired findings (D1, D2, D4)
+  grep -q "\[demoted from high: missing failure_scenario marker\]" "$WRITES" && { fail "test_failure_scenario_symmetric_syntax_matrix: unexpected demotion audit note written (D1, D2, D4)"; return 1; }
+
+  pass "test_failure_scenario_symmetric_syntax_matrix (D1, D2, D4, D8, AT-354-1..4, AT-354-7)"
+}
+
+# AT-354-5, AT-354-6 (D1, D3, D5, D8): Demotion attribution, full finding ID preservation, and diagnostic stdout logging
+test_failure_scenario_demotion_attribution_and_logging() {
+  reset_state
+  pr_fixture 119 "$H"
+  run_fixture 2021 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2021 -->
+<!-- round:1 -->
+<!-- finding:R1-1@D7:high:open:none -->
+<!-- finding:R1-2:high:open:none -->
+<!-- finding:R1-3@D7:high:open:none -->
+<!-- failure-scenario:R1-99 -->
+Testing demotion on missing and mismatched markers
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 119 "$(comment_item "$ARGUS" "$rev_body" 3019)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_failure_scenario_demotion_attribution_and_logging: $RECORDER does not exist (D1, D3, D5, D8)"
+    return 1
+  fi
+
+  local out
+  out="$(bash "$RECORDER" 119 2>&1)" || { fail "test_failure_scenario_demotion_attribution_and_logging: recorder execution failed"; return 1; }
+
+  # Suffixed finding demoted to normal with full ID in audit note (AT-354-5, D1, D3)
+  grep -q "ledger-row:R1-1@D7:normal:open:none" "$WRITES" || { fail "test_failure_scenario_demotion_attribution_and_logging: suffixed finding not demoted to normal (D1, D3, AT-354-5)"; return 1; }
+  grep -q "\[demoted from high: missing failure_scenario marker\] on R1-1@D7" "$WRITES" || { fail "test_failure_scenario_demotion_attribution_and_logging: audit note missing full suffixed ID R1-1@D7 (D3, AT-354-5)"; return 1; }
+  echo "$out" | grep -q "finding R1-1@D7: demoted from high to normal: missing failure_scenario marker" || { fail "test_failure_scenario_demotion_attribution_and_logging: stdout missing diagnostic log for R1-1@D7 (D5, AT-354-5)"; return 1; }
+
+  # Bare finding demoted to normal with bare ID in audit note (AT-354-6, D1, D3)
+  grep -q "ledger-row:R1-2:normal:open:none" "$WRITES" || { fail "test_failure_scenario_demotion_attribution_and_logging: bare finding not demoted to normal (D1, D3, AT-354-6)"; return 1; }
+  grep -q "\[demoted from high: missing failure_scenario marker\] on R1-2" "$WRITES" || { fail "test_failure_scenario_demotion_attribution_and_logging: audit note missing bare ID R1-2 (D3, AT-354-6)"; return 1; }
+  echo "$out" | grep -q "finding R1-2: demoted from high to normal: missing failure_scenario marker" || { fail "test_failure_scenario_demotion_attribution_and_logging: stdout missing diagnostic log for R1-2 (D5, AT-354-6)"; return 1; }
+
+  # Mismatched marker does not prevent demotion (D1, D8)
+  grep -q "ledger-row:R1-3@D7:normal:open:none" "$WRITES" || { fail "test_failure_scenario_demotion_attribution_and_logging: mismatched marker prevented demotion (D1, D8)"; return 1; }
+  grep -q "\[demoted from high: missing failure_scenario marker\] on R1-3@D7" "$WRITES" || { fail "test_failure_scenario_demotion_attribution_and_logging: audit note missing ID for mismatched marker (D3, D8)"; return 1; }
+  echo "$out" | grep -q "finding R1-3@D7: demoted from high to normal: missing failure_scenario marker" || { fail "test_failure_scenario_demotion_attribution_and_logging: stdout missing diagnostic log for mismatched marker R1-3@D7 (D5, D8)"; return 1; }
+
+  pass "test_failure_scenario_demotion_attribution_and_logging (D1, D3, D5, D8, AT-354-5, AT-354-6)"
+}
+
+# AT-354-8 (D7, D8): Exemption preservation for dispute and withdrawn high findings
+test_failure_scenario_exemptions_preservation() {
+  reset_state
+  pr_fixture 120 "$H"
+  run_fixture 2022 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2022 -->
+<!-- round:1 -->
+<!-- finding:R1-1@D7:high:open:dispute -->
+<!-- finding:R1-2@D7:high:withdrawn:none -->
+Findings lacking failure-scenario markers but exempted under D7
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 120 "$(comment_item "$ARGUS" "$rev_body" 3020)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_failure_scenario_exemptions_preservation: $RECORDER does not exist (D7, D8)"
+    return 1
+  fi
+
+  bash "$RECORDER" 120 || { fail "test_failure_scenario_exemptions_preservation: recorder execution failed"; return 1; }
+
+  # Dispute exemption preserved (AT-354-8, D7)
+  grep -q "ledger-row:R1-1@D7:high:open:dispute" "$WRITES" || { fail "test_failure_scenario_exemptions_preservation: dispute finding was demoted (D7, AT-354-8)"; return 1; }
+  grep -q "\[demoted from high: missing failure_scenario marker\] on R1-1@D7" "$WRITES" && { fail "test_failure_scenario_exemptions_preservation: dispute finding audit note written (D7, AT-354-8)"; return 1; }
+
+  # Withdrawn exemption preserved (AT-354-8, D7)
+  grep -q "ledger-row:R1-2@D7:high:withdrawn:none" "$WRITES" || { fail "test_failure_scenario_exemptions_preservation: withdrawn finding was demoted (D7, AT-354-8)"; return 1; }
+  grep -q "\[demoted from high: missing failure_scenario marker\] on R1-2@D7" "$WRITES" && { fail "test_failure_scenario_exemptions_preservation: withdrawn finding audit note written (D7, AT-354-8)"; return 1; }
+
+  pass "test_failure_scenario_exemptions_preservation (D7, D8, AT-354-8)"
+}
+
 # --- Test Runner ---
 
 TESTS=(
@@ -1555,6 +1702,9 @@ TESTS=(
   test_hold_probe_fail_closed
   test_python_engine_extraction
   test_non_issue_reference_not_held
+  test_failure_scenario_symmetric_syntax_matrix
+  test_failure_scenario_demotion_attribution_and_logging
+  test_failure_scenario_exemptions_preservation
 )
 
 TOTAL=0
