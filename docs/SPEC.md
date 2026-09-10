@@ -1359,8 +1359,7 @@ When evaluating conjuncts 9 and 10, an issue carrying only `intent:new` with no 
 
 Before merge evaluation executes, `.github/workflows/merge-gate.yml` runs
 a dedicated `record` job (`scripts/ci/review_recorder.sh <pr>`) ahead of `gate`
-(`gate` declares `needs: [record]`). Both jobs run under `environment: themis`
-and share `concurrency: group: merge-gate` (#267). The shell entrypoint `scripts/ci/review_recorder.sh`
+(`gate` declares `needs: [record]`). Both mutating jobs run under `environment: themis` and share workflow-level concurrency scoped per pull request (`concurrency: group: merge-gate-${{ pr }}` with `cancel-in-progress: false`) (#308). The `status` trigger is removed (all CI gates emit CheckRuns producing `check_suite` events), and check suites without pull requests (e.g. pushes to `main`) skip pre-runner in job `if:` conditions (#308). The shell entrypoint `scripts/ci/review_recorder.sh`
 delegates review parsing, ledger derivation, and action plan generation to the standalone engine
 `scripts/ci/review_recorder.py` (#291 D8). The recorder maintains a single
 in-place consensus ledger comment (`<!-- consensus-ledger:<pr> -->`) per pull request:

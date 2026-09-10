@@ -4,6 +4,9 @@ All notable behavioral and user-facing changes to this repository are documented
 
 ## 2026-09-15
 
+### Per-Pull-Request Concurrency for Merge Gate and Recorder Isolation ([#308](https://github.com/evekhm/agentic-sdlc/issues/308))
+Declares workflow-level concurrency in `.github/workflows/merge-gate.yml` scoped per pull request (`merge-gate-${{ pr }}`) with `cancel-in-progress: false`, removing repository-wide job-level concurrency from `record` and `gate`. Eliminates cross-PR cancellations where burst activity on one pull request aborted consensus recording or merge gate evaluations on another. Removes the unresolvable `status` event trigger and legacy commit API fallbacks, while adding pre-runner job guards to skip non-PR check suites and issue comments before runner allocation.
+
 ### Authority-Boundary-on-Comment-Writes Intent Closed as Designed ([#467](https://github.com/evekhm/agentic-sdlc/issues/467))
 An intent.md proposed gating `scripts/ops/post.sh` comment writes on stage ownership and claim-holder status, after Atlas commented on issue #372 while it was claimed by athena at the planning stage. The operator reviewed the proposal and ruled it is not a defect: a reviewer persona commenting on a claimed, out-of-stage issue is within the existing design, not a gap in write authority. The intent.md is withdrawn; the issue is closed as designed, not fixed.
 
