@@ -122,9 +122,12 @@ Enforcement (recorder execution via scripts/ci/review_recorder.sh):
 - Severity must be one of the four enum values; anything else fails
   validation.
 - A `high` row must carry a `failure_scenario` field naming concrete
-  input or state and the concrete damage. A `high` row without one is
-  recorded as `normal`, and the demotion is noted in the ledger row —
-  loudly, never silently.
+  input or state and the concrete damage. Sibling failure-scenario markers
+  match on normalized base finding IDs (`token.split('@', 1)[0]`), accepting
+  both bare (`<!-- failure-scenario:R1-1 -->`) and decision-cited
+  (`<!-- failure-scenario:R1-1@D7 -->`) marker forms symmetrically. A `high` row
+  without one is recorded as `normal`, and the demotion is noted in the
+  ledger row — loudly, never silently.
 - A human can retier any finding with one comment verb
   (`@argus retier <id> <severity>` or `@atlas retier <id> <severity>`,
   e.g. `@argus retier R2-1 normal`); the recorder records the override

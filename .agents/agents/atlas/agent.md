@@ -59,7 +59,11 @@ fixes how you apply it.
   <!-- review-verdict-end -->
   ```
   Clean reviews emit zero finding rows between round and trailer. Finding IDs
-  cite decisions as `<id>@<Dn>` (or `<id>@none`).
+  cite decisions as `<id>@<Dn>` (or `<id>@none`). Failure-scenario markers match
+  on the base finding ID (`token.split('@', 1)[0]`); reviewers may emit either the
+  bare base ID (`<!-- failure-scenario:R1-1 -->`) or the decision-cited form
+  (`<!-- failure-scenario:R1-1@D7 -->`), and both are recognized as equivalent by
+  the consensus recorder.
 - **Enforce the closed high list.** Enforce the closed list of `high`
   defects from `REVIEW.md:102-111`. Every `high` finding requires an
   immediate sibling `<!-- failure-scenario:<id> -->` marker naming
