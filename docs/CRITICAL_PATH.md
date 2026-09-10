@@ -17,16 +17,21 @@ Status line: 2026-09-10, revision ten (~05:20 UTC, main at `1f57021`).
 The operator reset the scope this morning to four capabilities and one
 inventory rule (the "Scope" section); the gates below are rewritten
 around them and the earlier gates are folded into "History". Since
-revision nine: twelve autonomous merges under `evekhm-themis-app`
-through 2026-09-09, then PR #344 (#337 spec) and PR #352 (#330 spec)
-today; the poller runs the plan rungs of #337, #308 and #312 on its
-own. Open and moving: PR #350 (#321 implement, fix round 1 at
-`852dad0`, Argus round 2 in), PR #319 (#265 implement, fix round 6 at
-`82857d7`, reviewers re-dispatched on `9482c37`), and the #330 spec
-amendment the remote Athena session owes (the merged spec skipped the
-advisor ruling; `in-progress` on #330 holds the plan rung until the
-amendment lands). Filed today: #353 (a `run-id:0` verdict is refused
-silently), #356 (a persona session writing as the wrong login).
+revision nine: sixteen autonomous merges under `evekhm-themis-app` on
+2026-09-09 and three more today (PR #349, #351, #352); PR #344 (#337
+spec) merged by hand because Argus wrote `run-id:0` (#353), PR #342
+and #343 by hand because of #321. The poller runs the plan rungs of
+#337, #308 and #312 on its own. Open and moving: PR #350 (#321
+implement, fix round 2 at `618e982`, Argus round 3 clean apart from
+one suggestion, Atlas round 3 running, label `consensus:disputed`
+left by a replayed dispute flag), PR #319 (#265 implement, fix round
+6 at `82857d7`, Atlas clean at `9482c37`, Argus re-run after the
+fourth hand clear of `status:review-stuck` on #265), and the #330
+spec amendment the remote Athena session owes (the merged spec
+skipped the advisor ruling; `in-progress` on #330 holds the plan rung
+until the amendment lands). Filed today: #353 (a `run-id:0` verdict
+is refused silently), #356 (a persona session writing as the wrong
+login), #360 (conjunct 10 declines every spec amendment).
 
 ## Scope (operator directive, 2026-09-10)
 
@@ -59,9 +64,9 @@ stage gaps. Ordered by what unblocks the most.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
-| Y1 | #321 | Conjuncts 9 and 10 read a ranked status label; `intent:new` issues carry none, so every intent-stage PR needs a by-hand merge (PR #342, #343, #344 today). | PR #350 open, fix round 1 at `852dad0`; Argus round 2 in, Atlas pending. Authorized test corrections recorded on #321 (comment 5613393316) |
+| Y1 | #321 | Conjuncts 9 and 10 read a ranked status label; `intent:new` issues carry none, so every intent-stage PR needs a by-hand merge (PR #342 and #343 today). | PR #350 open, fix round 2 at `618e982`; Argus round 3: every row fixed or a suggestion; Atlas round 3 running; label `consensus:disputed` and a `dispute` peer flag on a row Atlas closed in round 2, the #331 replay. Authorized test corrections recorded on #321 (comment 5613393316) |
 | Y2 | #331, #324, #328 | The consensus recorder. #331: a dispute flag is write-once, so every gate run replays it and re-escalates the issue (PR #327 needed a by-hand merge; PR #319 was re-labelled `status:review-stuck` 40 seconds after a hand clear, twice today, because a fix report comment re-ran the gate). #324: a `high` row is demoted when its failure-scenario sibling omits the `@Dn` anchor. #328: the assigned reviewer set is hardcoded, so #265's split gate branch is unreachable. | all three `intent:new`, no rung launched. Advisor recommendation: one intent covering the recorder, three Decision IDs, so the rungs run once |
-| Y3 | #265 | The review split: Atlas on every PR, Argus at the code gate, `deep-review` as a one-shot grant. Cuts review spend per round. | PR #319 open at `82857d7` plus empty commit `9482c37`; six fix rounds; Argus R1-3@D3 fixed in round 6 (label consumed where honoured, refused on drafts); reviews pending at the new head. Merges by hand if Y2 holds it |
+| Y3 | #265 | The review split: Atlas on every PR, Argus at the code gate, `deep-review` as a one-shot grant. Cuts review spend per round. | PR #319 open at `82857d7` plus empty commit `9482c37`; six fix rounds; Argus R1-3@D3 fixed in round 6 (label consumed where honoured, refused on drafts). #265 was re-labelled `status:review-stuck` by the replay four times today and cleared by hand each time; Atlas at `9482c37` has every high row fixed, Argus re-run in progress. Merges by hand if Y2 holds it |
 | Y4 | #337 | The poller only starts rungs; it cannot fire a fix round, so every reviewer finding waits for a human launch. | spec merged (PR #344, `2c5c263`), `status:build`, plan rung claimed by the poller |
 | Y5 | #353 | Argus wrote `run-id:0` on PR #344; the recorder refused the verdict into audit notes only, and the gate declined on a stale ledger with no visible reason. | `intent:new` |
 | Y6 | #308, #312 | Concurrency group cancels gate and recorder runs across PRs; a stream-interrupted review reports FAILURE after posting. Both make clean heads look blocked. | #308 `status:implementing` (poller), #312 `status:in-review` |
@@ -94,7 +99,7 @@ configurations point at different scripts.
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | W1 | #85 | `scripts/ops/wrap.sh` writes the dated handoff and runs the close-out; the `/wrap` door is Claude Code only by the operator's scope cut of 2026-09-10 (spec D8 on PR #357, per #43 D16: no `.agents/workflows/` twin in v1). An Antigravity seat calls the script from its brief or Stop hook; the agy door is a follow-up intent that D8 must name. | spec amendment round 2 open as PR #357 (athena, `0be054d`); plan PR #349 superseded by it |
-| W2 | #330 D7 | Claude Code injects the newest handoff from the `SessionStart` hook; Antigravity has no such hook, so `work.sh` and the seat launcher inject it at dispatch. | decided in the ruling, lands with S1's implement rung |
+| W2 | #330 amendment | Claude Code injects the newest handoff from the `SessionStart` hook; Antigravity has no such hook, so `work.sh` and the seat launcher inject it at dispatch. The merged spec has no Decision for this yet; the amendment round numbers it. | decided in the advisor ruling on #330, lands with S1's implement rung |
 | W3 | #329 | The ceiling enforces itself: threshold nudges at 60/70/90 percent from the side-channel file, compaction backstop `autoCompactWindow: 180000`. Consumes S1's file format. | `intent:new`; its design rung starts after S1's implement merges |
 
 Exit criterion: a session on each harness crosses the wrap threshold,
@@ -168,8 +173,8 @@ tracker"; the advisor's recommendation is stated where it has one.
 - **#339 authority**: which identity removes labels and posts
   refusals. The workflow token does it today under `issues: write`.
 - **Stale processes**: the idle agy REPL in tmux `waves:265i-odyssey`
-  since 2026-09-09 19:08 and any opus verifier older than a day; the
-  operator kills, never a seat.
+  since 2026-09-09 19:08 and any verifier process older than a day;
+  the operator kills, never a seat.
 - **#269 and #245** stay deferred under this scope unless the operator
   promotes them.
 - **Fast-forward cadence for the primary checkout.** DECIDED
@@ -195,12 +200,12 @@ git history. The facts they carried, compressed:
   for the gate's skipped `pull_request` jobs.
 - **First autonomous merge** 2026-09-09 19:03:35Z: PR #309 (#291 spec)
   by `evekhm-themis-app`, run 34392659988, all eleven conjuncts true.
-  Twelve autonomous merges that day; the poller went live 21:50Z as
+  Sixteen autonomous merges that day; the poller went live 21:50Z as
   `poll.service` and claimed #308 twelve seconds later.
 - **By-hand merges and why:** PR #327 (held by #331), PR #322, #315,
-  #316, #342, #343, #344 (intent-stage PRs, held by #321), PR #352's
-  predecessor rounds. Every one is recorded on its PR with the holding
-  conjunct.
+  #316, #342, #343 (intent-stage PRs, held by #321), PR #344 (held by
+  a refused `run-id:0` verdict, #353), PR #346 (#85 spec round 1).
+  Every one is recorded on its PR with the holding conjunct.
 - **Fast path directive 2026-09-08:** merge on smoke, skip review
   rounds. Withdrawn for PR #257 by the verifier on evidence, then the
   ladder ran with both runner reviewers on every head.
