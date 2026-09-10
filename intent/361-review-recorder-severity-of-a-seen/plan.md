@@ -91,6 +91,10 @@ The `security` tier carries existential impact:
 - A `security` row can only be downgraded through an authorized maintainer retier directive (`@<reviewer> retier <fid> <severity>`), as verified by AT-361-7.
 - Elevation of an existing non-security finding to `security` by the discoverer is permitted, but sets `rows[fid]["peer"] = "pending"` to enforce dual-agreement existence verification before merge.
 
+**Retier precedence (D1 vs D4).** An authorized maintainer retier is terminal for that finding id within a recorder run: once `@<reviewer> retier <fid> <sev>` has been applied by an authorized human, a later verdict block footer line from the discovering reviewer never overrides the retiered severity, in either direction (a restated original tier, a downgrade, or an elevation). The recorder logs:
+`print(f"finding {fid}: footer severity {fsev} ignored; retiered to {rows[fid]['severity']} by maintainer")`
+and appends no severity-update audit note. This closes the case where the discoverer's next round restates its original footer severity and silently reverses a human override (AT-361-7, `test_maintainer_retier_precedence_over_footer`). The retier itself keeps its own audit note `[retiered to {rsev} by @{author_login}]` from `review_recorder.py:273`.
+
 ### P5 · Peer Reviewer Non-Interference (D5)
 A non-discovering peer reviewer (`reviewer != discoverer`) cannot alter the severity of a finding. If Atlas emits `finding:R2-1@D5:normal:open:none` on Argus's finding `R2-1@D5`:
 - The severity remains `high`.
@@ -124,7 +128,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
 - **File touched:** `scripts/ci/tests/review_recorder_test.sh`
 - **Decisions implemented:** D1, D2, D3, D4, D5, D6, D7, D8
 - **Acceptance criteria proven:** AT-361-1 through AT-361-7
-- **Description:** Append 5 contract test functions and register them in `TESTS=(...)`:
+- **Description:** Append 7 contract test functions and register them in `TESTS=(...)`:
   1. `test_discoverer_severity_downgrade_and_unblock` [RED-NOW] (D1, D6, D7, D8, AT-361-1, AT-361-2):
      - Fixture PR 121 with Argus finding `R2-1@D5:high:open:none`.
      - In round 3, Argus emits `finding:R2-1@D5:normal:open:none`, Atlas emits `clean`.
@@ -150,8 +154,16 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
      - Fixture PR 125 with existing `R1-5:normal:open:none`.
      - In round 4, Argus attempts to elevate `R1-5` to `high` with failure scenario.
      - Asserts row remains `normal` per post-round-3 funnel cap.
+  6. `test_maintainer_retier_precedence_over_footer` [RED-NOW] (D4, D8, AT-361-7):
+     - Fixture PR 126 with existing `R2-4@D4:normal:open:none`.
+     - OWNER comment `@argus retier R2-4@D4 high`, then a later accepted Argus round-3 block restating `finding:R2-4@D4:normal:open:none` with its failure-scenario sibling.
+     - Asserts the row stays `high:open:none`, the audit notes carry `[retiered to high by @evekhm]` and no `[severity updated to normal` note, and stdout logs `finding R2-4@D4: footer severity normal ignored; retiered to high by maintainer`.
+  7. `test_discoverer_elevation_to_security` [RED-NOW] (D4, D8, AT-361-5):
+     - Fixture PR 127 with existing `R2-5@D4:normal:open:none`.
+     - Accepted Argus round-3 block footers `finding:R2-5@D4:security:open:none`.
+     - Asserts `ledger-row:R2-5@D4:security:open:pending`, audit note `[severity updated to security by @argus on R2-5@D4]`, and the stdout severity-update diagnostic.
 - **Done-When:**
-  Running `bash scripts/ci/tests/review_recorder_test.sh` exits with code 1, reporting `22 passed, 3 failed out of 25 run` (clean assertion failures, not syntax crashes), fulfilling Daedalus's contract test gate.
+  Running `bash scripts/ci/tests/review_recorder_test.sh` exits with code 1, reporting `22 passed, 5 failed out of 27 run` (clean assertion failures, not syntax crashes), fulfilling Daedalus's contract test gate.
 
 ---
 
@@ -161,7 +173,20 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
 - **Decisions implemented:** D1, D2, D3, D4, D5, D6, D7
 - **Acceptance criteria proven:** AT-361-1 through AT-361-7
 - **Step-by-step diff:**
-  The existing update is a two-arm block (`if fsev == "security": ... else: ...`, `scripts/ci/review_recorder.py:333-365`). The severity mutation must sit **outside and after** both arms, so that it runs whichever arm the footer line selects; a mutation inside the non-security arm can never see `fsev == "security"` and P4's elevation rule would be dead code. Two hunks:
+  The existing update is a two-arm block (`if fsev == "security": ... else: ...`, `scripts/ci/review_recorder.py:333-365`). The severity mutation must sit **outside and after** both arms, so that it runs whichever arm the footer line selects; a mutation inside the non-security arm can never see `fsev == "security"` and P4's elevation rule would be dead code. Three hunks:
+
+  Hunk 0, at the maintainer retier site: record the finding ids an authorized retier has settled, so the P4 precedence rule can skip them. Declare the set immediately before Pass 2's comment loop at `:255`, and fill it in the authorized `elif rfid in rows:` branch at `:271-273`:
+  ```diff
+       # Pass 2: apply maintainer retiers and process findings in accepted blocks
+  +    # D4: finding ids settled by an authorized maintainer retier in this run
+  +    retiered_fids = set()
+       for c_idx, c in enumerate(comments):
+  @@
+                   elif rfid in rows:
+                       rows[rfid]["severity"] = rsev
+                       audit_notes.append(f"[retiered to {rsev} by @{author_login}]")
+  +                    retiered_fids.add(rfid)
+  ```
 
   Hunk 1, immediately before `if fsev == "security":` at `:333` (after the discoverer is determined at `:327-331`):
   ```diff
@@ -183,7 +208,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
                                rows[fid]["peer"] = "dispute"
   +
   +                # D1/D2/D4: the discovering reviewer may move a recorded finding's severity
-  +                if old_sev is not None and reviewer == discoverer:
+  +                if old_sev is not None and reviewer == discoverer and fid not in retiered_fids:
   +                    # D4: Security tier protection against unilateral footer downgrades
   +                    if old_sev == "security" and fsev != "security":
   +                        print(f"finding {fid}: footer severity change from security to {fsev} ignored; security rows require maintainer retier")
@@ -199,10 +224,13 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
   +                            # D4: Non-security elevation to security requires peer confirmation
   +                            if new_sev == "security":
   +                                rows[fid]["peer"] = "pending"
+  +                elif old_sev is not None and reviewer == discoverer and fid in retiered_fids:
+  +                    # P4: an authorized maintainer retier is terminal for this finding id
+  +                    print(f"finding {fid}: footer severity {fsev} ignored; retiered to {rows[fid]['severity']} by maintainer")
   ```
-  Reachability check for the implementer: an existing `normal` row whose discoverer footer now says `security` enters the security arm (`fid in rows`, discoverer branch sets status), then hunk 2 elevates it and sets `peer = "pending"`; an existing `security` row whose footer says `normal` enters the non-security arm (status updated), then hunk 2 ignores the downgrade with the D4 diagnostic; `fsev` here is the value after the `:305-325` demotion and funnel adjustments, which is D3's ordering.
+  Reachability check for the implementer: an existing `normal` row whose discoverer footer now says `security` enters the security arm (`fid in rows`, discoverer branch sets status), then hunk 2 elevates it and sets `peer = "pending"`; an existing `security` row whose footer says `normal` enters the non-security arm (status updated), then hunk 2 ignores the downgrade with the D4 diagnostic; `fsev` here is the value after the `:305-325` demotion and funnel adjustments, which is D3's ordering. For the retier case, both the retier directive and the verdict block are handled by the same Pass 2 comment loop in comment order, so a retier comment posted before the reviewer's next round has already put `fid` in `retiered_fids` when hunk 2 runs, and the `elif` arm logs the ignored footer and writes neither `rows[fid]["severity"]` nor an audit note.
 - **Done-When:**
-  `bash scripts/ci/tests/review_recorder_test.sh` runs all 25 tests green (25 passed, 0 failed).
+  `bash scripts/ci/tests/review_recorder_test.sh` runs all 27 tests green (27 passed, 0 failed).
 
 ---
 
@@ -216,7 +244,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
 - **Acceptance criteria proven:** AT-361-8
 - **Step-by-step diff:**
   1. In `personas/skills/review-protocol.md`:
-     Document that discovering reviewers may update finding severity in subsequent review verdict blocks; that `security` findings cannot be downgraded via verdict blocks; and that late-round upward escalations to `high` are capped to `normal`.
+     Document that discovering reviewers may update finding severity in subsequent review verdict blocks; that `security` findings cannot be downgraded via verdict blocks; that an authorized maintainer retier is terminal for that finding id, so a later footer line from the discovering reviewer never overrides it in either direction; and that late-round upward escalations to `high` are capped to `normal`.
   2. In `REVIEW.md`:
      Update consensus table and severity progression documentation to reflect discoverer severity mutability and security tier protection.
   3. Execute `python3 scripts/sync_agents.py` to regenerate sidecar targets.
@@ -237,6 +265,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
   - Downward severity transitions are unrestricted across all rounds; upward escalation of existing findings to `high` in round 4+ demotes to `normal` (#361, D2).
   - Existing `high` findings re-encountered without sibling failure-scenario markers demote to `normal` with audit note and stdout logging (#361, D3).
   - Existing `security` rows cannot be downgraded via review verdict footers; maintainer retier directives are required (#361, D4).
+  - An authorized maintainer retier is terminal for that finding id within a recorder run; a later verdict block footer from the discovering reviewer never overrides it in either direction (#361, D4).
   - Peer reviewers (`reviewer != discoverer`) cannot alter finding severity (#361, D5).
   - Severity modifications by discoverer append `[severity updated to {new_sev} by @{reviewer} on {fid}]` to consensus ledger and log to stdout (#361, D6).
 - **Done-When:**
@@ -250,7 +279,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
 - **Decisions implemented:** D1–D10
 - **Acceptance criteria proven:** AT-361-1 through AT-361-9
 - **Step-by-step verification commands:**
-  1. `bash scripts/ci/tests/review_recorder_test.sh` -> PASS (all 25 scenarios passed)
+  1. `bash scripts/ci/tests/review_recorder_test.sh` -> PASS (all 27 scenarios passed)
   2. `python3 scripts/sync_agents.py --check` -> PASS
   3. `bash scripts/ci/sanitize_check.sh` -> PASS
   4. `bash scripts/ci/spec_check.sh origin/main` -> PASS
@@ -275,6 +304,8 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
 | **AT-361-5** | D4, D8 | **RED-NOW (log) / GUARD (row)** | `test_security_tier_footer_downgrade_protection` | T1 (test), T2 (code) | Discoverer emitting `normal` on `security` row is ignored; stdout logs footer downgrade refusal |
 | **AT-361-6** | D2, D8 | **REGRESSION GUARD** | `test_late_round_funnel_elevation_cap` | T1 (test), T2 (code) | Escalation of existing finding to `high` in round 4 is demoted to `normal` |
 | **AT-361-7** | D4, D8 | **REGRESSION GUARD** | `test_security_tier_footer_downgrade_protection` | T1 (test), T2 (code) | Maintainer retier directive from authorized owner successfully retiers `security` row to `normal` |
+| **AT-361-7** | D4, D8 | **RED-NOW** | `test_maintainer_retier_precedence_over_footer` | T1 (test), T2 (code) | A maintainer retier to `high` survives a later discoverer footer restating `normal`; row stays `high`, no severity-update note, precedence diagnostic logged |
+| **AT-361-5** | D4, D8 | **RED-NOW** | `test_discoverer_elevation_to_security` | T1 (test), T2 (code) | Discoverer elevating a `normal` row to `security` records `security:open:pending` with the severity-update audit note |
 | **AT-361-8** | D9 | **HYGIENE** | Gate verification scripts | T3, T5 | `sanitize_check.sh`, `spec_check.sh`, `sync_agents.py --check` exit 0 |
 | **AT-361-9** | D10 | **SPEC** | Inspection of living spec | T4 | `docs/SPEC.md` updated under `### review.policy` |
 
@@ -289,5 +320,5 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
   - Reference: `Refs #361` only. No closing keyword anywhere in the PR body, commit messages or comments (docs/SPEC.md:448, #245).
   - Deep Review grant: apply `deep-review` grant label (`scripts/ops/post.sh <pr> --as odyssey --add-label deep-review`) per DEEP-3, DEEP-5, DEEP-7.
   - Plan sync / Summary of implemented tasks T2, T3, T4.
-  - Proof that all 25 scenarios in `scripts/ci/tests/review_recorder_test.sh` pass green.
+  - Proof that all 27 scenarios in `scripts/ci/tests/review_recorder_test.sh` pass green.
   - Proof that `python3 scripts/sync_agents.py --check` passes green.
