@@ -1242,15 +1242,26 @@ and dispatches through `scripts/placement/vm-local/run.sh <issue> --as <persona>
 First-hop intake discovers unclaimed `intent:new` issues carrying `intake:auto`,
 capped by the `max_concurrent_first_hops` fleet ceiling measured across active
 Athena claims, claiming and dispatching them to Athena without writing loop-ledger
-rows prior to intent merge (D5; PR #327, D3, D4). Fix rounds on pull requests at
-`status:in-review` with blocking review comments from suffixed App reviewer logins
-(`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`) bypass `claim.sh` entirely and
-acquire a per-PR lock (`${poll_state_dir}/poll-pr-<pr>.lock`) and write consumed
-key files (`${poll_state_dir}/pr-<pr>-<repo_hash>-<key>`) inside `POLL_STATE_DIR`
-(defaulting to `${XDG_STATE_HOME:-~/.local/state}/sdlc-poller`), leaving zero lock
-files in `/tmp` (D2; PR #327, D5, D6). If VM credentials for a persona are missing
-during preflight, the poller logs a notice and skips that persona's rows without
-failing or terminating (D4).
+rows prior to intent merge (D5; PR #327, D3, D4). Fix rounds on open builder
+pull requests (`scripts/placement/vm-local/poll.sh`, section 2; #337) query open
+non-draft pull requests without status label filters, excluding forks and drafts.
+When unconsumed blocking review comments from suffixed App reviewer logins
+(`evekhm-argus-app[bot]`, `evekhm-atlas-app[bot]`) appear on a PR, the poller
+resolves the candidate PR to its tracking issue via `scripts/ops/lib/github.sh`
+`resolve_issue` inside an isolated subshell wrapper, ensuring daemon survivability on
+unresolvable PRs or read failures. Transient circuit breakers (`hold` or `blocked` on the issue,
+`hold` on the PR) skip dispatch without caching. Terminal refusals (closed tracking issues,
+issues at `status:review-stuck`, or stage mismatches between author persona and tracking
+issue stage) write negative refusal keys (`${poll_state_dir}/refuse-pr-<pr>-<repo_hash>-<head_oid>`)
+caching the refusal until a new commit changes `headRefOid`. The poller validates strict
+stage-to-author alignment (`athena` on `status:spec`, `daedalus` on `status:build`, `odyssey`
+on `status:implementing`), touches the consumption key (`${poll_state_dir}/pr-<pr>-<repo_hash>-<key>`),
+acquires a per-PR lock (`${poll_state_dir}/poll-pr-<pr>.lock`), and dispatches
+`scripts/placement/vm-local/run.sh <pr> --as <persona>`, bypassing `claim.sh`.
+`scripts/ops/work.sh` harmonizes `is_fix_round` for all builder personas matching the PR head
+branch author and issue stage, preserving the PR's exact branch slug `<author>/<n>-<slug>`.
+If VM credentials for a persona are missing during preflight, the poller logs a notice and skips
+that persona's rows without failing or terminating (D4).
 
 ## Agreed, not yet built
 

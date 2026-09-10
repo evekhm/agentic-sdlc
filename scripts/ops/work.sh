@@ -396,11 +396,11 @@ if [ "$IS_PR" = "1" ] && [ -n "$pr_head_ref" ]; then
 fi
 
 is_fix_round=0
-if [ "$IS_PR" = "1" ] && [ "$status_labels" = "status:in-review" ] && [ -n "$AS" ] && [ -n "$pr_head_author" ] && [ "$AS" = "$pr_head_author" ] && [ -n "$PR_HEAD_REPO" ] && [ "$PR_HEAD_REPO" = "$GITHUB_REPO" ]; then
+if [ "$IS_PR" = "1" ] && [ -n "$AS" ] && [ -n "$pr_head_author" ] && [ "$AS" = "$pr_head_author" ] && [ -n "$PR_HEAD_REPO" ] && [ "$PR_HEAD_REPO" = "$GITHUB_REPO" ]; then
     is_fix_round=1
-    author_stage="$(jq -r '.stages[] | select(.advances_to == "status:in-review") | .stage // empty' "$LIFECYCLE_JSON")"
-    [ -n "$author_stage" ] || author_stage="$(sed -n 's/^stage:[[:space:]]*\[\(.*\)\].*/\1/p' "$PERSONA_DIR/$AS.yaml" 2>/dev/null | tr -d ' ')"
-    stage="${author_stage:-implement}"
+    if [ "$status_labels" = "status:in-review" ]; then
+        stage="implement"
+    fi
 fi
 
 RUNG_STAGE="$stage"
