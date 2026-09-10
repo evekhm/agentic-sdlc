@@ -13,56 +13,60 @@ this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line. Live `gh issue list` state always
 beats this file.
 
-Status line: 2026-09-10, revision eleven (~07:20 UTC, main at
-`7a81528`).
+Status line: 2026-09-10, revision twelve (~10:50 UTC, main at
+`4bdbc48`).
 
-Since revision ten: Y1 is done. PR #350 (#321 implement) merged by
-hand 05:33Z as `1158acd`, only conjunct 5 false, the #331 replayed
-dispute flag. Confirmed 06:52Z: PR #362 (#329 intent) and PR #364
-(#354 intent) merged autonomously under `app/evekhm-themis-app` once
-their gate runs were rerun. Their declines were the reviewer
-`IN_PROGRESS` race and, for PR #362, three gate runs cancelled by PR
-#364's under the repository-wide concurrency group (#308).
+Since revision eleven: four Gate Y rungs closed today, #354, #337,
+#361 and #353. #354 merged earlier today, so the conditional demotion
+of `high` rows is gone. #337 is `status:in-review`, done from the
+builder side, so the poller can fire a fix round. #361 shipped end to
+end: intent, spec and plan merged, its plan escalation was cleared by
+hand and merged as PR #385, then implement PR #387 merged by Themis at
+10:20Z as `51d0ebf` after one autonomous review round, and the
+lifecycle advanced #361 to `status:in-review` on its own.
 
-Y3 is done. PR #319 (#265 implement) merged by hand 06:14Z as
-`b3f86aa` after eight fix rounds; only conjunct 3 was false, an Argus
-verdict with `run-id:0` refused by the recorder (#353). #265 is
-`status:in-review`. Its normal and suggestion rows from rounds 1-7
-have no follow-up issue yet.
+#353 followed within twenty minutes. Intent, spec and plan merged,
+the plan escalation cleared by hand as PR #384 (`4fe132c`), then
+implement PR #388 merged by Themis at 10:39:54Z as `4bdbc48` after
+Argus and Atlas round 1 on `e4fe14f`. Lifecycle run 34467240566 did
+not rank it, the D17 slug miss filed as #382, so the advisor seat
+advanced #353 to `status:in-review` by hand at 10:41Z. The verifier's
+post-merge smoke of `e4fe14f` landed 33 seconds before the merge and
+was BLOCK on one row: PR #388 deleted REVIEW.md's finding-line grammar
+bullet, the only statement of the legal severity, status and peer
+enum, which `merge_gate.sh:305-309` declines fail-closed against, and
+it carried no task, decision or Plan Sync entry; the body's "Plan
+Sync: None" was also contradicted by T7 naming
+`scripts/ops/tests/post_test.sh`, which D10 (`spec.md:80`) fences out.
+Follow-up PR #389 (`advisor/353-review-md-grammar`) restores the line
+and adds the owed Plan Sync paragraph; it is in a normal reviewer
+round. `merge_gate_test.sh` still aborts at MG-38 on `main`, the #308
+contract, tracked as #386.
 
-PR #357 (#85 spec round 2, Claude Code only) merged 06:24Z. PR #358
-(revision ten) merged 05:5xZ.
+New trap, #376: `extensions.worktreeConfig` is unset, so
+`git config --local` in any linked worktree writes the primary's
+shared `.git/config`, which today holds the daedalus App identity.
+`work.sh` sets no author identity, so every persona commit from a
+poller worktree is authored as daedalus. Hit on PR #387 commit
+`d96e1c8` and PR #388 commit `f26d367`; both were re-authored by hand
+with `--reset-author` and a force-with-lease push as the odyssey App.
+The fix is an operator decision below.
 
-Filed since revision ten: #354 (a `high` row is demoted when the
-finding ID keeps its `@Dn` suffix and the sibling failure-scenario
-marker drops it; Argus writes the bare sibling, so its rows demote,
-and PR #349 merged on demoted rows; Atlas writes the suffixed
-sibling, so its rows survive; same code path as #324,
-`review_recorder.py:280` and `:305`), #361 (severity of a seen
-finding ID never updated), #363 (poller dispatches from a stale
-ledger rung and keeps the claim when `work.sh` refuses), #366 (every
-poller-driven claim comment says `stage: implement`; nothing sets
-`CLAIM_STAGE`).
-
-Open and moving: #354 spec PR #367 (poller-driven, athena; advisor
-reviewer checklist posted 07:0xZ); PR #359 (#337 plan) fix round 1 at
-`d177366`, the one blocking row was a closing keyword in the PR body
-(#245), fired by the seat because the poller cannot (#337); PR #365
-(#85 plan) held by a seat with `hold` until #354's fix is on `main`;
-the #330 spec amendment the remote Athena session owes has still not
-been opened, `in-progress` on #330 holds its plan rung.
-
-Four by-hand merges on 2026-09-10: PR #342 and #343 for #321; PR #344
-and #319 for #353. #353 is the most expensive open defect for YOLO.
-
-PR #359 (#337 plan) merged autonomously 07:09Z after a gate rerun;
-#337 is `status:implementing`. PR #367 (#354 spec) merged by hand
-07:1xZ as `7a81528` citing #328: under #265's split (live since PR
-#319) spec and plan PRs dispatch Atlas only, `docs/SPEC.md`
-`### review.split` says conjunct (3) then reads Atlas alone, and the
-recorder still writes `assigned:argus,atlas`, so every spec and plan
-PR declines on conjunct (3) until #328 lands (PR #365 is in the same
-state). #354 is `status:build`.
+Two follow-ups from this morning, both filed. Recorder observability
+residue from #361, filed as #390: the round-4 cap guard
+`if old_sev != new_sev` prints nothing when the row is already
+`normal`, and plan.md's Category split, its matrix sentence and the
+retier-site peer comment line were not delivered. #390 also carries
+the finding that outlives its PR: Argus's R1-1@D3 normal row on the
+merged PR #388 names the same deletion, PR #389 discharges it, and it
+sits on a merged PR where no reviewer can mark it fixed. Duplicate
+refusal audit note, filed as #391: #267 D3 fixes the exact withdrawal
+string (AT-3 at `review_recorder_test.sh:602` and `:627`) and #353 D4
+mandates the uniform attributed format for all eight refusals
+(AT-353-5 at `:2369`); both are merged, so the terminal-failure branch
+emits both notes and the ledger renders a duplicate. No rung repairs
+that without breaking a merged contract, so one of the two specs needs
+an amendment (operator decision below).
 
 ## Scope (operator directive, 2026-09-10)
 
@@ -93,14 +97,28 @@ The mechanism exists: Themis has merged autonomously since 2026-09-09
 What still needs a human is the ledger, the fix-round path and a few
 stage gaps. Ordered by what unblocks the most.
 
+Clearing an escalation by hand is now verified twice, on the plans of
+#353 and #361. Check that the verifier smoke is CLEAN and that
+`closingIssuesReferences` is 0. Remove `status:review-stuck` and
+restore the DISPLACED label named in the escalation marker
+(`status:build`), which is what the gate's D10 self-clear would
+restore. Merge with `--delete-branch` as the bot. The lifecycle run
+then advances the label and writes the dispatch rung, and the VM
+poller claims and launches the next rung itself within about a
+minute. The root cause this works around: the unattended reviewer
+workflow refuses a PR whose issue carries `status:review-stuck`, so no
+reviewer re-verifies and D10 self-clear can never fire. The retier
+verb `@argus retier` needs a non-Bot OWNER or MEMBER, so a bot cannot
+take the retier path.
+
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
 | Y1 | #321 | Conjuncts 9 and 10 read a ranked status label; `intent:new` issues carry none, so every intent-stage PR needs a by-hand merge (PR #342 and #343 today). | DONE. PR #350 merged by hand 05:33Z (`1158acd`, conjunct 5 alone, the #331 replay). Confirmed 06:52Z when PR #362 and PR #364 merged autonomously. #321 is `status:in-review`; closing it is the operator's call or #148's job |
-| Y2 | #331, #324, #328, #354, #361 | The consensus recorder. #331: a dispute flag is write-once, so every gate run replays it and re-escalates the issue (PR #327 needed a by-hand merge; PR #319 was re-labelled `status:review-stuck` 40 seconds after a hand clear, twice today, because a fix report comment re-ran the gate). #324: a `high` row is demoted when its failure-scenario sibling omits the `@Dn` anchor. #328: the assigned reviewer set is hardcoded, so #265's split gate branch is unreachable. #354: the demotion is conditional on the sibling marker dropping the `@Dn` suffix (Argus's habit), the same fragments #324 cites; PR #349 merged on three demoted rows. #361: the recorder never updates the severity of a finding ID it has already seen, so a corrected or retiered row stays as first written. | #354: intent merged (PR #364, autonomous), spec merged by hand (PR #367, `7a81528`, #328), `status:build`, plan rung next. #331, #324, #328, #361 `intent:new`. Advisor recommendation (on #354): close #324 as superseded by #354; keep #354 to the two-line normalization plus tests; #331, #328, #361 as one recorder intent. #328 is now the wall for every spec and plan PR (PR #367, PR #365 on 2026-09-10); advisor recommendation: promote #328 ahead of #331 and #361 as its own rung |
+| Y2 | #331, #324, #328, #354, #361 | The consensus recorder. #331: a dispute flag is write-once, so every gate run replays it and re-escalates the issue (PR #327 needed a by-hand merge; PR #319 was re-labelled `status:review-stuck` 40 seconds after a hand clear, twice today, because a fix report comment re-ran the gate). #324: a `high` row is demoted when its failure-scenario sibling omits the `@Dn` anchor. #328: the assigned reviewer set is hardcoded, so #265's split gate branch is unreachable. #354: the demotion is conditional on the sibling marker dropping the `@Dn` suffix (Argus's habit), the same fragments #324 cites; PR #349 merged on three demoted rows. #361: the recorder never updates the severity of a finding ID it has already seen, so a corrected or retiered row stays as first written. | #354 DONE, merged earlier today. #361 DONE: implement PR #387 merged by Themis 10:20Z as `51d0ebf` after one autonomous review round, `status:in-review`; its ratchet N-1 spec amendment is an operator decision below. #331, #324, #328 `intent:new`. Advisor recommendation: retire #324 as superseded by #354; #331 and #328 as one recorder intent. #328 is still the wall for every spec and plan PR (PR #367, PR #365 on 2026-09-10); advisor recommendation: promote #328 ahead of #331 as its own rung |
 | Y3 | #265 | The review split: Atlas on every PR, Argus at the code gate, `deep-review` as a one-shot grant. Cuts review spend per round. | DONE. PR #319 merged by hand 06:14Z as `b3f86aa`; conjunct 3 alone (#353). #265 is `status:in-review`. Rounds 1-7 normal and suggestion rows have no follow-up issue yet |
-| Y4 | #337 | The poller only starts rungs; it cannot fire a fix round, so every reviewer finding waits for a human launch. | plan PR #359 merged autonomously 07:09Z after fix round 1 (`d177366`, closing keyword in the PR body, #245, fired by the seat). `status:implementing`; the implement rung is the one that lets the poller fire fix rounds |
-| Y5 | #353 | Argus wrote `run-id:0` on PR #344; the recorder refused the verdict into audit notes only, and the gate declined on a stale ledger with no visible reason. | `intent:new`. Two of the four by-hand merges on 2026-09-10 (PR #344, PR #319) were this alone; advisor recommendation: top of the remaining Gate Y work |
-| Y6 | #308, #312 | Concurrency group cancels gate and recorder runs across PRs; a stream-interrupted review reports FAILURE after posting. Both make clean heads look blocked. | #308 `status:implementing` (poller), #312 `status:in-review`; PR #362's three gate runs were cancelled by PR #364's on 06:37Z and never re-evaluated until a hand rerun (#308) |
+| Y4 | #337 | The poller only starts rungs; it cannot fire a fix round, so every reviewer finding waits for a human launch. | DONE from the builder side. Plan PR #359 merged autonomously 07:09Z after fix round 1 (`d177366`, closing keyword in the PR body, #245, fired by the seat); the implement rung landed and #337 is `status:in-review`, so the poller can fire a fix round |
+| Y5 | #353 | Argus wrote `run-id:0` on PR #344; the recorder refused the verdict into audit notes only, and the gate declined on a stale ledger with no visible reason. | DONE. Implement PR #388 merged by Themis 10:39:54Z as `4bdbc48` after Argus and Atlas round 1 on `e4fe14f`; the plan escalation before it was cleared by hand as PR #384 (`4fe132c`). Lifecycle run 34467240566 did not rank it (D17 slug miss, #382), so the seat advanced #353 to `status:in-review` by hand at 10:41Z. The verifier's post-merge smoke was BLOCK on one row: the merged diff deleted REVIEW.md's finding-line grammar bullet, the only statement of the enum `merge_gate.sh:305-309` declines against, with no task, decision or Plan Sync entry; follow-up PR #389 restores it and is in a reviewer round. Two of the four by-hand merges on 2026-09-10 (PR #344, PR #319) were this defect alone |
+| Y6 | #308, #312 | Concurrency group cancels gate and recorder runs across PRs; a stream-interrupted review reports FAILURE after posting. Both make clean heads look blocked. | #308 `status:implementing` (poller), #312 `status:in-review`; PR #362's three gate runs were cancelled by PR #364's on 06:37Z and never re-evaluated until a hand rerun (#308). `merge_gate_test.sh` aborts at MG-38 on `main` under the #308 contract, tracked as #386 |
 | Y7 | #339 | Who may remove a label or post a refusal. Today the workflow token does it; the persona layer has no verb. Draft guard in `post.sh` belongs here (Argus, PR #319 round 4). | `intent:new` |
 | Y8 | #252, #251 | The advancer never releases the finished rung's `in-progress`; the chain's checklist. | #252 `bug`; #251 `status:in-review` |
 | Y9 | #148 | Deterministic close after the last rung merges; the last by-hand step of a clean run. | `intent:new` |
@@ -108,6 +126,7 @@ stage gaps. Ordered by what unblocks the most.
 | Y11 | #245 | The closing-keyword check misses commit bodies; a "Closes" in a non-final rung closed #308 and #312 one rung early. | `intent:new` |
 | Y12 | #345 | A fork ignored a prose read-only instruction and launched live work under this seat's name; no tool-level enforcement exists. | `intent:new` |
 | Y13 | #363, #366 | The poller's own bookkeeping: #363 dispatches from a stale ledger rung and keeps the claim when `work.sh` refuses; #366 writes `stage: implement` in every claim comment because nothing sets `CLAIM_STAGE`. | both `intent:new` |
+| Y14 | #376 | `extensions.worktreeConfig` is unset, so `git config --local` in a linked worktree writes the primary's shared `.git/config`, which holds the daedalus App identity; `work.sh` sets no author identity. Every persona commit from a poller worktree is authored as daedalus, so the timeline attributes autonomous work to the wrong persona. | hit on PR #387 (`d96e1c8`) and PR #388 (`f26d367`), both re-authored by hand with `--reset-author` and a force-with-lease push as the odyssey App; the fix is an operator decision below |
 
 Exit criterion: one issue, poller-driven from `intent:new`, with a fix
 round fired by #337 and a dispute resolved by the recorder, merged by
@@ -130,7 +149,7 @@ configurations point at different scripts.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
-| W1 | #85 | `scripts/ops/wrap.sh` writes the dated handoff and runs the close-out; the `/wrap` door is Claude Code only by the operator's scope cut of 2026-09-10 (spec D8 on PR #357, per #43 D16: no `.agents/workflows/` twin in v1). An Antigravity seat calls the script from its brief or Stop hook; the agy door is a follow-up intent that D8 must name. | spec round 2 merged 06:24Z (PR #357, Claude Code only per the operator), plan PR #365 open and held (`hold`) until #354's fix reaches `main` |
+| W1 | #85 | `scripts/ops/wrap.sh` writes the dated handoff and runs the close-out; the `/wrap` door is Claude Code only by the operator's scope cut of 2026-09-10 (spec D8 on PR #357, per #43 D16: no `.agents/workflows/` twin in v1). An Antigravity seat calls the script from its brief or Stop hook; the agy door is a follow-up intent that D8 must name. | spec round 2 merged 06:24Z (PR #357, Claude Code only per the operator), plan PR #365 open and held (`hold`); #354's fix is on `main`, so lifting the hold is the operator's call (decision below) |
 | W2 | #330 amendment | Claude Code injects the newest handoff from the `SessionStart` hook; Antigravity has no such hook, so `work.sh` and the seat launcher inject it at dispatch. The merged spec has no Decision for this yet; the amendment round numbers it. | decided in the advisor ruling on #330, lands with S1's implement rung |
 | W3 | #329 | The ceiling enforces itself: threshold nudges at 60/70/90 percent from the side-channel file, compaction backstop `autoCompactWindow: 180000`. Consumes S1's file format. | `intent:new`; its design rung starts after S1's implement merges |
 
@@ -176,21 +195,24 @@ handoff.
 3. #328 as its own rung (recorder writes the dispatched reviewer set;
    the gate's Atlas-alone branch becomes reachable). Until it lands
    every spec and plan PR merges by hand, citing #328 on the PR.
-4. #354 plan and implement rungs (poller-driven; the plan PR needs a
-   by-hand merge on Atlas alone until #328 lands; the seat fires fix
-   rounds by hand until #337's implement lands); its merge lifts the
-   `hold` on PR #365.
+4. #354 plan and implement rungs. DONE, merged earlier today; the
+   `hold` on PR #365 is now the operator's call. #361 walked the same
+   path and is DONE, implement PR #387 merged by Themis 10:20Z.
 5. PR #319 merges (Y3), by hand if Y2 is still open. DONE 06:14Z, by
    hand (#353).
 6. #330 amendment merges by hand, `in-progress` comes off, the poller
    runs the plan and implement rungs (S1, W2).
 7. #337 implement (Y4), so the next fix round is fired by the poller.
-   In progress, `status:implementing` since 07:09Z.
-8. #199 implement (P1): `nestor.yaml`, the seat launch, the pin.
-9. #259 spec amended for `seat.sh` (P3), then its rungs.
-10. #85 and #329 (W1, W3) once S1 is on main.
-11. #147 (Y10, P4).
-12. #353, #308, #312, #339, #252, #148, #245, #345 as the poller reaches
+   DONE, `status:in-review`.
+8. #353 implement (Y5). DONE, PR #388 merged by Themis 10:39:54Z as
+   `4bdbc48`, with the label advanced by hand (#382). The remaining
+   piece is PR #389, the REVIEW.md grammar-line restore plus the owed
+   Plan Sync paragraph.
+9. #199 implement (P1): `nestor.yaml`, the seat launch, the pin.
+10. #259 spec amended for `seat.sh` (P3), then its rungs.
+11. #85 and #329 (W1, W3) once S1 is on main.
+12. #147 (Y10, P4).
+13. #308, #312, #339, #252, #148, #245, #345 as the poller reaches
     them.
 
 Everything else in the tracker is deferred under this scope: #10, #89,
@@ -206,12 +228,28 @@ tracker"; the advisor's recommendation is stated where it has one.
 - **Home of the seat launch without an issue number.** Under #199's
   plan (recommended: D15 already owns the launch convention) or a new
   issue that #199 and #204 cite.
-- **Recorder set.** #324 fold: close #324 as superseded by #354
-  (recommended, #354's ladder is already at spec) or fold #354 into
-  #324. #354 scope: normalization plus tests only, #361 named out of
-  scope (recommended). #331, #328, #361 as one intent (recommended).
-  #328 promoted to its own rung ahead of the others (recommended,
-  2026-09-10 07:20Z: it walls every spec and plan PR).
+- **Recorder set.** #324 fold: retire #324 as superseded by #354
+  (recommended, #354 is merged) or fold #354 into #324. #331 and #328
+  as one intent (recommended). #328 promoted to its own rung ahead of
+  the others (recommended, it walls every spec and plan PR). #361
+  ratchet N-1: whether the spec is amended for it.
+- **Commit identity in poller worktrees (#376).** Either
+  `git config extensions.worktreeConfig true` plus a per-worktree
+  identity, or `work.sh` and `claim.sh` exporting `GIT_AUTHOR_*` and
+  `GIT_COMMITTER_*` from `--as`. Until one lands, every poller commit
+  is authored as daedalus.
+- **`delete_branch_on_merge=true`** on the repository. Still open; it
+  is the fix for the stacked-PR stale-base trap.
+- **#353's AT-353-9/10 exit-0 form** against the #308 contract that
+  #386 tracks.
+- **Duplicate audit note: which spec to amend, #267 D3 or #353 D4
+  (#391).** Both are merged and both bind the terminal-failure branch,
+  so the ledger renders the withdrawal note twice and no rung can
+  repair it under the two contracts as written.
+- **PR #369.** The BLOCK stands; do not merge.
+- **PR #365.** Hold or merge, the operator's queue.
+- **poll.service restart** to pick up the logging change.
+- **Intake of #382, #383, #386, #390 and #391.**
 - **nestor's harness pin** in `config/deployments.yaml` (plan T3 of
   #199). Antigravity is the stated goal; the pin is the operator's
   line to write.
@@ -221,8 +259,11 @@ tracker"; the advisor's recommendation is stated where it has one.
   REPL in tmux `waves:265i-odyssey` (11 hours), the #350 fix-round
   REPL in `waves:350f-odyssey` (1 hour); the operator kills, never a
   seat.
-- **Close #321.** Implement merged, `status:in-review`; close now or
-  wait for #148.
+- **Reopen #321.** Closed by accident at 07:34:52Z by a closing
+  reference inside PR #368's body, a sentence listing operator
+  decisions, the #245 trap; the advisor note on the issue at 07:42Z
+  records it. Its implement is merged and it sat at
+  `status:in-review`, so reopen until #148, or leave it closed.
 - **#269 and #245** stay deferred under this scope unless the operator
   promotes them.
 - **Fast-forward cadence for the primary checkout.** DECIDED
@@ -252,8 +293,11 @@ git history. The facts they carried, compressed:
   `poll.service` and claimed #308 twelve seconds later.
 - **By-hand merges and why:** PR #327 (held by #331), PR #322, #315,
   #316, #342, #343 (intent-stage PRs, held by #321), PR #344 (held by
-  a refused `run-id:0` verdict, #353), PR #346 (#85 spec round 1).
-  Every one is recorded on its PR with the holding conjunct.
+  a refused `run-id:0` verdict, #353), PR #346 (#85 spec round 1),
+  PR #367 (#354 spec, held by #328), PR #384 and PR #385 (the #353 and
+  #361 plans, held by a round-3 `status:review-stuck` escalation that
+  D10 cannot self-clear). Every one is recorded on its PR with the
+  holding conjunct.
 - **Fast path directive 2026-09-08:** merge on smoke, skip review
   rounds. Withdrawn for PR #257 by the verifier on evidence, then the
   ladder ran with both runner reviewers on every head.
