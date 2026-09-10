@@ -711,6 +711,20 @@ went live as the systemd user unit `poll.service`, and its first
 self-directed launch claimed #308. One ledger defect, #331, forced a
 by-hand merge of PR #327, the poller's own implementation PR.
 
+Status snapshot (2026-09-10, ~07:10 UTC, main at `9c364c4`): Y1 and
+Y3 of the critical path are done, PR #350 and PR #319. The first
+fully autonomous intent-stage merges of `intent:new` issues happened
+at 06:52Z, PR #362 and PR #364, confirming #321's fix. Four by-hand
+merges landed today, two caused by #353 and two by #321 before its
+fix. #354 was found, a conditional demotion of `high` rows when
+Argus writes the bare sibling marker, and is at spec (PR #367). The
+decline-line decoder for a held clean head: conjunct 3 with a stale
+head is #353, conjunct 4 with a retiered row is #361, conjunct 5
+after a hand clear is the #331 replay, conjunct 2 with a reviewer
+`IN_PROGRESS` is a race that a gate rerun clears, and a PR whose gate
+runs were all cancelled by a sibling PR's runs is #308 and needs a
+rerun of its newest cancelled run.
+
 Status snapshot (2026-09-10, ~05:20 UTC, main at `1f57021`): the
 operator reset the scope to four capabilities, YOLO end to end, wrap
 and handoff on both harnesses, one statusline on both harnesses, and
