@@ -1,6 +1,6 @@
 # Intent: self-enforcing context ceiling and incremental session handoffs
 
-**Issue:** #329 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #329 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
