@@ -217,7 +217,11 @@ rung_of() { jq -r --arg l "$1" '[.stages[].label] | index($l)' "$LIFECYCLE_JSON"
 # both settings; the escalation is an unattended act and waits on it.
 if [ -n "$over_budget" ]; then
     log "Decline: $over_budget"
-    idx="$(rung_of "$STATUS")"; [ "$idx" != "null" ] && rung=$((idx + 1)) || rung=0
+    idx="$(rung_of "$STATUS")"
+    if [ -z "$STATUS" ] && grep -Fxq "intent:new" <<<"$ISSUE_LABELS"; then
+        idx=0
+    fi
+    [ "$idx" != "null" ] && rung=$((idx + 1)) || rung=0
     ledger_append "refusal:budget" "$rung"
     if [ "$AUTONOMOUS" = "true" ]; then escalate budget
     else log "autonomous_merge is false — refusal recorded, no escalation (D18)"; fi
@@ -341,7 +345,10 @@ fi
 # --- conjuncts 9 and 10 ---------------------------------------------------------------
 RUNG=0; ARTIFACT=""
 idx="$(rung_of "$STATUS")"
-if [ -z "$STATUS" ] || [ "$idx" = "null" ]; then
+if [ -z "$STATUS" ] && grep -Fxq "intent:new" <<<"$ISSUE_LABELS"; then
+    idx=0
+fi
+if [ -z "$STATUS" ] && ! grep -Fxq "intent:new" <<<"$ISSUE_LABELS" || [ "$idx" = "null" ]; then
     WHY[9]="#$ISSUE carries no ranked status label (${STATUS:-none})"; WHY[10]="${WHY[9]}"
 else
     RUNG=$((idx + 1))
