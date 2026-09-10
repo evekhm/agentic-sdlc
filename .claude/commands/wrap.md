@@ -72,7 +72,9 @@ with its reason. If the divergence check above is non-empty, say so.
 **3. Tracked, never only chatted.** Every decision, proposal and follow-up from
 this session maps to an issue, a PR, or an explicit "deferred, no tracker" line
 in the handoff. File what is missing now (`intent:new` for new work). This is
-the check that matters most — chat is not a tracker.
+the check that matters most — chat is not a tracker. If material decisions
+remain unrecorded or unaccounted for, export
+`WRAP_UNACCOUNTED_DECISIONS="<details>"` to trigger Check 7 refusal during close-out.
 
 **4. Dispositions.** *(close-out only)* Every `runs/` artifact you produced that
 led to an action gets its footnote:

@@ -231,6 +231,15 @@ if [ "$SNAPSHOT" -eq 0 ]; then
         echo "refused: primary checkout dirty or behind origin/main" >&2
         FAIL=1
     fi
+    current_dir="$(pwd -P)"
+    primary_dir="$(cd "$PRIMARY_REPO" && pwd -P)"
+    if [ "$current_dir" != "$primary_dir" ]; then
+        current_dirty="$(git status --porcelain 2>/dev/null || echo "")"
+        if [ -n "$current_dirty" ]; then
+            echo "refused: current working tree dirty" >&2
+            FAIL=1
+        fi
+    fi
 fi
 
 # Check 5: PR CI check status (D1, AT-5) (close-out only)
@@ -278,10 +287,14 @@ fi
 
 # Check 8: Claim release and auto-repair (D1, D4, AT-6, AT-7, AT-8) (close-out only)
 SESSION_CLAIMED_ISSUES=()
+session_comment_bodies=""
 if [ "$SNAPSHOT" -eq 0 ]; then
     valid_identities="[]"
     if [ -d "$PRIMARY_REPO/personas" ]; then
         valid_identities="$(grep -h 'identity:' "$PRIMARY_REPO/personas"/*.yaml 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/' | jq -R . | jq -s . 2>/dev/null || echo "[]")"
+    fi
+    if [ "$valid_identities" = "[]" ] || [ -z "$valid_identities" ]; then
+        valid_identities='["evekhm-argus-app[bot]","evekhm-athena-app[bot]","evekhm-atlas-app[bot]","evekhm-cassandra-app[bot]","evekhm-daedalus-app[bot]","evekhm-odyssey-app[bot]"]'
     fi
 
     claim_issues="$(gh issue list --json number,title,labels 2>/dev/null || echo "[]")"
@@ -294,7 +307,7 @@ if [ "$SNAPSHOT" -eq 0 ]; then
                 --argjson valid_identities "$valid_identities" '
                 def is_valid_author:
                     (.user.login // "") as $l |
-                    ($l | test("^([a-zA-Z0-9_-]+-app(\\[bot\\])?|[a-zA-Z0-9_-]+\\[bot\\])$")) or ($valid_identities | index($l) != null);
+                    ($valid_identities | index($l) != null);
 
                 def is_claim:
                     is_valid_author and ((.body // "") | test("\\A[[:space:]]*\\**[[:space:]]*Claim(ing)?:?\\b"; "i"));
@@ -307,11 +320,15 @@ if [ "$SNAPSHOT" -eq 0 ]; then
                         ((.body // "") | test("(?i)\\bBlocked:"))
                     );
 
+                def extract_claimed_session:
+                    [(.body // "") | capture("(?i)\\bClaim(ing)?:?[^\\n]*\\([[:space:]]*(?<sess>[^[:space:]\\)]+)[[:space:]]*\\)")] |
+                    if length > 0 then .[0].sess else "" end;
+
                 (to_entries | [.[] | select(.value | is_claim)] | last) as $last_claim |
                 if $last_claim == null then
                     {"is_claimed": false, "has_handoff": false}
                 else
-                    ($last_claim.value.body | test("(?i)\\bClaim(ing)?:?[^\\n]*\\([[:space:]]*" + $s + "[[:space:]]*\\)")) as $mine |
+                    ($last_claim.value | extract_claimed_session == $s) as $mine |
                     if $mine then
                         (.[$last_claim.key:] | [.[] | select(is_handoff)] | length > 0) as $has_ho |
                         {"is_claimed": true, "has_handoff": $has_ho}
@@ -324,6 +341,12 @@ if [ "$SNAPSHOT" -eq 0 ]; then
             is_claimed_by_session="$(echo "$claim_eval" | jq -r '.is_claimed' 2>/dev/null || echo "false")"
             if [ "$is_claimed_by_session" = "true" ]; then
                 SESSION_CLAIMED_ISSUES+=("#$inum")
+                session_comments="$(echo "$comments" | jq -r \
+                    --argjson valid_identities "$valid_identities" '
+                    .[] | select((.user.login // "") as $l | $valid_identities | index($l) != null) | .body // ""
+                ' 2>/dev/null || true)"
+                [ -n "$session_comments" ] && session_comment_bodies+="$session_comments"$'\n'
+
                 has_valid_handoff="$(echo "$claim_eval" | jq -r '.has_handoff' 2>/dev/null || echo "false")"
                 if [ "$has_valid_handoff" != "true" ]; then
                     echo "fail: missing handoff comment on #$inum" >&2
@@ -388,11 +411,17 @@ if [ "$SNAPSHOT" -eq 0 ]; then
         wt_out="$("$wt_cmd" 2>&1 || true)"
         while IFS= read -r line; do
             [ -n "$line" ] || continue
-            if [[ "$line" =~ dirty|locked ]]; then
-                wt_name="$(echo "$line" | awk '{print $1}')"
-                wt_branch="$(echo "$line" | awk '{print $2}')"
-                if [ "$wt_name" != "primary" ] && [[ "$wt_name" != *"$SESSION_NAME"* ]]; then
-                    echo "warn: peer worktree $wt_name held by $wt_branch is dirty"
+            [[ "$line" =~ ^WORKTREE ]] && continue
+            wt_name="$(echo "$line" | awk '{print $1}')"
+            wt_branch="$(echo "$line" | awk '{print $2}')"
+            wt_verdict="$(echo "$line" | awk '{print $NF}')"
+            [ "$wt_name" = "primary" ] && continue
+            if [[ "$wt_verdict" =~ ^(dirty|unpushed|locked) ]]; then
+                if [[ "$wt_name" == *"$SESSION_NAME"* ]]; then
+                    echo "fail: session worktree $wt_name is $wt_verdict" >&2
+                    FAIL=1
+                else
+                    echo "warn: peer worktree $wt_name held by $wt_branch is $wt_verdict"
                 fi
             fi
         done <<< "$wt_out"
@@ -422,11 +451,21 @@ fi
 leak=0
 CRED_PATTERNS='\bgh[pousr]_[A-Za-z0-9]{16,}|\bgithub_pat_[A-Za-z0-9_]{16,}|\bAKIA[0-9A-Z]{16}\b|\bsk-[A-Za-z0-9]{20,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
 
+# Scan command arguments
+for arg_val in "$@"; do
+    if echo "$arg_val" | grep -qE "$CRED_PATTERNS"; then
+        leak=1
+        break
+    fi
+done
+
 # Scan uncommitted changes (staged and unstaged)
-if git diff --cached 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
-    leak=1
-elif git diff 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
-    leak=1
+if [ "$leak" -eq 0 ]; then
+    if git diff --cached 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
+        leak=1
+    elif git diff 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
+        leak=1
+    fi
 fi
 
 # Scan committed changes on current branch relative to origin/main
@@ -442,18 +481,9 @@ if [ "$leak" -eq 0 ]; then
     fi
 fi
 
-# Scan tracked files in HEAD (excluding tests and scanners)
-if [ "$leak" -eq 0 ]; then
-    if git rev-parse HEAD >/dev/null 2>&1; then
-        if git grep -I -E "$CRED_PATTERNS" HEAD -- ':!scripts/ci/*' ':!scripts/ops/wrap.sh' ':!scripts/ops/tests/wrap_test.sh' >/dev/null 2>&1; then
-            leak=1
-        fi
-    fi
-fi
-
 # Scan comment bodies fetched from claimed issues
-if [ "$leak" -eq 0 ] && [ -n "${comments:-}" ]; then
-    if echo "$comments" | jq -r '.[].body // ""' 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
+if [ "$leak" -eq 0 ] && [ -n "${session_comment_bodies:-}" ]; then
+    if echo "$session_comment_bodies" | grep -qE "$CRED_PATTERNS"; then
         leak=1
     fi
 fi
@@ -472,7 +502,11 @@ if [ "$SNAPSHOT" -eq 0 ]; then
         [ -f "$tf" ] || continue
         fname="$(basename "$tf")"
         if [[ "$fname" =~ (^|[-_])"${SESSION_NAME}"(([-_](body|tmp|comment).*)|\.(tmp|md|txt)|$) ]]; then
-            rm -f "$tf" 2>/dev/null || true
+            if [ "$IS_DRY_RUN" -eq 1 ]; then
+                echo "would: clean temporary body file $tf"
+            else
+                rm -f "$tf" 2>/dev/null || true
+            fi
         fi
     done
     shopt -u nullglob

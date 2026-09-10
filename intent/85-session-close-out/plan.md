@@ -201,7 +201,7 @@ Deferred to post-v1 by number: Checks 2, 6, 9, 11, 13, 14, 19.
 - **Acceptance criteria proven:** AT-6, AT-7, AT-8, AT-9
 - **Risk:** High (touches issue label state machines and mutexes; triggers DEEP-3 / DEEP-5).
 - **Description:**
-  1. **Check 7 (Decision accounting):** Output prompt inventory of material decisions for session reconciliation; verify all decisions map to an issue, PR, or explicit deferral.
+  1. **Check 7 (Decision accounting):** Output prompt inventory of material decisions for session reconciliation; verify all decisions map to an issue, PR, or explicit deferral. Report `fail` and exit 2 if unrecorded decisions remain or if `WRAP_UNACCOUNTED_DECISIONS` is supplied.
   2. **Check 8 (Claim release & auto-repair):** Scan issues claimed by this session.
      - Fallback lock path: query `$GIT_COMMON_DIR/worktrees/<name>/locked` per `scripts/ops/worktrees.sh:79`.
      - If Done/Decided/Next/Blocked handoff comment exists and `in-progress` remains: under normal execution, remove `in-progress` via GitHub REST API `DELETE repos/<repo>/issues/<n>/labels/in-progress`, print `fixed: removed in-progress from #<n>`, and proceed to exit 0. Under `DRY_RUN=1`, print `would: remove in-progress from #<n>`, report `fail: #<n> carries in-progress (dry-run)`, make zero API write calls, and exit 2.
@@ -349,5 +349,16 @@ Review Round 2 repair sync (`scripts/ops/wrap.sh`, `scripts/ops/tests/wrap_test.
   - AT-7: Verified `DRY_RUN=true` case-insensitive parsing without mutations (mutation 2).
   - AT-8: Verified anchored session regex prevents match against peer session prefix (mutation 3), verified unauthenticated comments are ignored, and verified superseding peer claims prevent auto-repair.
   - AT-12: Verified committed credential detection on branch, verified clean run reports `pass: credential scan clean`, and verified Check 18 temp file isolation preserves peer temp files.
+
+Review Round 3 repair sync (`scripts/ops/wrap.sh`, `scripts/ops/tests/wrap_test.sh`, `docs/SPEC.md`, `.claude/commands/wrap.md`, `intent/85-session-close-out/spec.md`, 2026-09-10):
+- **Check 8 author allowlist and claim session matching (R1-1@D4, R3-4@D2):** Removed loose regex alternative in `is_valid_author`; author validation is strictly constrained to official persona App bot identities (`evekhm-*-app[bot]`) read from `personas/*.yaml` (with verified fallback list in sandbox test environments). Replaced unescaped session name regex concatenation with exact string matching on the captured session token, preventing regex metacharacter misinterpretation.
+- **Worktree hygiene and current working tree cleanliness (AT-R2-2@D1, AT-R2-3@D1):** Added current working tree dirty check to Check 4, ensuring uncommitted worktree modifications refuse close-out. Updated Check 15 to evaluate both `dirty` and `unpushed` statuses against session-owned worktrees, reporting `fail` and setting `FAIL=1` to prevent worktree prune data loss, while preserving `warn` for foreign peer worktrees.
+- **Check 18 dry-run guard (AT-R2-4@D4):** Guarded temporary file removal in Check 18 under `DRY_RUN=1`, printing `would: clean temporary body file <path>` without mutating filesystem state.
+- **Check 17 credential scan scoping (R3-2@D1, R3-3@D1):** Scoped credential scanning to session-owned artifacts (command arguments, committed diffs relative to `origin/main`, uncommitted staged/unstaged changes, and session-authored comments accumulated across all evaluated issues). Removed the whole-tree `git grep HEAD` scan that attributed pre-existing repository code to the session.
+- **Documentation sync for `WRAP_UNACCOUNTED_DECISIONS` (R3-1@D9):** Documented `WRAP_UNACCOUNTED_DECISIONS` interface in `docs/SPEC.md` (`ops.wrap`), `intent/85-session-close-out/spec.md`, `intent/85-session-close-out/plan.md`, and `.claude/commands/wrap.md`.
+- **Contract test regression suite:**
+  - AT-8 Case D (R3-5 / AT-R2-1): Verified that a handoff comment preceding the session's latest claim does not satisfy the handoff requirement.
+  - AT-10 Case B & C (AT-R2-2, AT-R2-3): Verified that dirty or unpushed session-owned worktrees fail close-out with exit 2.
+  - AT-12 Case E (AT-R2-4): Verified that `DRY_RUN=1` preserves session temporary files without deletion.
 
 

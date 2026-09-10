@@ -666,6 +666,31 @@ JSON
             fail "AT-8 (D1, R1-1): auto-repair deleted label on re-claimed issue (rc=$rc, writes=$writes, out=$out)"
         fi
     )
+
+    # Case D (AT-R2-1, R3-5): Handoff comment prior to latest claim does not satisfy requirement
+    setup_sandbox
+    seed_session_state
+    seed_stale_in_progress
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/issues_88_comments.json" <<'JSON'
+[
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Done: work\nDecided: none\nNext: review\nBlocked: none"},
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Claim: odyssey (test-session), stage: implementing."}
+]
+JSON
+        : > "$WRITES_LOG"
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        writes="$(wc -l < "$WRITES_LOG")"
+        if [ "$rc" -eq 2 ] && [ "$writes" -eq 0 ] && grep -q "fail: missing handoff comment on #88" <<<"$out"; then
+            pass "AT-8 (D1, R3-5): handoff prior to latest claim rejected, missing handoff reported (rc=$rc, writes=$writes)"
+        else
+            fail "AT-8 (D1, R3-5): handoff prior to claim incorrectly satisfied requirement (rc=$rc, writes=$writes, out=$out)"
+        fi
+    )
 fi
 
 # --- AT-9 (D1, Check 10): run artifact missing disposition --------------------
@@ -715,6 +740,46 @@ TXT
             pass "AT-10 (D1): wrap.sh reports warn on peer worktree and exits 0"
         else
             fail "AT-10 (D1): wrap.sh did not warn and exit 0 on peer worktree anomaly (rc=$rc, out=$out)"
+        fi
+    )
+
+    # Case B (AT-R2-2): dirty session worktree fails close-out
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/worktrees.txt" <<'TXT'
+primary                 main         -  0  0 M  safe
+test-session-worktree   my-branch    -  1  0 -  dirty
+TXT
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        if [ "$rc" -eq 2 ] && grep -q "fail: session worktree test-session-worktree is dirty" <<<"$out"; then
+            pass "AT-10 (D1, AT-R2-2): dirty session worktree fails close-out with exit 2"
+        else
+            fail "AT-10 (D1, AT-R2-2): dirty session worktree did not fail close-out (rc=$rc, out=$out)"
+        fi
+    )
+
+    # Case C (AT-R2-3): unpushed session worktree fails close-out
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/worktrees.txt" <<'TXT'
+primary                 main         -  0  0 M  safe
+test-session-worktree   my-branch    -  0  1 -  unpushed
+TXT
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        if [ "$rc" -eq 2 ] && grep -q "fail: session worktree test-session-worktree is unpushed" <<<"$out"; then
+            pass "AT-10 (D1, AT-R2-3): unpushed session worktree fails close-out with exit 2"
+        else
+            fail "AT-10 (D1, AT-R2-3): unpushed session worktree did not fail close-out (rc=$rc, out=$out)"
         fi
     )
 fi
@@ -835,6 +900,27 @@ else
             pass "AT-12 (D6, R2-4): Check 18 cleans session temp files while preserving peer session temp files"
         else
             fail "AT-12 (D6, R2-4): Check 18 failed isolation (rc=$rc, my_cleaned=$my_cleaned, peer_preserved=$peer_preserved)"
+        fi
+    )
+
+    # Case E (AT-R2-4): DRY_RUN=1 preserves session temp files without deletion
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        dry_f="/tmp/test-session-body.tmp"
+        touch "$dry_f"
+        rc=0
+        out="$(DRY_RUN=1 "$WRAP_SH" test-session 2>&1)" || rc=$?
+        preserved=0
+        [ -f "$dry_f" ] && preserved=1
+        rm -f "$dry_f" 2>/dev/null || true
+        if [ "$preserved" -eq 1 ] && grep -q "would: clean temporary body file" <<<"$out"; then
+            pass "AT-12 (D4, AT-R2-4): DRY_RUN=1 preserves session temp files and reports would-clean"
+        else
+            fail "AT-12 (D4, AT-R2-4): DRY_RUN=1 did not preserve session temp files (preserved=$preserved, out=$out)"
         fi
     )
 fi

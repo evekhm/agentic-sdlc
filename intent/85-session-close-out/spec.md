@@ -126,9 +126,9 @@ The derivations for the v1 shipped checks:
   *Condition:* All material decisions reached in the session map to an issue,
   a PR, or an explicit "deferred, no tracker" entry in the handoff.
   *Derivation:* Session deliberations and commitments are session-owned. If
-  decisions remain unrecorded or unaccounted for, the verdict is **`fail`**
-  (blocks close-out). When all decisions are mapped or explicitly deferred,
-  the verdict is **`pass`**.
+  decisions remain unrecorded or unaccounted for (or if `WRAP_UNACCOUNTED_DECISIONS`
+  is provided), the verdict is **`fail`** (blocks close-out). When all decisions
+  are mapped or explicitly deferred, the verdict is **`pass`**.
 - **Check 8: Claim release and handoff comment (Tracked mutexes)** *(close-out only)*
   *Condition:* Every issue claimed under this session's name carries a valid
   Done / Decided / Next / Blocked handoff comment and no stale `in-progress`
