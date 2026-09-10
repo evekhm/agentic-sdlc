@@ -69,6 +69,7 @@ IFS=$'\t' read -r sid model used window cost dur hit warm ttl cwrite creq cmiss 
 )
 [[ -n "${sid:-}" ]] || exit 0   # unparseable payload: print nothing, never break the chrome
 [[ "$sid" == "null" ]] && exit 0
+[[ "$sid" == *"/"* ]] && sid=unknown
 [[ "$warm" == "-" ]] && warm=""
 [[ "$ttl"  == "-" ]] && ttl=""
 [[ "$cost" == "-" ]] && cost=""
@@ -80,9 +81,9 @@ pct=$(( CEILING > 0 ? used * 100 / CEILING : 0 ))
 accum_in=0 accum_out=0 prev_req=-1
 if [[ "$sid" != unknown && -f "$CTX_DIR/$sid.json" ]]; then
   prev="$(cat "$CTX_DIR/$sid.json" 2>/dev/null)"
-  [[ "$prev" =~ \"accum_input_tokens\":([0-9]+) ]]  && accum_in="${BASH_REMATCH[1]}"
-  [[ "$prev" =~ \"accum_output_tokens\":([0-9]+) ]] && accum_out="${BASH_REMATCH[1]}"
-  [[ "$prev" =~ \"requests\":([0-9]+) ]]             && prev_req="${BASH_REMATCH[1]}"
+  [[ "$prev" =~ \"accum_input_tokens\":[[:space:]]*([0-9]+) ]]  && accum_in="${BASH_REMATCH[1]}"
+  [[ "$prev" =~ \"accum_output_tokens\":[[:space:]]*([0-9]+) ]] && accum_out="${BASH_REMATCH[1]}"
+  [[ "$prev" =~ \"requests\":[[:space:]]*([0-9]+) ]]             && prev_req="${BASH_REMATCH[1]}"
 fi
 
 if [[ "$has_req" == "true" ]]; then
@@ -107,12 +108,53 @@ if [[ "$sid" != unknown ]]; then
   fi
   tmp="$target_dir/.$sid.$$"
   ts="$(printf '%(%s)T' -1 2>/dev/null || date +%s)"
-  printf '{"session_id":"%s","used_tokens":%s,"output_tokens":%s,"total_tokens":%s,"accum_input_tokens":%s,"accum_output_tokens":%s,"accum_total_tokens":%s,"ceiling":%s,"pct":%s,"window_size":%s,"cost_usd":%s,"duration_ms":%s,"seat":"%s","cache":{"hit_pct":%s,"warm":"%s","ttl":"%s","write_tokens":%s,"requests":%s,"misses":%s},"pre_compact_mechanical_ts":null,"pre_compact_narrative_ts":null,"ts":%s}\n' \
-    "$sid" "$used" "$outtok" "$(( used + outtok ))" \
-    "$accum_in" "$accum_out" "$accum_tot" \
-    "$CEILING" "$pct" "$window" "${cost:-null}" "$dur" "$SEAT" \
-    "$hit" "$warm" "$ttl" "$cwrite" "${creq:--1}" "$cmiss" "$ts" \
-    > "$tmp" 2>/dev/null && mv -f "$tmp" "$target_dir/$sid.json" 2>/dev/null
+  jq -c -n \
+    --arg sid "$sid" \
+    --argjson used "$used" \
+    --argjson outtok "$outtok" \
+    --argjson total "$(( used + outtok ))" \
+    --argjson accum_in "$accum_in" \
+    --argjson accum_out "$accum_out" \
+    --argjson accum_tot "$accum_tot" \
+    --argjson ceiling "$CEILING" \
+    --argjson pct "$pct" \
+    --argjson window "$window" \
+    --argjson cost "${cost:-null}" \
+    --argjson dur "$dur" \
+    --arg seat "$SEAT" \
+    --argjson hit "$hit" \
+    --arg warm "$warm" \
+    --arg ttl "$ttl" \
+    --argjson cwrite "$cwrite" \
+    --argjson creq "${creq:--1}" \
+    --argjson cmiss "$cmiss" \
+    --argjson ts "$ts" \
+    '{
+      session_id: $sid,
+      used_tokens: $used,
+      output_tokens: $outtok,
+      total_tokens: $total,
+      accum_input_tokens: $accum_in,
+      accum_output_tokens: $accum_out,
+      accum_total_tokens: $accum_tot,
+      ceiling: $ceiling,
+      pct: $pct,
+      window_size: $window,
+      cost_usd: $cost,
+      duration_ms: $dur,
+      seat: $seat,
+      cache: {
+        hit_pct: $hit,
+        warm: $warm,
+        ttl: $ttl,
+        write_tokens: $cwrite,
+        requests: $creq,
+        misses: $cmiss
+      },
+      pre_compact_mechanical_ts: null,
+      pre_compact_narrative_ts: null,
+      ts: $ts
+    }' > "$tmp" 2>/dev/null && mv -f "$tmp" "$target_dir/$sid.json" 2>/dev/null
   printf '%s' "$payload" > "$target_dir/$sid.raw.json" 2>/dev/null
 fi
 
@@ -158,6 +200,16 @@ TOK="$(printf '  %stok %s in/%s out/%s tot%s' "$DIM" "$(fmt_tok "$accum_in")" "$
 
 COST=""
 [[ -n "$cost" ]] && COST="$(printf '  %s$%.2f%s' "$DIM" "$cost" "$D")"
+
+# Normalize model segment: when effort is set and model display_name ends with
+# a parenthetical equal to effort case-insensitively, strip it before appending [<effort>].
+if [[ -n "$effort" ]]; then
+  shopt -s nocasematch
+  if [[ "$model" =~ ^(.*)[[:space:]]+\($effort\)$ ]]; then
+    model="${BASH_REMATCH[1]}"
+  fi
+  shopt -u nocasematch
+fi
 
 printf '%sctx %s.%sK/%sK %s%%%s%s%s%s%s  %s%s%s%s%s\n' \
   "$C" "$(( used / 1000 ))" "$(( used % 1000 / 100 ))" "$(( CEILING / 1000 ))" "$pct" "$TAG" "$D" \

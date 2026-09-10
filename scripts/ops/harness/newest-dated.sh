@@ -21,7 +21,7 @@ pick() {
     base="${f##*/}"; base="${base%.txt}"
     [[ "$base" =~ -([0-9]{4}-[0-9]{2}-[0-9]{2})(-([0-9]+))?$ ]] || continue
     # unsuffixed is the first of its day, so it sorts as -001
-    printf '%s-%03d\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]:-1}" "$f"
+    printf '%s-%03d\t%s\n' "${BASH_REMATCH[1]}" "$(( 10#${BASH_REMATCH[3]:-1} ))" "$f"
   done | sort | tail -1 | cut -f2-
 }
 

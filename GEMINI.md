@@ -152,7 +152,7 @@ Harness instrumentation (`scripts/ops/harness/`, #330):
   Tracks context usage against the 200K ceiling with visual warning tags
   (`wrap soon` at 60%, `WRAP NOW` at 70%, `COMPACTING` at 90%), running token
   accumulation (`tok <in> in/<out> out/<tot> tot`), and cache hit ratio derived
-  from `.current_usage.cache_read_input_tokens * 100 / .context_window.total_input_tokens`.
+  from `.current_usage.cache_read_input_tokens * 100 / (.current_usage.input_tokens // .context_window.total_input_tokens)`.
   On internal quota accounts lacking `.cost`, the `$` segment is omitted.
   Writes side-channel metrics atomically to `$AGENTIC_CTX_DIR/<session_id>.json`.
 

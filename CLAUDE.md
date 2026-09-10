@@ -78,9 +78,10 @@ Harness instrumentation (`scripts/ops/harness/`, #330):
 - **statusLine command:** configured in `~/.claude/settings.json` via
   `scripts/ops/harness/install.sh`, running `scripts/ops/harness/statusline.sh`.
   Tracks context usage against 200K ceiling, displaying graduated tags
-  (`wrap soon` at 60%, `WRAP NOW` at 70%, `COMPACTING` at 90%), list spend,
-  token accumulation in/out/tot, and cache health (`cw <n>`). Writes atomic
-  side-channel metrics to `~/.claude/context/<session_id>.json`.
+  (`wrap soon` at 60%, `WRAP NOW` at 70%, `COMPACTING` at 90%), list-rate spend,
+  token accumulation in/out/tot, and cache health (with Claude cache-write tokens `cw <n>`).
+  Writes atomic side-channel metrics to `$AGENTIC_CTX_DIR/<session_id>.json`
+  (defaulting to `$CLAUDE_CTX_DIR` or `~/.claude/context/<session_id>.json`, with fallback to `/tmp/agentic-context/`).
 - **SessionStart hook:** configured in `<repo>/.claude/settings.json` via
   `${CLAUDE_PROJECT_DIR}/scripts/ops/harness/session-start.sh` with
   `autoCompactWindow: 180000`. Primes seated sessions (`CLAUDE_SEAT` or `AGENTIC_SEAT`)

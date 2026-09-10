@@ -24,7 +24,7 @@ SEAT="${AGENTIC_SEAT:-${CLAUDE_SEAT:-}}"
 cat >/dev/null   # drain stdin; nothing here needs the payload yet
 
 # Housekeeping: one prune per session, not per statusline render.
-[[ -d "$CTX_DIR" ]] && find "$CTX_DIR" -maxdepth 1 -name '*.json' -mtime +7 -delete 2>/dev/null || true
+[[ -d "$CTX_DIR" ]] && find "$CTX_DIR" -maxdepth 1 \( -name '*.json' -o -name '.*.[0-9]*' \) -mtime +7 -delete 2>/dev/null || true
 
 path="$("$HERE/newest-handoff.sh" "$SEAT" 2>/dev/null)" || exit 0
 [[ -r "$path" ]] || exit 0
