@@ -325,3 +325,12 @@ Direct inspection of these files confirms the naming contract:
 ```
 where `<seat>` can contain internal hyphens, `<YYYY-MM-DD>` is the ISO calendar date, and optional suffix `-n` disambiguates multiple distinct sessions writing on the same day for that seat.
 
+---
+
+## 7. Plan Deviation (Implement Rung, 2026-09-10)
+
+Contract test failure accounting correction in `scripts/ops/tests/wrap_test.sh` under operator authorization ([comment 5624183049](https://github.com/evekhm/agentic-sdlc/issues/85#issuecomment-5624183049)):
+- The merged contract suite `scripts/ops/tests/wrap_test.sh` at head 2a6f142 incremented shell variable `FAILURES` inside `( ... )` subshell test bodies, causing the parent shell counter to remain 0 and exit 0 against a stub `wrap.sh` whose body was `exit 0` once AT-14/AT-15 passed.
+- Corrected failure accounting by recording failures to a temporary log file (`$FAIL_LOG`) created at suite startup and cleaned up on EXIT trap, with `fail()` appending `1` to `$FAIL_LOG` and the summary block computing `FAILURES=$(wc -l < "$FAIL_LOG")`. No assertion, fixture, AT body or Decision citation was changed.
+- Acceptance proven: with `WRAP_SH` pointing at a stub whose body is `exit 0`, the suite exits nonzero (exit 1) and its reported count equals its FAIL lines.
+

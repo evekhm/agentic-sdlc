@@ -50,11 +50,12 @@ edit. The never-list at the end is absolute.
    merge ref, so the stale ref reruns identically). When committing your
    work as a persona, author the commit explicitly as your persona App identity
    (e.g. `git -c user.name="<identity>" -c user.email="<bot_user_id>+<identity>@users.noreply.github.com" commit ...`), deriving the ID via `gh api users/<identity> -q .id` — do not rely on push credentials.
-4. **Hand off.** Done/Decided/Next/Blocked comment on the issue; if
-   pausing, drop `in-progress`; after the merge, remove your worktree
-   and fast-forward the primary checkout ("Whoever merges
-   fast-forwards" below) — a merge the primary has not seen is not
-   finished.
+4. **Hand off and close out.** Done/Decided/Next/Blocked comment on the issue;
+   if pausing, drop `in-progress`; run `/wrap` (or
+   `scripts/ops/wrap.sh <session>`) to reconcile session state and write the
+   handoff; after the merge, remove your worktree and fast-forward the primary
+   checkout ("Whoever merges fast-forwards" below) — a merge the primary has not
+   seen is not finished.
 
 Never: commit, stage, stash or checkout in the primary checkout (the
 one sanctioned write there is the `--ff-only` pull below); work

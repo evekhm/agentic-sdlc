@@ -70,6 +70,8 @@ TODAY="$(date -u +%Y-%m-%d)"
 PRIOR_DATE="2026-01-02"
 export TODAY PRIOR_DATE
 
+FAIL_LOG="$(mktemp "${TMPDIR:-/tmp}/wrap_test_fails.XXXXXX")"
+export FAIL_LOG
 FAILURES=0
 
 banner() { printf '\n=== %s ===\n' "$*"; }
@@ -80,7 +82,7 @@ pass() {
 
 fail() {
     echo "FAIL: $*" >&2
-    FAILURES=$((FAILURES + 1))
+    echo "1" >> "$FAIL_LOG"
 }
 
 # Count log lines matching a regex. Yields 0 for "no matches" and for a
@@ -99,6 +101,7 @@ cleanup() {
     for s in "${SANDBOXES[@]:-}"; do
         [ -n "$s" ] && [ -d "$s" ] && rm -rf "$s"
     done
+    [ -n "${FAIL_LOG:-}" ] && [ -f "$FAIL_LOG" ] && rm -f "$FAIL_LOG"
 }
 trap cleanup EXIT
 
@@ -952,6 +955,8 @@ fi
 
 # --- Summary ------------------------------------------------------------------
 banner "Wrap Contract Test Summary"
+FAILURES=$(wc -l < "$FAIL_LOG" 2>/dev/null | tr -d ' ')
+FAILURES="${FAILURES:-0}"
 if [ "$FAILURES" -gt 0 ]; then
     echo "Total contract test failures: $FAILURES (EXPECTED RED at build rung)" >&2
     exit 1
