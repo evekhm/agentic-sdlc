@@ -76,6 +76,147 @@ Settings files (`~/.claude/settings.json`, `~/.gemini/antigravity-cli/settings.j
 - **Side-channel concurrency:** Multiple parallel sessions or subagents rendering statuslines simultaneously must not corrupt side-channel files. Atomic rename (`mv -f`) ensures single-turn readers never see truncated files.
 - **Disk growth in context directory:** In long-running or high-throughput workflows, `$CTX_DIR` accumulates `.json` and `.raw.json` files. The 7-day prune in `session-start.sh` bounds disk usage without interfering with active sessions.
 
+
+---
+
+## Implementation Reference (Verified Prototype Scripts)
+
+### `scripts/ops/harness/statusline.sh`
+
+```bash
+#!/usr/bin/env bash
+# Copyright 2026 The Agentic SDLC Authors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# statusline.sh — Statusline command for Antigravity and Claude Code harnesses.
+# Two jobs:
+#   1. Display context size against the 200K working ceiling (AGENTS.md
+#      "Context ceiling") and session spend, so the operator never has to
+#      ask an agent how expensive it has become.
+#   2. Write the same numbers to a side-channel file, because no hook event
+#      receives a token count. Hooks and watchers read the file; this script is
+#      the only place the harness hands the number over.
+#
+# stdin: StatusLine JSON payload (from Claude Code or Antigravity/Jetski).
+# stdout: one line, rendered in the terminal chrome.
+#
+# Env:
+#   AGENTIC_CONTEXT_CEILING / CLAUDE_CONTEXT_CEILING  working ceiling (default 200000)
+#   AGENTIC_CTX_DIR / CLAUDE_CTX_DIR / AGY_CTX_DIR    side-channel directory
+#   AGENTIC_SEAT / CLAUDE_SEAT                        seat name, shown in the line
+set -uo pipefail
+
+CEILING="${AGENTIC_CONTEXT_CEILING:-${CLAUDE_CONTEXT_CEILING:-200000}}"
+
+# Default context dir: check AGENTIC_CTX_DIR, CLAUDE_CTX_DIR, AGY_CTX_DIR,
+# or default based on home directory structure.
+if [[ -n "${AGENTIC_CTX_DIR:-}" ]]; then
+  CTX_DIR="$AGENTIC_CTX_DIR"
+elif [[ -n "${CLAUDE_CTX_DIR:-}" ]]; then
+  CTX_DIR="$CLAUDE_CTX_DIR"
+elif [[ -n "${AGY_CTX_DIR:-}" ]]; then
+  CTX_DIR="$AGY_CTX_DIR"
+elif [[ -d "$HOME/.gemini/antigravity-cli" ]]; then
+  CTX_DIR="$HOME/.gemini/antigravity-cli/context"
+elif [[ -d "$HOME/.gemini" ]]; then
+  CTX_DIR="$HOME/.gemini/context"
+else
+  CTX_DIR="$HOME/.claude/context"
+fi
+
+SEAT="${AGENTIC_SEAT:-${CLAUDE_SEAT:-${AGY_SEAT:-}}}"
+
+payload="$(cat)"
+
+# One jq pass; the rest is pure bash so a render costs a single subprocess.
+# Normalized extraction across both Antigravity and Claude schemas:
+# - session_id: .session_id // .conversation_id (non-empty filter prevents IFS whitespace collapse)
+# - model: .model.display_name // .model.id
+# - used: total_input_tokens with current_usage fallback (tolerates null usage after compaction)
+# - tot_out: total_output_tokens (cumulative output generated in session)
+# - cost: .cost.total_cost_usd (Claude) // .cost.total_usd (Antigravity) // 0
+# - dur: .cost.total_duration_ms // 0
+# - cache: .prompt_cache fields (Claude), or current_usage.cache_read_input_tokens (Antigravity)
+IFS=$'\t' read -r sid model used tot_out window cost dur hit warm ttl cwrite creq cmiss < <(
+  printf '%s' "$payload" | jq -r '
+    (.context_window // {}) as $cw
+    | ($cw.current_usage // {}) as $cu
+    | (.prompt_cache // {}) as $pc
+    | ((($cu.input_tokens // 0) + ($cu.cache_read_input_tokens // 0) + ($cu.cache_creation_input_tokens // 0))) as $turn_in
+    | [ ((.session_id | select(. != null and . != "")) // (.conversation_id | select(. != null and . != "")) // "unknown")
+      , ((.model.display_name | select(. != null and . != "")) // (.model.id | select(. != null and . != "")) // "model")
+      , ( $cw.total_input_tokens // $turn_in )
+      , ($cw.total_output_tokens // 0)
+      , ($cw.context_window_size // 0)
+      , (.cost.total_cost_usd // .cost.total_usd // 0)
+      , (.cost.total_duration_ms // 0)
+      # Absent reads as -1 / "-", never "". Tab is an IFS whitespace char.
+      # Support both Claude .prompt_cache and Antigravity current_usage.cache_read_input_tokens
+      , (if $pc.hit_ratio != null then ($pc.hit_ratio * 100 | floor)
+         elif ($cu.cache_read_input_tokens != null and $turn_in > 0)
+         then (($cu.cache_read_input_tokens * 100) / $turn_in | floor)
+         else -1 end)
+      , (if $pc.warm != null then ($pc.warm | tostring)
+         elif $cu.cache_read_input_tokens != null then
+           (if $cu.cache_read_input_tokens > 0 then "true" else "false" end)
+         else "-" end)
+      , ($pc.ttl // "-")
+      , ($pc.cache_write_tokens // $cu.cache_creation_input_tokens // 0)
+      , ($pc.requests // 0)
+      , ($pc.misses // 0)
+      ] | @tsv' 2>/dev/null
+)
+[[ -n "${sid:-}" ]] || exit 0   # unparseable payload: print nothing, never break chrome
+[[ "$warm" == "-" ]] && warm=""
+[[ "$ttl"  == "-" ]] && ttl=""
+
+pct=$(( CEILING > 0 ? used * 100 / CEILING : 0 ))
+tot_tokens=$(( used + tot_out ))
+
+# Side channel for hooks/watchers. Atomic so reader never sees partial file.
+if [[ "$sid" != "unknown" ]]; then
+  mkdir -p "$CTX_DIR" 2>/dev/null
+  tmp="$CTX_DIR/.$sid.$$"
+  printf '{"session_id":"%s","used_tokens":%s,"output_tokens":%s,"total_tokens":%s,"ceiling":%s,"pct":%s,"window_size":%s,"cost_usd":%s,"duration_ms":%s,"seat":"%s","cache":{"hit_pct":%s,"warm":"%s","ttl":"%s","write_tokens":%s,"requests":%s,"misses":%s},"ts":%s}\n' \
+    "$sid" "$used" "$tot_out" "$tot_tokens" "$CEILING" "$pct" "$window" "$cost" "$dur" "$SEAT" \
+    "$hit" "$warm" "$ttl" "$cwrite" "$creq" "$cmiss" "$(printf '%(%s)T' -1)" \
+    > "$tmp" 2>/dev/null && mv -f "$tmp" "$CTX_DIR/$sid.json" 2>/dev/null
+  printf '%s' "$payload" > "$CTX_DIR/$sid.raw.json" 2>/dev/null
+fi
+
+D=$'\033[0m'; DIM=$'\033[2m'
+if   (( pct >= 100 )); then C=$'\033[1;31m'; TAG=" HANDOFF"       # past ceiling
+elif (( pct >= 75  )); then C=$'\033[33m';   TAG=" wrap up"
+else                        C=$'\033[32m';   TAG=""
+fi
+
+CACHE=""
+if (( hit >= 0 )); then
+  if   [[ "$warm" == false ]]; then CC=$'\033[33m'; SUFFIX=" cold"
+  elif (( hit < 80 ));         then CC=$'\033[33m'; SUFFIX=""
+  else                              CC="$DIM";      SUFFIX=""
+  fi
+  CACHE="$(printf '  %scache %s%%%s%s%s' "$CC" "$hit" "$SUFFIX" "${ttl:+ $ttl}" "$D")"
+fi
+
+fmt_tok() {
+  local n="${1:-0}"
+  if (( n >= 1000000 )); then
+    printf '%d.%dM' "$(( n / 1000000 ))" "$(( n % 1000000 / 100000 ))"
+  else
+    printf '%d.%dK' "$(( n / 1000 ))" "$(( n % 1000 / 100 ))"
+  fi
+}
+
+TOK="$(printf '%stok %s in/%s out%s' "$DIM" "$(fmt_tok "$used")" "$(fmt_tok "$tot_out")" "$D")"
+
+printf '%sctx %s.%sK/%sK %s%%%s%s  %s$%.2f%s  %s%s  %s%s%s%s\n' \
+  "$C" "$(( used / 1000 ))" "$(( used % 1000 / 100 ))" "$(( CEILING / 1000 ))" "$pct" "$TAG" "$D" \
+  "$DIM" "$cost" "$D" \
+  "$TOK" "$CACHE" \
+  "$DIM" "$model" "${SEAT:+ · $SEAT}" "$D"
+```
+
 ---
 
 ## Out of scope
