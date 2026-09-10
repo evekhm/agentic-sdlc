@@ -175,8 +175,8 @@ In `scripts/ci/merge_gate.sh`:
      - MG-49: reports dual refusals joined by semicolon in `WHY[3]`.
 - **Done-When:**
   Running `bash scripts/ci/tests/review_recorder_test.sh` outputs:
-  `review_recorder_test.sh results: 20 passed, 5 failed out of 25 run`
-  (20 regression tests pass green, 5 contract tests fail cleanly on assertion messages, zero crashes).
+  `review_recorder_test.sh results: 22 passed, 10 failed out of 32 run`
+  (22 regression tests pass green; 10 contract tests fail cleanly on assertion messages, zero crashes: the five AT-353 tests of this plan plus the five AT-361 tests that #361's plan, merged in PR #385, leaves RED for its own implement rung. #361's five are not this rung's to turn green and are counted as pre-existing in T7.)
 
 ---
 
@@ -230,7 +230,7 @@ In `scripts/ci/merge_gate.sh`:
      - In markdown comment generation, render unique attributed refusal notes under `#### Notes`.
      - If findings table is empty, render `|_No findings recorded._|||||`.
 - **Done-When:**
-  `bash scripts/ci/tests/review_recorder_test.sh` passes all 25 scenarios green.
+  `bash scripts/ci/tests/review_recorder_test.sh` reports no failing AT-353 scenario: the 22 pre-existing green tests stay green and the five AT-353 tests pass; the five AT-361 contract tests (PR #385) stay RED until #361's implement rung lands, unless it lands first, in which case all 32 are green.
 
 ---
 
@@ -312,7 +312,7 @@ In `scripts/ci/merge_gate.sh`:
 - **Decisions implemented:** D8, D10
 - **Acceptance criteria proven:** AT-353-1 through AT-353-13
 - **Verification Commands:**
-  1. `bash scripts/ci/tests/review_recorder_test.sh` -> PASS (all 25 scenarios)
+  1. `bash scripts/ci/tests/review_recorder_test.sh` -> no `FAIL:` line naming an AT-353 scenario (32 scenarios run; the five AT-361 tests from PR #385 may still fail and are not this rung's)
   2. `python3 scripts/sync_agents.py --check` -> PASS
   3. `bash scripts/ci/sanitize_check.sh` -> PASS
   4. `bash scripts/ci/spec_check.sh origin/main` -> PASS
@@ -355,6 +355,6 @@ In `scripts/ci/merge_gate.sh`:
   - Reference: `Refs #353` only. No closing keyword anywhere in the PR body, commit messages or comments (docs/SPEC.md:448, #245).
   - Deep Review grant: apply `deep-review` grant label (DEEP-7: alters `personas/skills/review-protocol.md`; DEEP-3: alters `scripts/ops/post.sh`)
   - Summary of implemented tasks T2, T3, T4, T5, T6, T7
-  - Proof that all 25 scenarios in `scripts/ci/tests/review_recorder_test.sh` pass green
+  - Proof that every AT-353 scenario in `scripts/ci/tests/review_recorder_test.sh` passes green and the 22 pre-existing tests still pass (the exact results line pasted; any remaining `FAIL:` lines must name only AT-361 tests)
   - Proof that `python3 scripts/sync_agents.py --check` passes green
   - Proof that `scripts/ci/spec_check.sh origin/main` passes green

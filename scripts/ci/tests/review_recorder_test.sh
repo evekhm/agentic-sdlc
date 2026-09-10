@@ -1682,6 +1682,380 @@ EOF
   pass "test_failure_scenario_exemptions_preservation (D7, D8, AT-354-8)"
 }
 
+# AT-361-1, AT-361-2 (D1, D6, D7, D8): Discoverer severity downgrade and downstream merge gate unblocking
+test_discoverer_severity_downgrade_and_unblock() {
+  reset_state
+  pr_fixture 121 "$H"
+  run_fixture 2023 "$ARGUS" "$H" "pull_request" "completed" "success"
+  run_fixture 2024 "$ATLAS" "$H" "pull_request" "completed" "success"
+
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #121
+<!-- consensus-ledger:121 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R2-1@D5:high:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
+
+  local argus_rev atlas_rev
+  argus_rev="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2023 -->
+<!-- round:3 -->
+<!-- finding:R2-1@D5:normal:open:none -->
+<!-- review-verdict-end -->
+EOF
+)"
+
+  atlas_rev="$(cat <<EOF
+### Atlas review
+<!-- review-verdict:atlas:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2024 -->
+<!-- round:3 -->
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 121 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$argus_rev" 3023)" \
+    "$(comment_item "$ATLAS" "$atlas_rev" 3024)"
+
+  local out
+  out="$(bash "$RECORDER" 121 2>&1)" || { fail "test_discoverer_severity_downgrade_and_unblock: recorder failed (D1, D8)"; return 1; }
+
+  grep -q "ledger-row:R2-1@D5:normal:open:none" "$WRITES" || { fail "test_discoverer_severity_downgrade_and_unblock: finding severity not updated to normal (D1, D8, AT-361-1)"; return 1; }
+  grep -q "\[severity updated to normal by @argus on R2-1@D5\]" "$WRITES" || { fail "test_discoverer_severity_downgrade_and_unblock: audit note missing for severity update (D6, D8, AT-361-1)"; return 1; }
+  echo "$out" | grep -q "finding R2-1@D5: severity updated from high to normal by @argus" || { fail "test_discoverer_severity_downgrade_and_unblock: stdout missing diagnostic log (D6, D8, AT-361-1)"; return 1; }
+  grep -q "gh issue edit 121.*--add-label.*review:merge-ready" "$WRITES" || { fail "test_discoverer_severity_downgrade_and_unblock: review:merge-ready label missing on clean consensus (D7, D8, AT-361-1)"; return 1; }
+
+  local emitted_ledger
+  emitted_ledger="$(awk '/### Findings ledger for #121/ {f = 1} f; /<!-- consensus-ledger-end -->/ {f = 0; exit}' "$WRITES")"
+  [ -n "$emitted_ledger" ] || { fail "test_discoverer_severity_downgrade_and_unblock: emitted ledger not captured in writes (D7, AT-361-2)"; return 1; }
+
+  comments_fixture 121 "$(comment_item "$THEMIS" "$emitted_ledger" 5001 "COLLABORATOR" "Bot")"
+  local gate_out
+  gate_out="$(run_gate 121)"
+  echo "$gate_out" | grep -q "conjunct (4): true" || { fail "test_discoverer_severity_downgrade_and_unblock: conjunct 4 not true after downgrade to normal (D7, D8, AT-361-2)"; return 1; }
+  echo "$gate_out" | grep -q "blocking set empty" || { fail "test_discoverer_severity_downgrade_and_unblock: WHY[4] blocking set empty missing (D7, D8, AT-361-2)"; return 1; }
+
+  pass "test_discoverer_severity_downgrade_and_unblock (D1, D6, D7, D8, AT-361-1, AT-361-2)"
+}
+
+# AT-361-3 (D5, D8): Peer reviewer non-interference on finding severity
+test_peer_severity_non_interference() {
+  reset_state
+  pr_fixture 122 "$H"
+  run_fixture 2025 "$ATLAS" "$H" "pull_request" "completed" "success"
+
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #122
+<!-- consensus-ledger:122 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R2-1@D5:high:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
+
+  local atlas_rev
+  atlas_rev="$(cat <<EOF
+### Atlas review
+<!-- review-verdict:atlas:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2025 -->
+<!-- round:3 -->
+<!-- finding:R2-1@D5:normal:open:none -->
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 122 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ATLAS" "$atlas_rev" 3025)"
+
+  local out
+  out="$(bash "$RECORDER" 122 2>&1)" || { fail "test_peer_severity_non_interference: recorder failed (D5, D8)"; return 1; }
+
+  grep -q "ledger-row:R2-1@D5:high:open:none" "$WRITES" || { fail "test_peer_severity_non_interference: peer modified discoverer finding severity (D5, D8, AT-361-3)"; return 1; }
+  grep -q "ledger-row:R2-1@D5:normal" "$WRITES" && { fail "test_peer_severity_non_interference: peer updated finding to normal (D5, D8, AT-361-3)"; return 1; }
+  grep -q "severity updated" "$WRITES" && { fail "test_peer_severity_non_interference: severity update audit note written on peer review (D5, D8, AT-361-3)"; return 1; }
+  echo "$out" | grep -q "severity updated" && { fail "test_peer_severity_non_interference: stdout logged severity update on peer review (D5, D8, AT-361-3)"; return 1; }
+
+  pass "test_peer_severity_non_interference (D5, D8, AT-361-3)"
+}
+
+# AT-361-4 (D3, D8): Re-encounter of high severity finding without sibling failure-scenario marker
+test_re_encounter_high_missing_failure_scenario() {
+  reset_state
+  pr_fixture 123 "$H"
+  run_fixture 2026 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #123
+<!-- consensus-ledger:123 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R2-1@D5:high:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
+
+  local argus_rev
+  argus_rev="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2026 -->
+<!-- round:3 -->
+<!-- finding:R2-1@D5:high:open:none -->
+Reasserting high finding without sibling failure-scenario marker
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 123 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$argus_rev" 3026)"
+
+  local out
+  out="$(bash "$RECORDER" 123 2>&1)" || { fail "test_re_encounter_high_missing_failure_scenario: recorder failed (D3, D8)"; return 1; }
+
+  grep -q "ledger-row:R2-1@D5:normal:open:none" "$WRITES" || { fail "test_re_encounter_high_missing_failure_scenario: high finding without marker was not demoted to normal (D3, D8, AT-361-4)"; return 1; }
+  grep -q "\[demoted from high: missing failure_scenario marker\] on R2-1@D5" "$WRITES" || { fail "test_re_encounter_high_missing_failure_scenario: demotion audit note missing full ID (D3, D8, AT-361-4)"; return 1; }
+  echo "$out" | grep -q "finding R2-1@D5: demoted from high to normal: missing failure_scenario marker" || { fail "test_re_encounter_high_missing_failure_scenario: stdout missing diagnostic log (D3, D8, AT-361-4)"; return 1; }
+
+  pass "test_re_encounter_high_missing_failure_scenario (D3, D8, AT-361-4)"
+}
+
+# AT-361-5, AT-361-7 (D4, D8): Security tier protection against footer downgrade & maintainer retier
+test_security_tier_footer_downgrade_protection() {
+  reset_state
+  pr_fixture 124 "$H"
+  run_fixture 2027 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #124
+<!-- consensus-ledger:124 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R1-1:security:open:pending -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
+
+  # Case 1 (AT-361-5, D4): Footer downgrade attempt from security to normal
+  local argus_rev
+  argus_rev="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2027 -->
+<!-- round:2 -->
+<!-- finding:R1-1:normal:open:none -->
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 124 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$argus_rev" 3027)"
+
+  local out
+  out="$(bash "$RECORDER" 124 2>&1)" || { fail "test_security_tier_footer_downgrade_protection: recorder failed (D4, D8)"; return 1; }
+
+  grep -q "ledger-row:R1-1:security:open:pending" "$WRITES" || { fail "test_security_tier_footer_downgrade_protection: security row downgraded by verdict block (D4, D8, AT-361-5)"; return 1; }
+  grep -q "ledger-row:R1-1:normal" "$WRITES" && { fail "test_security_tier_footer_downgrade_protection: normal row recorded for security finding (D4, D8, AT-361-5)"; return 1; }
+  grep -q "\[severity updated" "$WRITES" && { fail "test_security_tier_footer_downgrade_protection: severity update audit note written for security footer downgrade (D4, D8, AT-361-5)"; return 1; }
+  echo "$out" | grep -q "finding R1-1: footer severity change from security to normal ignored; security rows require maintainer retier" || { fail "test_security_tier_footer_downgrade_protection: stdout missing security footer downgrade diagnostic log (D4, D8, AT-361-5)"; return 1; }
+
+  # Case 2 (AT-361-7, D4): Maintainer retier directive retiers security finding
+  : > "$WRITES"
+  local owner_cmd="@argus retier R1-1 normal"
+  comments_fixture 124 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "evekhm" "$owner_cmd" 3028 "OWNER" "User")"
+
+  bash "$RECORDER" 124 >/dev/null || { fail "test_security_tier_footer_downgrade_protection: recorder failed on maintainer retier (D4, D8, AT-361-7)"; return 1; }
+  grep -q "ledger-row:R1-1:normal:open:pending" "$WRITES" || { fail "test_security_tier_footer_downgrade_protection: maintainer retier did not retier security row (D4, D8, AT-361-7)"; return 1; }
+  grep -q "\[retiered to normal by @evekhm\]" "$WRITES" || { fail "test_security_tier_footer_downgrade_protection: retier audit note missing (D4, D8, AT-361-7)"; return 1; }
+
+  pass "test_security_tier_footer_downgrade_protection (D4, D8, AT-361-5, AT-361-7)"
+}
+
+# AT-361-6 (D2, D8): Post-round-3 funnel cap prevents upward escalation of existing finding to high
+test_late_round_funnel_elevation_cap() {
+  reset_state
+  pr_fixture 125 "$H"
+  run_fixture 2028 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #125
+<!-- consensus-ledger:125 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R1-5:normal:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
+
+  local argus_rev
+  argus_rev="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2028 -->
+<!-- round:4 -->
+<!-- finding:R1-5:high:open:none -->
+<!-- failure-scenario:R1-5 -->
+Escalating existing finding in late round
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 125 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$argus_rev" 3028)"
+
+  local out
+  out="$(bash "$RECORDER" 125 2>&1)" || { fail "test_late_round_funnel_elevation_cap: recorder execution failed (D2, D8)"; return 1; }
+
+  grep -q "ledger-row:R1-5:normal:open:none" "$WRITES" || { fail "test_late_round_funnel_elevation_cap: late round elevation to high was not demoted to normal (D2, D8, AT-361-6)"; return 1; }
+  grep -q "ledger-row:R1-5:high" "$WRITES" && { fail "test_late_round_funnel_elevation_cap: late round elevation to high was accepted (D2, D8, AT-361-6)"; return 1; }
+
+  pass "test_late_round_funnel_elevation_cap (D2, D8, AT-361-6)"
+}
+
+# AT-361-7 (D4, D8): An authorized maintainer retier is terminal for a finding id;
+# a later verdict block from the discovering reviewer restating the original footer
+# severity does not override it (P4 precedence).
+test_maintainer_retier_precedence_over_footer() {
+  reset_state
+  pr_fixture 126 "$H"
+  run_fixture 2029 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #126
+<!-- consensus-ledger:126 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R2-4@D4:normal:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
+
+  local owner_cmd argus_rev
+  owner_cmd="@argus retier R2-4@D4 high"
+  argus_rev="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2029 -->
+<!-- round:3 -->
+<!-- finding:R2-4@D4:normal:open:none -->
+<!-- failure-scenario:R2-4@D4 -->
+Restating the original tier after the maintainer retier
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 126 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "evekhm" "$owner_cmd" 3029 "OWNER" "User")" \
+    "$(comment_item "$ARGUS" "$argus_rev" 3030)"
+
+  local out
+  out="$(bash "$RECORDER" 126 2>&1)" || { fail "test_maintainer_retier_precedence_over_footer: recorder failed (D4, D8)"; return 1; }
+
+  grep -q "ledger-row:R2-4@D4:high:open:none" "$WRITES" || { fail "test_maintainer_retier_precedence_over_footer: maintainer retier not terminal, row left the retiered tier (D4, D8, AT-361-7)"; return 1; }
+  grep -q "ledger-row:R2-4@D4:normal" "$WRITES" && { fail "test_maintainer_retier_precedence_over_footer: discoverer footer overrode the maintainer retier (D4, D8, AT-361-7)"; return 1; }
+  grep -q "\[retiered to high by @evekhm\]" "$WRITES" || { fail "test_maintainer_retier_precedence_over_footer: retier audit note missing (D4, D8, AT-361-7)"; return 1; }
+  grep -q "\[severity updated to normal" "$WRITES" && { fail "test_maintainer_retier_precedence_over_footer: severity update audit note written over a maintainer retier (D4, D8, AT-361-7)"; return 1; }
+  echo "$out" | grep -q "finding R2-4@D4: footer severity normal ignored; retiered to high by maintainer" || { fail "test_maintainer_retier_precedence_over_footer: stdout missing retier precedence diagnostic (D4, D8, AT-361-7)"; return 1; }
+
+  pass "test_maintainer_retier_precedence_over_footer (D4, D8, AT-361-7)"
+}
+
+# AT-361-5 (D4, D8): The discovering reviewer may elevate a non-security finding to
+# security; the elevated row carries peer pending for dual-agreement.
+test_discoverer_elevation_to_security() {
+  reset_state
+  pr_fixture 127 "$H"
+  run_fixture 2030 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local prior_ledger
+  prior_ledger="$(cat <<EOF
+### Findings ledger for #127
+<!-- consensus-ledger:127 -->
+<!-- assigned:argus,atlas -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- ledger-row:R2-5@D4:normal:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+
+  comment_item "$THEMIS" "$prior_ledger" 5001 > "$FX/comment-5001.json"
+
+  local argus_rev
+  argus_rev="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2030 -->
+<!-- round:3 -->
+<!-- finding:R2-5@D4:security:open:none -->
+Escalating the recorded finding to the security tier
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 127 \
+    "$(comment_item "$THEMIS" "$prior_ledger" 5001)" \
+    "$(comment_item "$ARGUS" "$argus_rev" 3031)"
+
+  local out
+  out="$(bash "$RECORDER" 127 2>&1)" || { fail "test_discoverer_elevation_to_security: recorder failed (D4, D8)"; return 1; }
+
+  grep -q "ledger-row:R2-5@D4:security:open:pending" "$WRITES" || { fail "test_discoverer_elevation_to_security: discoverer elevation to security not recorded with peer pending (D4, D8, AT-361-5)"; return 1; }
+  grep -q "\[severity updated to security by @argus on R2-5@D4\]" "$WRITES" || { fail "test_discoverer_elevation_to_security: audit note missing for elevation to security (D4, D8, AT-361-5)"; return 1; }
+  echo "$out" | grep -q "finding R2-5@D4: severity updated from normal to security by @argus" || { fail "test_discoverer_elevation_to_security: stdout missing elevation diagnostic log (D4, D8, AT-361-5)"; return 1; }
+
+  pass "test_discoverer_elevation_to_security (D4, D8, AT-361-5)"
+}
+
+# --- Test Runner ---
+
+
 
 # ==============================================================================
 # Issue #353: Enforce Reviewer Run-ID Provenance Injection and Surface Verdict Refusals
@@ -2169,6 +2543,13 @@ TESTS=(
   test_failure_scenario_symmetric_syntax_matrix
   test_failure_scenario_demotion_attribution_and_logging
   test_failure_scenario_exemptions_preservation
+  test_discoverer_severity_downgrade_and_unblock
+  test_peer_severity_non_interference
+  test_re_encounter_high_missing_failure_scenario
+  test_security_tier_footer_downgrade_protection
+  test_late_round_funnel_elevation_cap
+  test_maintainer_retier_precedence_over_footer
+  test_discoverer_elevation_to_security
   test_post_run_id_injection_and_guards
   test_attributed_verdict_refusal_audit_notes_and_logging
   test_machine_readable_refusal_markers
