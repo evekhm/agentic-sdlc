@@ -1,0 +1,152 @@
+# Spec: Commands Single Source of Truth and Cross-Harness Compiler with Drift Gate
+
+**Issue:** #416 · **Status:** Approved (approval = merge of this PR) ·
+**Author:** athena (`evekhm-athena-app[bot]`) ·
+**Open questions:** none
+
+## What is being built
+
+This specification resolves issue #416 by establishing a single source of truth for repository slash commands (`/work`, `/idea`, `/bug`, and future commands like `/wrap`), introducing a deterministic multi-target compiler (`scripts/sync_commands.py`), generating native targets for both Claude Code (`.claude/commands/`) and Google Antigravity (`.agents/skills/`), enforcing a mechanical drift gate in continuous integration (`scripts/ci/compiler_roundtrip.sh`), and protecting command sources under the living-spec gate (`scripts/ci/spec_check.sh`).
+
+### Background and Motivation
+
+In the current codebase, slash commands are authored directly as bespoke Markdown files in the Claude-specific directory `.claude/commands/`:
+- `.claude/commands/work.md`: Invokes `scripts/ops/digest.sh` and headless `scripts/ops/work.sh` via Claude Code's pre-turn `!` shell execution.
+- `.claude/commands/idea.md`: Conversational intake prompt directing Claude to search the tracker via `scripts/ops/tracker_search.sh` and file an `intent:new` issue via `scripts/ops/intake.sh`.
+- `.claude/commands/bug.md`: Conversational intake prompt directing Claude to search the tracker and file an `intent:new` + `bug` issue.
+
+This architecture exhibits three core deficiencies:
+1. **Harness Asymmetry:** Commands exist exclusively for Claude Code. Operators and autonomous assistants running on Google Antigravity (`agy`) lack access to these operational doors, despite `agy` supporting slash-command and skill expansion via `.agents/skills/<name>/SKILL.md` (verified in `agy 1.1.25+`).
+2. **Missing Source of Truth:** Unlike personas (which are authored canonically in `personas/` and compiled to `.claude/agents/` and `.agents/agents/` via `scripts/sync_agents.py`), commands are hand-edited directly inside their target directories. There is no schema validation, frontmatter linting, or single source of truth.
+3. **No Drift Enforcement:** Target command files are not verified by CI. A developer or agent can modify or delete a command file without detection, or introduce drift between harnesses.
+
+### Proposed Architecture
+
+This specification establishes an end-to-end command compilation pipeline mirroring the persona compiler architecture:
+
+```text
+                        ┌──────────────────────────────────────────────┐
+                        │              Canonical Sources               │
+                        │             commands/<name>.md               │
+                        │ (work.md, idea.md, bug.md, [future wrap.md]) │
+                        └──────────────────────┬───────────────────────┘
+                                               │
+                                               ▼
+                               ┌───────────────────────────────┐
+                               │   scripts/sync_commands.py    │
+                               │   - Frontmatter validation    │
+                               │   - Exec vs Prompt derivation │
+                               │   - Secret sanitizer          │
+                               │   - Deterministic formatting  │
+                               │   - Target directory pruning  │
+                               └───────┬───────────────┬───────┘
+                                       │               │
+                     ┌─────────────────┘               └─────────────────┐
+                     ▼                                                   ▼
+       ┌───────────────────────────┐                       ┌───────────────────────────┐
+       │     Claude Code Target    │                       │     Antigravity Target    │
+       │ .claude/commands/<name>.md│                       │.agents/skills/<name>/SKILL│
+       │ (Byte-identical to main)  │                       │  (Native Agent Skill)     │
+       └───────────────────────────┘                       └───────────────────────────┘
+```
+
+1. **Canonical Source Directory (`commands/`):**
+   Canonical commands are stored in `commands/<name>.md`. Each source file contains a YAML frontmatter block delimited by `---` with metadata (`description`, optional `argument-hint`, optional `allowed-tools`), followed by the command body.
+2. **Dedicated Compiler Script (`scripts/sync_commands.py`):**
+   A standalone Python script compiled with standard library modules plus `pyyaml` (and `jsonschema` when available). Supports standard compiler CLI flags: default build, `--check` (dry-run drift verification), and `--root DIR --out DIR` (isolated tree compilation for tests).
+3. **Claude Code Emitter:**
+   Emits `.claude/commands/<name>.md`. To prevent regressions and satisfy byte-identity requirements, emitted files contain no generated header comments in their frontmatter, matching current `main` byte-for-byte upon migration.
+4. **Antigravity Emitter:**
+   Emits `.agents/skills/<name>/SKILL.md`. Frontmatter contains standard `name:` and `description:` along with a `# GENERATED by scripts/sync_commands.py` comment. For `exec` commands (such as `/work`), the emitter translates the `!` shell syntax into clear prompt instructions instructing Gemini/Antigravity to run the shell command via `run_command` and stream the output. For conversational intake prompts (`/idea`, `/bug`), the emitter preserves prompt instructions and argument variables.
+5. **CI Drift Gate (`scripts/ci/compiler_roundtrip.sh`):**
+   `scripts/ci/compiler_roundtrip.sh` is extended with Step 8 ("Commands compiler roundtrip and drift gate"), asserting:
+   - `python3 scripts/sync_commands.py --check` passes against committed targets.
+   - Emitted `.claude/commands/{work,idea,bug}.md` are byte-identical to `main`.
+   - Emitted `.agents/skills/{work,idea,bug}/SKILL.md` exist and match canonical sources.
+   - Determinism: two consecutive builds produce byte-identical file trees.
+   - Throwaway command compilation succeeds in temporary trees.
+   - Secret sanitizer fails closed on source files containing tokens or absolute user home paths.
+6. **Living Spec Protection (`scripts/ci/spec_check.sh`):**
+   `commands/*` is added to the list of behavior-bearing source paths in `scripts/ci/spec_check.sh`.
+
+### File Manifest
+
+```text
+commands/work.md                                  # canonical source for /work command
+commands/idea.md                                  # canonical source for /idea command
+commands/bug.md                                   # canonical source for /bug command
+scripts/sync_commands.py                          # deterministic commands compiler script
+.claude/commands/work.md                          # compiled Claude Code target (byte-identical)
+.claude/commands/idea.md                          # compiled Claude Code target (byte-identical)
+.claude/commands/bug.md                           # compiled Claude Code target (byte-identical)
+.agents/skills/work/SKILL.md                      # compiled Antigravity Agent Skill target
+.agents/skills/idea/SKILL.md                      # compiled Antigravity Agent Skill target
+.agents/skills/bug/SKILL.md                       # compiled Antigravity Agent Skill target
+scripts/ci/compiler_roundtrip.sh                  # extended with Step 8 commands roundtrip check
+scripts/ci/spec_check.sh                          # commands/* added to behavior-bearing paths
+docs/SPEC.md                                      # living spec update under commands.compiler
+AGENTS.md                                         # cross-harness slash command usage documentation
+CLAUDE.md                                         # Claude-specific slash command reference
+GEMINI.md                                         # Antigravity-specific slash command & skill reference
+scripts/ci/tests/sync_commands_test.py            # contract & unit tests for command compiler
+intent/416-commands-work-idea-bug/intent.md       # intent artifact
+intent/416-commands-work-idea-bug/spec.md         # this specification
+```
+
+## Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| D1 | **Canonical Command Sources in `commands/<name>.md` with YAML Frontmatter.** Canonical command sources live in `commands/<name>.md`. The filename stem `<name>` defines the command's canonical identifier (e.g., `work`, `idea`, `bug`). Each source file begins with a YAML frontmatter block delimited by `---` containing: mandatory `description` (non-empty string), optional `argument-hint` (string describing parameter syntax), and optional `allowed-tools` (string or list of strings). The content following the closing `---` constitutes the command body. | Markdown with YAML frontmatter is the native format for prompt templates and instructions across both harnesses. It avoids string escaping, newline manipulation, and quote indentation errors associated with embedding multi-line markdown prompts inside pure YAML files. |
+| D2 | **Zero-Regression Byte-Identical Emission on Claude Code.** When emitting `.claude/commands/<name>.md`, `scripts/sync_commands.py` formats the YAML frontmatter with `description:`, `argument-hint:` (if present), and `allowed-tools:` (if present), followed by the exact body text. The emitted `.claude/commands/<name>.md` files for `work.md`, `idea.md`, and `bug.md` MUST match their counterparts on `origin/main` at commit `4ecde8d` byte-for-byte. Specifically, NO `# GENERATED...` comment line is inserted into the Claude target frontmatter, preserving pristine compatibility with Claude Code's command parser. | Prevents silent parse failures or unintended behavior changes in Claude Code. Preserving byte-identity guarantees zero regression during migration. |
+| D3 | **Execution Mode Derivation (`exec` vs `prompt`).** The compiler automatically determines command execution mode by inspecting the first non-whitespace line of the command body: if it begins with `!` (backtick-enclosed shell invocation, e.g. `!\`scripts/ops/...\``), the command is classified as `kind: exec`; otherwise, it is classified as `kind: prompt`. No redundant `type:` or `kind:` field is required in frontmatter. | Deriving execution mode directly from body syntax respects established Claude conventions while eliminating boilerplate. |
+| D4 | **Antigravity Target Structure in `.agents/skills/<name>/SKILL.md`.** For each canonical command `commands/<name>.md`, the compiler emits an Antigravity Agent Skill target at `.agents/skills/<name>/SKILL.md`. The frontmatter is formatted strictly according to the Antigravity Agent Skills specification (`~/.gemini/config/skills/`): `name: <name>`, `description: <description>`, preceded by the provenance comment `# GENERATED by scripts/sync_commands.py — edit commands/, not this file`. | Antigravity discovery (`agy`) natively parses `.agents/skills/<name>/SKILL.md` for slash commands and skill expansion. |
+| D5 | **Antigravity Execution Semantics for `exec` Commands.** For `exec` commands (such as `/work`), Antigravity does not support pre-turn `!` shell execution. The Antigravity emitter unwraps the `!` shell expression from the canonical body and emits an imperative markdown instruction directing Gemini / Antigravity to execute the command immediately via `run_command`: `# Command: /<name>`<br>`**Usage:** /<name> <argument-hint>`<br>`When invoked, execute the following shell command immediately using run_command and report its output:`<br>````bash`<br>`<command-expression>`<br>```` | Translates Claude's harness-specific shell execution hook into Antigravity's native tool-calling paradigm without altering the underlying script execution. |
+| D6 | **Antigravity Intake Semantics for `prompt` Commands.** For `prompt` commands (such as `/idea` and `/bug`), the Antigravity emitter retains the canonical prompt instructions. In `.agents/skills/<name>/SKILL.md`, it includes a usage header specifying the command usage and explaining that `$ARGUMENTS` represents the user's raw input following the slash command. | Ensures Gemini has the full context required to execute tracker searches and invoke `scripts/ops/intake.sh`. |
+| D7 | **Dedicated Compiler Script (`scripts/sync_commands.py`).** Command compilation is implemented in a dedicated script `scripts/sync_commands.py`, separate from `scripts/sync_agents.py`. The script accepts `--check` (rebuilds in memory and diffs against disk without writing; exits 0 on match, exit 1 on drift), `--root DIR` (custom repository root), and `--out DIR` (custom output root for testing). Input files are processed in lexicographical order. Output files are formatted deterministically. | Keeps `scripts/sync_agents.py` focused exclusively on personas, model tiers, and subagents. Slash commands have different lifecycles, targets, and execution models. |
+| D8 | **Secret Leak and Path Sanitizer.** `scripts/sync_commands.py` incorporates the same secret and environment sanitizer as `scripts/sync_agents.py`. If any emitted file contains token patterns (`ghp_`, `github_pat_`, private keys) or local user home directories, compilation fails immediately with exit status 1 and writes nothing to disk. | Prevents credential leaks and non-hermetic machine path pollution in committed command targets. |
+| D9 | **Target Directory Ownership and Pruning.** The target directories `.claude/commands/` and `.agents/skills/` are fully managed by `scripts/sync_commands.py`. On standard build, any file in `.claude/commands/` or directory in `.agents/skills/` that does not correspond to an active source in `commands/` is pruned (deleted). Under `--check`, extraneous or orphaned files in target directories trigger a drift error (exit 1). | Eliminates stale, rogue, or unmanaged commands and prevents split-brain configurations. |
+| D10 | **Compiler Roundtrip and CI Gate Integration.** `scripts/ci/compiler_roundtrip.sh` is extended with Step 8 ("Commands compiler roundtrip and drift gate"), asserting: (1) `python3 scripts/sync_commands.py --check` exits 0; (2) `.claude/commands/{work,idea,bug}.md` are byte-identical to `main`; (3) `.agents/skills/{work,idea,bug}/SKILL.md` exist and match canonical sources; (4) two consecutive compiles in a temp tree produce byte-identical trees; (5) a throwaway command in a temporary tree compiles to both targets; (6) a command source containing an absolute home directory fails the sanitizer. | Guarantees mechanical enforcement of compiler determinism and drift prevention on every pull request. |
+| D11 | **Living Spec Gate Protection (`scripts/ci/spec_check.sh`).** `scripts/ci/spec_check.sh` is updated to include `commands/*` under behavior-bearing paths (`.github/workflows/*|scripts/*|personas/*|config/*|commands/*`). Any pull request altering files in `commands/` must update `docs/SPEC.md` or provide a `Spec-impact: none` marker. | Ensures all command behavior changes are tracked in the living specification per repository standards. |
+| D12 | **Scope Boundary and Phasing for `/wrap` (#85).** Issue #416 migrates only the existing merged commands: `work`, `idea`, and `bug`. Authoring and delivering `/wrap` remains strictly scoped to issue #85 (`intent/85-session-close-out/`). Once #85 is ready to implement `/wrap`, it will author `commands/wrap.md` using the compilation framework established by this issue. | Prevents circular dependencies and scope creep across parallel feature tracks. |
+| D13 | **Implementation Scope Boundary.** The implementing pull request for #416 may touch `commands/**`, `scripts/sync_commands.py`, `.claude/commands/**`, `.agents/skills/**`, `scripts/ci/compiler_roundtrip.sh`, `scripts/ci/spec_check.sh`, `scripts/ci/tests/**`, `docs/SPEC.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `intent/416-commands-work-idea-bug/**`. It may NOT modify the behavioral logic of `scripts/ops/digest.sh`, `scripts/ops/work.sh`, `scripts/ops/intake.sh`, or `scripts/ops/tracker_search.sh`. | Strictly fences implementation diff to compilation plumbing and documentation. |
+
+## Acceptance
+
+- **AT-416-1 (D1, D7)** Verify canonical command sources exist in `commands/`: `commands/work.md`, `commands/idea.md`, and `commands/bug.md`. Each file contains valid YAML frontmatter with a non-empty `description` field.
+- **AT-416-2 (D2, D7)** Run `python3 scripts/sync_commands.py`: emitted files `.claude/commands/work.md`, `.claude/commands/idea.md`, and `.claude/commands/bug.md` are byte-for-byte identical to the baseline versions on `origin/main` at commit `4ecde8d` (`git diff .claude/commands/` is empty).
+- **AT-416-3 (D4, D7)** Run `python3 scripts/sync_commands.py`: emitted files `.agents/skills/work/SKILL.md`, `.agents/skills/idea/SKILL.md`, and `.agents/skills/bug/SKILL.md` exist and carry YAML frontmatter containing `name`, `description`, and the generated comment `# GENERATED by scripts/sync_commands.py — edit commands/, not this file`.
+- **AT-416-4 (D3, D5)** In `.agents/skills/work/SKILL.md`, the body contains instructions directing execution of `scripts/ops/digest.sh $ARGUMENTS` and `HEADLESS=1 scripts/ops/work.sh $ARGUMENTS` via `run_command`.
+- **AT-416-5 (D3, D6)** In `.agents/skills/idea/SKILL.md` and `.agents/skills/bug/SKILL.md`, the body contains intake search instructions (`tracker_search.sh`) and issue creation instructions (`intake.sh`), preserving the conversational intake flow.
+- **AT-416-6 (D7, D10)** Run `python3 scripts/sync_commands.py --check`: exits 0 against the repository state. Modifying any character in `.claude/commands/work.md` causes `--check` to exit 1 with a per-file drift summary.
+- **AT-416-7 (D9, D10)** Creating an extraneous file `.claude/commands/orphan.md` causes `python3 scripts/sync_commands.py --check` to exit 1. Running `python3 scripts/sync_commands.py` prunes `.claude/commands/orphan.md`.
+- **AT-416-8 (D8, D10)** Creating a temporary command source in a temp directory containing an absolute home-directory path with an account segment causes `scripts/sync_commands.py` to refuse compilation with exit status 1.
+- **AT-416-9 (D10)** Run `bash scripts/ci/compiler_roundtrip.sh`: exits 0, with Step 8 proving command compilation determinism, byte-identity, throwaway command roundtrip, and sanitizer refusal.
+- **AT-416-10 (D11)** In `scripts/ci/spec_check.sh`, verify that modifying a file in `commands/` without modifying `docs/SPEC.md` causes `spec_check.sh` to report a spec obligation and exit 1 if no `Spec-impact: none` marker is present.
+- **AT-416-11 (D12, D13)** Verify that `scripts/ops/digest.sh`, `scripts/ops/work.sh`, `scripts/ops/intake.sh`, and `scripts/ops/tracker_search.sh` are not modified, and that no `wrap.md` file is added by this PR.
+- **AT-416-12 (D11)** Verify `docs/SPEC.md` contains an updated section under `### commands.compiler` describing canonical command sources, compilation targets, execution model derivation, and drift gate enforcement.
+
+## Concerns
+
+- **Claude Code Frontmatter Sensitivity:** Claude Code's slash-command loader parses YAML frontmatter in `.claude/commands/*.md`. Any unexpected keys or comments could cause command registration to fail. Decision D2 addresses this by preserving exact frontmatter keys (`description`, `argument-hint`, `allowed-tools`) and omitting header comments in `.claude/commands/`, guaranteeing byte-identity.
+- **Antigravity Execution Parity:** Claude Code's `!` prefix executes shell commands outside the model's inference loop. Antigravity does not support pre-turn shell triggers in Agent Skills. Decision D5 addresses this by providing explicit, unambiguous imperative prompt instructions directing Gemini to run the shell command via `run_command`, ensuring functional parity across harnesses.
+- **Secret Leakage in Prompts:** Slash command bodies could inadvertently embed user-specific paths or environment details. Decision D8 enforces mechanical secret and path sanitization matching the persona compiler.
+- **Target Pruning and Accidental Deletion:** If a user stores non-command files in `.claude/commands/`, automated pruning could delete them. Decision D9 strictly scopes pruning to files directly under `.claude/commands/*.md` and directories under `.agents/skills/*/SKILL.md`, and documents that target directories are exclusively generated.
+
+## Out of scope
+
+- Redesigning the underlying implementation or behavior of `scripts/ops/work.sh`, `digest.sh`, `intake.sh`, or `tracker_search.sh`.
+- Authoring or delivering `/wrap` (owned by issue #85).
+- Modifying persona definitions or compiler logic in `scripts/sync_agents.py`.
+- Adding interactive GUI or web interfaces for slash commands.
+
+## Operator decisions
+
+All five open questions from `intent.md` have been resolved by numbered decisions in this specification:
+1. *Canonical Source Format:* Resolved by D1. Markdown with YAML frontmatter (`commands/<name>.md`).
+2. *Antigravity Target Format:* Resolved by D4. Native Agent Skills in `.agents/skills/<name>/SKILL.md`.
+3. *Execution Model & Argument Substitution:* Resolved by D3, D5, and D6. Automatic derivation of `exec` vs `prompt` based on leading `!` syntax.
+4. *Compiler Architecture:* Resolved by D7. Dedicated standalone script `scripts/sync_commands.py` integrated into `scripts/ci/compiler_roundtrip.sh`.
+5. *Tool Permissions Mapping:* Resolved by D2, D4, and D5. `allowed-tools` preserved for Claude; translated to imperative tool usage instructions in Antigravity.
+
+Open questions: none
