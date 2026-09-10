@@ -1,6 +1,6 @@
 # Intent: Enforce Reviewer Run-ID Provenance Injection and Surface Verdict Refusals
 
-**Issue:** #353 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #353 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
