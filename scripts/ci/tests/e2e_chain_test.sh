@@ -136,6 +136,12 @@ for (( idx=0; idx<${#args[@]}; idx++ )); do
             ;;
         --limit=*)
             ;;
+        --draft=false)
+            draft_filter="false"
+            ;;
+        --draft)
+            draft_filter="true"
+            ;;
         --json)
             idx=$((idx + 1))
             json_fields="${args[$idx]:-}"
@@ -202,6 +208,11 @@ if [ "$cmd" = "issue" ] || [ "$cmd" = "pr" ] || [ "$cmd" = "search" ]; then
         for lf in "${label_filters[@]}"; do
             content="$("$REAL_JQ" --arg l "$lf" '[.[] | select(.labels | if type == "array" then any(.[]; (.name // .) == $l) else false end)]' <<<"$content")"
         done
+        if [ "${draft_filter:-}" = "false" ]; then
+            content="$("$REAL_JQ" '[.[] | select((.isDraft // false) != true)]' <<<"$content")"
+        elif [ "${draft_filter:-}" = "true" ]; then
+            content="$("$REAL_JQ" '[.[] | select((.isDraft // false) == true)]' <<<"$content")"
+        fi
         if [ -n "$json_fields" ]; then
             fields_expr="$(echo "$json_fields" | sed 's/,/, /g')"
             content="$("$REAL_JQ" -c "[.[] | {$fields_expr}]" <<<"$content")"
@@ -280,6 +291,9 @@ if [ "$cmd" = "api" ]; then
             ;;
         repos/*/issues/[0-9]*)
             n="${clean_path##*/}"
+            if [ -f "$FIXTURES/issue-$n.unreadable" ]; then
+                exit 1
+            fi
             if [ -f "$FIXTURES/issue-$n.json" ]; then
                 cat "$FIXTURES/issue-$n.json"
                 exit 0
@@ -549,7 +563,7 @@ get_range() {
 }
 
 reset_fixtures() {
-    rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable "$FIXTURES"/loop-* "$FIXTURES"/binding-*
+    rm -f "$FIXTURES"/*.json "$FIXTURES"/*.unreadable "$FIXTURES"/fail-in-progress-list "$FIXTURES"/loop-* "$FIXTURES"/binding-*
     rm -f "$WORK/.first_claim_checked" "$WORK/.first_claim_had_list_query"
     : > "$WRITES"
     : > "$INVOKES"
@@ -1278,22 +1292,23 @@ EOF
 run_at12
 
 # =============================================================================
-# AT-13 (D2, D8): Fix-round dispatch work.sh on PR authored by odyssey under status:in-review
+# AT-13 (D2, D7, D8): Fix-round dispatch work.sh on PR across rungs (Athena, Daedalus, Odyssey)
 # =============================================================================
 run_at13() {
     local name="AT-13"
     should_run "$name" || return 0
     TOTAL=$((TOTAL + 1))
-    banner "$name (D2, D8): Fix-round dispatch on PR at status:in-review"
+    banner "$name (D2, D7, D8): Fix-round dispatch on PR across rungs (Athena, Daedalus, Odyssey)"
     local work_sh="$REPO/scripts/ops/work.sh"
 
     reset_fixtures
+    # Odyssey fix-round: PR 108 (no status labels), tracking issue 107 carries status:implementing
     cat > "$FIXTURES/issue-107.json" <<'EOF'
 {
   "number": 107,
   "state": "open",
   "title": "Issue 107",
-  "labels": [{"name": "status:in-review"}],
+  "labels": [{"name": "status:implementing"}],
   "comments": []
 }
 EOF
@@ -1303,7 +1318,7 @@ EOF
   "state": "open",
   "title": "PR 108",
   "body": "Fixes #107",
-  "labels": [{"name": "status:in-review"}],
+  "labels": [],
   "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/108"},
   "comments": []
 }
@@ -1317,13 +1332,96 @@ EOF
 }
 EOF
 
-    local out="" rc=0
-    out="$(DRY_RUN=1 HEADLESS=1 bash "$work_sh" 108 --as odyssey 2>&1)" || rc=$?
-    if [ "$rc" -eq 0 ] && ! grep -q "does not own stage review" <<<"$out" \
-       && grep -q -- "--> odyssey" <<<"$out" && grep -qE "branch:.*odyssey/107-fix" <<<"$out"; then
-        pass "AT-13 (D2, D8): work.sh proceeded under fix-round resume protocol"
+    local out_ody="" rc_ody=0
+    out_ody="$(DRY_RUN=1 HEADLESS=1 bash "$work_sh" 108 --as odyssey 2>&1)" || rc_ody=$?
+    local ok_ody=0
+    if [ "$rc_ody" -eq 0 ] && ! grep -q "does not own stage review" <<<"$out_ody" \
+       && grep -q -- "--> odyssey" <<<"$out_ody" && grep -qE "branch:.*odyssey/107-fix" <<<"$out_ody"; then
+        ok_ody=1
+    fi
+
+    # Athena fix-round: PR 109 (no status labels), tracking issue 105 carries status:spec
+    cat > "$FIXTURES/issue-105.json" <<'EOF'
+{
+  "number": 105,
+  "state": "open",
+  "title": "Issue 105",
+  "labels": [{"name": "status:spec"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-109.json" <<'EOF'
+{
+  "number": 109,
+  "state": "open",
+  "title": "PR 109",
+  "body": "Fixes #105",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/109"},
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_109.json" <<'EOF'
+{
+  "head": {
+    "ref": "athena/105-spec-fix",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    local out_ath="" rc_ath=0
+    out_ath="$(DRY_RUN=1 HEADLESS=1 bash "$work_sh" 109 --as athena 2>&1)" || rc_ath=$?
+    local ok_ath=0
+    if [ "$rc_ath" -eq 0 ] && grep -q -- "--> athena" <<<"$out_ath" \
+       && grep -qE "stage:[[:space:]]*design" <<<"$out_ath" \
+       && grep -qE "branch:.*athena/105-spec-fix" <<<"$out_ath"; then
+        ok_ath=1
+    fi
+
+    # Daedalus fix-round: PR 110 (no status labels), tracking issue 106 carries status:build
+    cat > "$FIXTURES/issue-106.json" <<'EOF'
+{
+  "number": 106,
+  "state": "open",
+  "title": "Issue 106",
+  "labels": [{"name": "status:build"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-110.json" <<'EOF'
+{
+  "number": 110,
+  "state": "open",
+  "title": "PR 110",
+  "body": "Fixes #106",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/110"},
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_110.json" <<'EOF'
+{
+  "head": {
+    "ref": "daedalus/106-plan-fix",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    local out_dae="" rc_dae=0
+    out_dae="$(DRY_RUN=1 HEADLESS=1 bash "$work_sh" 110 --as daedalus 2>&1)" || rc_dae=$?
+    local ok_dae=0
+    if [ "$rc_dae" -eq 0 ] && grep -q -- "--> daedalus" <<<"$out_dae" \
+       && grep -qE "stage:[[:space:]]*build" <<<"$out_dae" \
+       && grep -qE "branch:.*daedalus/106-plan-fix" <<<"$out_dae"; then
+        ok_dae=1
+    fi
+
+    if [ "$ok_ody" -eq 1 ] && [ "$ok_ath" -eq 1 ] && [ "$ok_dae" -eq 1 ]; then
+        pass "AT-13 (D7, D8): work.sh proceeded under fix-round resume protocol for athena, daedalus, and odyssey"
     else
-        fail "AT-13 (D2, D8): work.sh did not proceed under resume protocol (rc=$rc): $out"
+        fail "AT-13 (D7, D8): work.sh fix-round resume protocol failed (ody=$ok_ody ath=$ok_ath dae=$ok_dae; ath_out='$out_ath', dae_out='$out_dae')"
     fi
 }
 run_at13
@@ -1588,12 +1686,23 @@ personas:
     max_cost_usd: 2.00
 EOF
 
+    # Tracking issue 4241 carries status:implementing; PR 4242 carries NO status label
+    cat > "$FIXTURES/issue-4241.json" <<'EOF'
+{
+  "number": 4241,
+  "state": "open",
+  "title": "Issue 4241",
+  "labels": [{"name": "status:implementing"}],
+  "comments": []
+}
+EOF
     cat > "$FIXTURES/issue-4242.json" <<'EOF'
 {
   "number": 4242,
   "state": "open",
   "title": "PR 4242",
-  "labels": [{"name": "status:in-review"}],
+  "body": "Fixes #4241",
+  "labels": [],
   "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
   "comments": [
     {
@@ -1607,6 +1716,7 @@ EOF
 {
   "head": {
     "ref": "odyssey/4241-fix",
+    "sha": "oid-4242",
     "repo": {"full_name": "evekhm/agentic-sdlc"}
   }
 }
@@ -1626,8 +1736,11 @@ EOF
     "number": 4242,
     "title": "PR 4242",
     "state": "open",
-    "labels": [{"name": "status:in-review"}],
-    "headRefName": "odyssey/4241-fix"
+    "labels": [],
+    "headRefName": "odyssey/4241-fix",
+    "headRefOid": "oid-4242",
+    "isCrossRepository": false,
+    "isDraft": false
   }
 ]
 EOF
@@ -1674,12 +1787,22 @@ EOF
     # D6 / SA-7: Non-reviewer comment containing 'review findings: blocking' must NOT trigger fix round
     reset_fixtures
     echo "true" > "$FIXTURES/loop-autonomous_merge"
+    cat > "$FIXTURES/issue-4241.json" <<'EOF'
+{
+  "number": 4241,
+  "state": "open",
+  "title": "Issue 4241",
+  "labels": [{"name": "status:implementing"}],
+  "comments": []
+}
+EOF
     cat > "$FIXTURES/issue-4242.json" <<'EOF'
 {
   "number": 4242,
   "state": "open",
   "title": "PR 4242",
-  "labels": [{"name": "status:in-review"}],
+  "body": "Fixes #4241",
+  "labels": [],
   "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
   "comments": [
     {
@@ -1687,6 +1810,15 @@ EOF
       "body": "review findings: blocking"
     }
   ]
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_4242.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/4241-fix",
+    "sha": "oid-4242",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
 }
 EOF
     cat > "$FIXTURES/comments-4242.json" <<'EOF'
@@ -1703,8 +1835,11 @@ EOF
     "number": 4242,
     "title": "PR 4242",
     "state": "open",
-    "labels": [{"name": "status:in-review"}],
-    "headRefName": "odyssey/4241-fix"
+    "labels": [],
+    "headRefName": "odyssey/4241-fix",
+    "headRefOid": "oid-4242",
+    "isCrossRepository": false,
+    "isDraft": false
   }
 ]
 EOF
@@ -1722,12 +1857,22 @@ EOF
     # Sub-case (ii): unsuffixed evekhm-argus-app login (comment 5607944803 / 5607980229)
     reset_fixtures
     echo "true" > "$FIXTURES/loop-autonomous_merge"
+    cat > "$FIXTURES/issue-4241.json" <<\EOF
+{
+  "number": 4241,
+  "state": "open",
+  "title": "Issue 4241",
+  "labels": [{"name": "status:implementing"}],
+  "comments": []
+}
+EOF
     cat > "$FIXTURES/issue-4242.json" <<\EOF
 {
   "number": 4242,
   "state": "open",
   "title": "PR 4242",
-  "labels": [{"name": "status:in-review"}],
+  "body": "Fixes #4241",
+  "labels": [],
   "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
   "comments": [
     {
@@ -1735,6 +1880,15 @@ EOF
       "body": "review findings: blocking"
     }
   ]
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_4242.json" <<\EOF
+{
+  "head": {
+    "ref": "odyssey/4241-fix",
+    "sha": "oid-4242",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
 }
 EOF
     cat > "$FIXTURES/comments-4242.json" <<\EOF
@@ -1751,8 +1905,11 @@ EOF
     "number": 4242,
     "title": "PR 4242",
     "state": "open",
-    "labels": [{"name": "status:in-review"}],
-    "headRefName": "odyssey/4241-fix"
+    "labels": [],
+    "headRefName": "odyssey/4241-fix",
+    "headRefOid": "oid-4242",
+    "isCrossRepository": false,
+    "isDraft": false
   }
 ]
 EOF
@@ -1770,12 +1927,22 @@ EOF
     # Sub-case (iii): a reviewer's later clean verdict after its own findings comment produces no launch (S-8)
     reset_fixtures
     echo "true" > "$FIXTURES/loop-autonomous_merge"
+    cat > "$FIXTURES/issue-4241.json" <<\EOF
+{
+  "number": 4241,
+  "state": "open",
+  "title": "Issue 4241",
+  "labels": [{"name": "status:implementing"}],
+  "comments": []
+}
+EOF
     cat > "$FIXTURES/issue-4242.json" <<\EOF
 {
   "number": 4242,
   "state": "open",
   "title": "PR 4242",
-  "labels": [{"name": "status:in-review"}],
+  "body": "Fixes #4241",
+  "labels": [],
   "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
   "comments": [
     {
@@ -1787,6 +1954,15 @@ EOF
       "body": "### Argus review\n<!-- review-verdict:argus:clean -->"
     }
   ]
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_4242.json" <<\EOF
+{
+  "head": {
+    "ref": "odyssey/4241-fix",
+    "sha": "oid-4242",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
 }
 EOF
     cat > "$FIXTURES/comments-4242.json" <<\EOF
@@ -1807,8 +1983,11 @@ EOF
     "number": 4242,
     "title": "PR 4242",
     "state": "open",
-    "labels": [{"name": "status:in-review"}],
-    "headRefName": "odyssey/4241-fix"
+    "labels": [],
+    "headRefName": "odyssey/4241-fix",
+    "headRefOid": "oid-4242",
+    "isCrossRepository": false,
+    "isDraft": false
   }
 ]
 EOF
@@ -1876,14 +2055,26 @@ EOF
 
     # Set up candidate work across all three queues to ensure nothing is dispatched:
     # 1. Fix-round candidate PR 4242
+    cat > "$FIXTURES/issue-4241.json" <<'EOF'
+{
+  "number": 4241,
+  "state": "open",
+  "title": "Issue 4241",
+  "labels": [{"name": "status:implementing"}],
+  "comments": []
+}
+EOF
     cat > "$FIXTURES/pr-list.json" <<'EOF'
 [
   {
     "number": 4242,
     "title": "PR 4242",
     "state": "open",
-    "labels": [{"name": "status:in-review"}],
-    "headRefName": "odyssey/4241-fix"
+    "labels": [],
+    "headRefName": "odyssey/4241-fix",
+    "headRefOid": "oid-4242",
+    "isCrossRepository": false,
+    "isDraft": false
   }
 ]
 EOF
@@ -1892,7 +2083,8 @@ EOF
   "number": 4242,
   "state": "open",
   "title": "PR 4242",
-  "labels": [{"name": "status:in-review"}],
+  "body": "Fixes #4241",
+  "labels": [],
   "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/4242"},
   "comments": [
     {
@@ -1900,6 +2092,15 @@ EOF
       "body": "review findings: blocking"
     }
   ]
+}
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_4242.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/4241-fix",
+    "sha": "oid-4242",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
 }
 EOF
     cat > "$FIXTURES/comments-4242.json" <<'EOF'
@@ -2314,6 +2515,764 @@ EOF
     fi
 }
 run_at23
+
+# =============================================================================
+# AT-24 (D2, D6): Multi-rung fix-round dispatches in poll.sh (Athena and Daedalus)
+# =============================================================================
+run_at24() {
+    local name="AT-24"
+    should_run "$name" || return 0
+    TOTAL=$((TOTAL + 1))
+    banner "$name (D2, D6): Multi-rung fix-round dispatches in poll.sh for Athena and Daedalus"
+    local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
+
+    if [ ! -f "$poll_sh" ]; then
+        fail "AT-24 (D2, D6): scripts/placement/vm-local/poll.sh does not exist"
+        return 0
+    fi
+
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+personas:
+  athena:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+  daedalus:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
+    # PR 5001 (Athena, spec fix round): targeting issue 5000 at status:spec
+    cat > "$FIXTURES/issue-5000.json" <<'EOF'
+{
+  "number": 5000,
+  "state": "open",
+  "title": "Issue 5000",
+  "labels": [{"name": "status:spec"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-5001.json" <<'EOF'
+{
+  "number": 5001,
+  "state": "open",
+  "title": "PR 5001",
+  "body": "Fixes #5000",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/5001"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-atlas-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-5001.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-atlas-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_5001.json" <<'EOF'
+{
+  "head": {
+    "ref": "athena/5000-spec",
+    "sha": "oid-5001",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    # PR 5003 (Daedalus, plan fix round): targeting issue 5002 at status:build
+    cat > "$FIXTURES/issue-5002.json" <<'EOF'
+{
+  "number": 5002,
+  "state": "open",
+  "title": "Issue 5002",
+  "labels": [{"name": "status:build"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-5003.json" <<'EOF'
+{
+  "number": 5003,
+  "state": "open",
+  "title": "PR 5003",
+  "body": "Fixes #5002",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/5003"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-5003.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_5003.json" <<'EOF'
+{
+  "head": {
+    "ref": "daedalus/5002-plan",
+    "sha": "oid-5003",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    cat > "$FIXTURES/pr-list.json" <<'EOF'
+[
+  {
+    "number": 5001,
+    "title": "PR 5001",
+    "state": "open",
+    "labels": [],
+    "headRefName": "athena/5000-spec",
+    "headRefOid": "oid-5001",
+    "isCrossRepository": false,
+    "isDraft": false
+  },
+  {
+    "number": 5003,
+    "title": "PR 5003",
+    "state": "open",
+    "labels": [],
+    "headRefName": "daedalus/5002-plan",
+    "headRefOid": "oid-5003",
+    "isCrossRepository": false,
+    "isDraft": false
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local poll_state_dir="$SANDBOX/state"
+    mkdir -p "$poll_state_dir"
+
+    local rc=0
+    (cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once >/dev/null 2>&1) || rc=$?
+
+    local has_athena=0 has_daedalus=0
+    grep -qE "^run\.sh 5001 --as athena$" "$LAUNCHES" && has_athena=1
+    grep -qE "^run\.sh 5003 --as daedalus$" "$LAUNCHES" && has_daedalus=1
+
+    if [ "$rc" -eq 0 ] && [ "$has_athena" -eq 1 ] && [ "$has_daedalus" -eq 1 ]; then
+        pass "AT-24 (D2, D6): poll.sh dispatched fix rounds for athena and daedalus"
+    else
+        fail "AT-24 (D2, D6): multi-rung fix rounds failed in poll.sh (rc=$rc athena=$has_athena daedalus=$has_daedalus launches='$(cat "$LAUNCHES" 2>/dev/null)')"
+    fi
+}
+run_at24
+
+# =============================================================================
+# AT-25 (D3): Daemon-safe subshell error handling in poll.sh
+# =============================================================================
+run_at25() {
+    local name="AT-25"
+    should_run "$name" || return 0
+    TOTAL=$((TOTAL + 1))
+    banner "$name (D3): Daemon-safe subshell error handling in poll.sh"
+    local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
+
+    if [ ! -f "$poll_sh" ]; then
+        fail "AT-25 (D3): scripts/placement/vm-local/poll.sh does not exist"
+        return 0
+    fi
+
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+personas:
+  odyssey:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
+    # PR 6001: gh read failure (issue-6001.unreadable)
+    touch "$FIXTURES/issue-6001.unreadable"
+    cat > "$FIXTURES/comments-6001.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+
+    # PR 6002: links multiple issues (Fixes #6010 Refs #6011)
+    cat > "$FIXTURES/issue-6002.json" <<'EOF'
+{
+  "number": 6002,
+  "state": "open",
+  "title": "PR 6002",
+  "body": "Fixes #6010 Refs #6011",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/6002"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-6002.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_6002.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/6010-fix",
+    "sha": "oid-6002",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    cat > "$FIXTURES/pr-list.json" <<'EOF'
+[
+  {
+    "number": 6001,
+    "title": "PR 6001",
+    "state": "open",
+    "labels": [],
+    "headRefName": "odyssey/6000-fix",
+    "headRefOid": "oid-6001",
+    "isCrossRepository": false,
+    "isDraft": false
+  },
+  {
+    "number": 6002,
+    "title": "PR 6002",
+    "state": "open",
+    "labels": [],
+    "headRefName": "odyssey/6010-fix",
+    "headRefOid": "oid-6002",
+    "isCrossRepository": false,
+    "isDraft": false
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local poll_state_dir="$SANDBOX/state"
+    mkdir -p "$poll_state_dir"
+
+    local out="" rc=0
+    out="$(cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
+
+    local has_skip_6001=0 has_skip_6002=0 zero_launches=0 zero_keys=0
+    grep -q "poll\.sh: skipping PR #6001 (could not resolve to tracking issue)" <<<"$out" && has_skip_6001=1
+    grep -q "poll\.sh: skipping PR #6002 (could not resolve to tracking issue)" <<<"$out" && has_skip_6002=1
+    [ ! -s "$LAUNCHES" ] && zero_launches=1
+    [ -z "$(find "$poll_state_dir" -name 'pr-*' 2>/dev/null)" ] && zero_keys=1
+
+    if [ "$rc" -eq 0 ] && [ "$has_skip_6001" -eq 1 ] && [ "$has_skip_6002" -eq 1 ] && [ "$zero_launches" -eq 1 ] && [ "$zero_keys" -eq 1 ]; then
+        pass "AT-25 (D3): daemon survived subshell resolution errors and skipped unresolvable PRs"
+    else
+        fail "AT-25 (D3): subshell error handling failed (rc=$rc skip1=$has_skip_6001 skip2=$has_skip_6002 launches=$zero_launches zero_keys=$zero_keys out='$out')"
+    fi
+}
+run_at25
+
+# =============================================================================
+# AT-26 (D4): Hold and blocked transient circuit breakers in poll.sh
+# =============================================================================
+run_at26() {
+    local name="AT-26"
+    should_run "$name" || return 0
+    TOTAL=$((TOTAL + 1))
+    banner "$name (D4): Hold and blocked transient circuit breakers in poll.sh"
+    local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
+
+    if [ ! -f "$poll_sh" ]; then
+        fail "AT-26 (D4): scripts/placement/vm-local/poll.sh does not exist"
+        return 0
+    fi
+
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+personas:
+  odyssey:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
+    # Case A: tracking issue carries hold
+    cat > "$FIXTURES/issue-6500.json" <<'EOF'
+{
+  "number": 6500,
+  "state": "open",
+  "title": "Issue 6500",
+  "labels": [{"name": "status:implementing"}, {"name": "hold"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-6501.json" <<'EOF'
+{
+  "number": 6501,
+  "state": "open",
+  "title": "PR 6501",
+  "body": "Fixes #6500",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/6501"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-6501.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_6501.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/6500-fix",
+    "sha": "oid-6501",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    # Case B: tracking issue carries blocked
+    cat > "$FIXTURES/issue-6510.json" <<'EOF'
+{
+  "number": 6510,
+  "state": "open",
+  "title": "Issue 6510",
+  "labels": [{"name": "status:implementing"}, {"name": "blocked"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-6511.json" <<'EOF'
+{
+  "number": 6511,
+  "state": "open",
+  "title": "PR 6511",
+  "body": "Fixes #6510",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/6511"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-6511.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_6511.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/6510-fix",
+    "sha": "oid-6511",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    # Case C: PR carries hold
+    cat > "$FIXTURES/issue-6520.json" <<'EOF'
+{
+  "number": 6520,
+  "state": "open",
+  "title": "Issue 6520",
+  "labels": [{"name": "status:implementing"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-6521.json" <<'EOF'
+{
+  "number": 6521,
+  "state": "open",
+  "title": "PR 6521",
+  "body": "Fixes #6520",
+  "labels": [{"name": "hold"}],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/6521"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-6521.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_6521.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/6520-fix",
+    "sha": "oid-6521",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    cat > "$FIXTURES/pr-list.json" <<'EOF'
+[
+  {
+    "number": 6501,
+    "title": "PR 6501",
+    "state": "open",
+    "labels": [],
+    "headRefName": "odyssey/6500-fix",
+    "headRefOid": "oid-6501",
+    "isCrossRepository": false,
+    "isDraft": false
+  },
+  {
+    "number": 6511,
+    "title": "PR 6511",
+    "state": "open",
+    "labels": [],
+    "headRefName": "odyssey/6510-fix",
+    "headRefOid": "oid-6511",
+    "isCrossRepository": false,
+    "isDraft": false
+  },
+  {
+    "number": 6521,
+    "title": "PR 6521",
+    "state": "open",
+    "labels": [{"name": "hold"}],
+    "headRefName": "odyssey/6520-fix",
+    "headRefOid": "oid-6521",
+    "isCrossRepository": false,
+    "isDraft": false
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local poll_state_dir="$SANDBOX/state"
+    mkdir -p "$poll_state_dir"
+
+    local out="" rc=0
+    out="$(cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc=$?
+
+    local zero_launches=0 zero_keys=0 zero_refuse_keys=0
+    [ ! -s "$LAUNCHES" ] && zero_launches=1
+    [ -z "$(find "$poll_state_dir" -name 'pr-*' 2>/dev/null)" ] && zero_keys=1
+    [ -z "$(find "$poll_state_dir" -name 'refuse-pr-*' 2>/dev/null)" ] && zero_refuse_keys=1
+
+    local has_hold_refusal=0 has_blocked_refusal=0 has_pr_hold_refusal=0
+    grep -qE "skipping PR #6501.*(hold)" <<<"$out" && has_hold_refusal=1
+    grep -qE "skipping PR #6511.*(blocked)" <<<"$out" && has_blocked_refusal=1
+    grep -qE "skipping PR #6521.*(hold)" <<<"$out" && has_pr_hold_refusal=1
+
+    if [ "$rc" -eq 0 ] && [ "$zero_launches" -eq 1 ] && [ "$zero_keys" -eq 1 ] \
+       && [ "$zero_refuse_keys" -eq 1 ] && [ "$has_hold_refusal" -eq 1 ] \
+       && [ "$has_blocked_refusal" -eq 1 ] && [ "$has_pr_hold_refusal" -eq 1 ]; then
+        pass "AT-26 (D4): transient circuit breakers (hold, blocked) prevented dispatch without negative caching"
+    else
+        fail "AT-26 (D4): transient circuit breaker checks failed (rc=$rc zero_launches=$zero_launches zero_keys=$zero_keys zero_refuse=$zero_refuse_keys hold=$has_hold_refusal blk=$has_blocked_refusal pr_hold=$has_pr_hold_refusal out='$out')"
+    fi
+}
+run_at26
+
+# =============================================================================
+# AT-27 (D5, D6): Terminal refusals and negative caching in poll.sh
+# =============================================================================
+run_at27() {
+    local name="AT-27"
+    should_run "$name" || return 0
+    TOTAL=$((TOTAL + 1))
+    banner "$name (D5, D6): Terminal refusals and negative caching in poll.sh"
+    local poll_sh="$REPO/scripts/placement/vm-local/poll.sh"
+
+    if [ ! -f "$poll_sh" ]; then
+        fail "AT-27 (D5, D6): scripts/placement/vm-local/poll.sh does not exist"
+        return 0
+    fi
+
+    reset_fixtures
+    echo "true" > "$FIXTURES/loop-autonomous_merge"
+    mkdir -p "$SANDBOX/config"
+    cat > "$SANDBOX/config/execution.yaml" <<'EOF'
+loop:
+  autonomous_merge: true
+  max_rung_dispatches_per_issue: 12
+  max_cost_usd_per_issue: 50.0
+personas:
+  athena:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+  odyssey:
+    trigger: ladder
+    placement: vm-local
+    max_cost_usd: 2.00
+EOF
+
+    # Case A: closed tracking issue (state != "open")
+    cat > "$FIXTURES/issue-7000.json" <<'EOF'
+{
+  "number": 7000,
+  "state": "closed",
+  "title": "Issue 7000",
+  "labels": [{"name": "status:implementing"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-7001.json" <<'EOF'
+{
+  "number": 7001,
+  "state": "open",
+  "title": "PR 7001",
+  "body": "Fixes #7000",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/7001"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-7001.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_7001.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/7000-fix",
+    "sha": "oid-7001",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    # Case B: tracking issue carries status:review-stuck
+    cat > "$FIXTURES/issue-7010.json" <<'EOF'
+{
+  "number": 7010,
+  "state": "open",
+  "title": "Issue 7010",
+  "labels": [{"name": "status:review-stuck"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-7011.json" <<'EOF'
+{
+  "number": 7011,
+  "state": "open",
+  "title": "PR 7011",
+  "body": "Fixes #7010",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/7011"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-argus-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-7011.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-argus-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_7011.json" <<'EOF'
+{
+  "head": {
+    "ref": "odyssey/7010-fix",
+    "sha": "oid-7011",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    # Case C: stage mismatch (Athena PR on issue at status:build)
+    cat > "$FIXTURES/issue-7020.json" <<'EOF'
+{
+  "number": 7020,
+  "state": "open",
+  "title": "Issue 7020",
+  "labels": [{"name": "status:build"}],
+  "comments": []
+}
+EOF
+    cat > "$FIXTURES/issue-7021.json" <<'EOF'
+{
+  "number": 7021,
+  "state": "open",
+  "title": "PR 7021",
+  "body": "Fixes #7020",
+  "labels": [],
+  "pull_request": {"url": "https://api.github.com/repos/evekhm/agentic-sdlc/pulls/7021"},
+  "comments": [
+    {
+      "user": {"login": "evekhm-atlas-app[bot]"},
+      "body": "review findings: blocking"
+    }
+  ]
+}
+EOF
+    cat > "$FIXTURES/comments-7021.json" <<'EOF'
+[
+  {
+    "user": {"login": "evekhm-atlas-app[bot]"},
+    "body": "review findings: blocking"
+  }
+]
+EOF
+    cat > "$FIXTURES/repos_evekhm_agentic-sdlc_pulls_7021.json" <<'EOF'
+{
+  "head": {
+    "ref": "athena/7020-spec",
+    "sha": "oid-7021",
+    "repo": {"full_name": "evekhm/agentic-sdlc"}
+  }
+}
+EOF
+
+    cat > "$FIXTURES/pr-list.json" <<'EOF'
+[
+  {
+    "number": 7001,
+    "title": "PR 7001",
+    "state": "open",
+    "labels": [],
+    "headRefName": "odyssey/7000-fix",
+    "headRefOid": "oid-7001",
+    "isCrossRepository": false,
+    "isDraft": false
+  },
+  {
+    "number": 7011,
+    "title": "PR 7011",
+    "state": "open",
+    "labels": [],
+    "headRefName": "odyssey/7010-fix",
+    "headRefOid": "oid-7011",
+    "isCrossRepository": false,
+    "isDraft": false
+  },
+  {
+    "number": 7021,
+    "title": "PR 7021",
+    "state": "open",
+    "labels": [],
+    "headRefName": "athena/7020-spec",
+    "headRefOid": "oid-7021",
+    "isCrossRepository": false,
+    "isDraft": false
+  }
+]
+EOF
+    echo '[]' > "$FIXTURES/issue-list.json"
+
+    cp "$poll_sh" "$SANDBOX/scripts/placement/vm-local/poll.sh"
+    chmod +x "$SANDBOX/scripts/placement/vm-local/poll.sh"
+
+    local poll_state_dir="$SANDBOX/state"
+    mkdir -p "$poll_state_dir"
+
+    # Tick 1: evaluation encounters terminal conditions and writes refusal keys
+    local out1="" rc1=0
+    out1="$(cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc1=$?
+
+    local has_refuse_key_7001=0 has_refuse_key_7011=0 has_refuse_key_7021=0
+    [ -n "$(find "$poll_state_dir" -name "refuse-pr-7001-*-oid-7001" 2>/dev/null)" ] && has_refuse_key_7001=1
+    [ -n "$(find "$poll_state_dir" -name "refuse-pr-7011-*-oid-7011" 2>/dev/null)" ] && has_refuse_key_7011=1
+    [ -n "$(find "$poll_state_dir" -name "refuse-pr-7021-*-oid-7021" 2>/dev/null)" ] && has_refuse_key_7021=1
+
+    # Tick 2: refusal keys short-circuit evaluation without reading comments or resolving issue
+    : > "$INVOKES"
+    local out2="" rc2=0
+    out2="$(cd "$SANDBOX" && POLL_STATE_DIR="$poll_state_dir" RUN_SH="$WORK/bin/run.sh" bash "scripts/placement/vm-local/poll.sh" --once 2>&1)" || rc2=$?
+
+    local zero_comments_queries=0
+    if ! grep -qE "issues/7001/comments|issues/7011/comments|issues/7021/comments" "$INVOKES"; then
+        zero_comments_queries=1
+    fi
+
+    if [ "$rc1" -eq 0 ] && [ "$rc2" -eq 0 ] \
+       && [ "$has_refuse_key_7001" -eq 1 ] && [ "$has_refuse_key_7011" -eq 1 ] && [ "$has_refuse_key_7021" -eq 1 ] \
+       && [ "$zero_comments_queries" -eq 1 ]; then
+        pass "AT-27 (D5, D6): terminal refusals cached negatively and short-circuited subsequent ticks"
+    else
+        fail "AT-27 (D5, D6): terminal refusal negative caching failed (rc1=$rc1 rc2=$rc2 key1=$has_refuse_key_7001 key2=$has_refuse_key_7011 key3=$has_refuse_key_7021 zero_q=$zero_comments_queries out1='$out1')"
+    fi
+}
+run_at27
 
 # =============================================================================
 # Summary
