@@ -8,11 +8,11 @@
 # At the build rung (Daedalus), before scripts/ci/changelog_check.sh exists,
 # running this suite reports failures (not syntax/runtime errors) and exits 1.
 # During the implement rung (Odyssey), once scripts/ci/changelog_check.sh is written,
-# all eight scenarios pass green and this suite exits 0.
+# all eleven scenarios pass green and this suite exits 0.
 
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../../.." && pwd)"
 CHANGELOG_CHECK="$REPO/scripts/ci/changelog_check.sh"
 
 WORK="$(mktemp -d)"
@@ -119,10 +119,29 @@ run_ci_check() { # <base-sha> <head-sha> <body-file>
         LAST_RC=127
         return 127
     fi
-    set +e
     LAST_OUT="$(cd "$SANDBOX" && BASE_SHA="$base" HEAD_SHA="$head" PR_BODY_FILE="$body" bash "$CHANGELOG_CHECK" 2>&1)"
     LAST_RC=$?
-    set -e
+    return "$LAST_RC"
+}
+
+run_custom_ci_check() { # <base-sha-or-unset> <head-sha-or-unset> <body-file-or-unset>
+    local base="$1" head="$2" body="$3"
+    LAST_OUT=""
+    LAST_RC=0
+    if [ ! -f "$CHANGELOG_CHECK" ]; then
+        LAST_OUT="scripts/ci/changelog_check.sh does not exist (implementation pending)"
+        LAST_RC=127
+        return 127
+    fi
+    LAST_OUT="$(
+        cd "$SANDBOX" && {
+            [ -z "$base" ] && unset BASE_SHA || export BASE_SHA="$base"
+            [ -z "$head" ] && unset HEAD_SHA || export HEAD_SHA="$head"
+            [ -z "$body" ] && unset PR_BODY_FILE || export PR_BODY_FILE="$body"
+            bash "$CHANGELOG_CHECK"
+        } 2>&1
+    )"
+    LAST_RC=$?
     return "$LAST_RC"
 }
 
@@ -136,14 +155,12 @@ run_local_check() { # <base-ref> [body-file]
         LAST_RC=127
         return 127
     fi
-    set +e
     if [ -n "$body" ]; then
         LAST_OUT="$(cd "$SANDBOX" && bash "$CHANGELOG_CHECK" "$base_ref" "$body" 2>&1)"
     else
         LAST_OUT="$(cd "$SANDBOX" && bash "$CHANGELOG_CHECK" "$base_ref" 2>&1)"
     fi
     LAST_RC=$?
-    set -e
     return "$LAST_RC"
 }
 
@@ -227,7 +244,6 @@ fi
 # --- Scenario 8: Positional CLI arguments function identically to CI env ------
 banner "Scenario 8 (D3, D11 / AT-12): Positional CLI arguments function identically to CI env"
 TOTAL=$((TOTAL + 1))
-# Run inside SANDBOX on test/missing-changelog branch against main
 git -C "$SANDBOX" checkout -q test/missing-changelog
 
 # Subcase 8a: Local positional invocation with body file containing valid marker -> exit 0
@@ -248,6 +264,39 @@ if [ "$subcase_8a_ok" -eq 1 ] && [ "$subcase_8b_ok" -eq 1 ]; then
     pass "D3, D11 / AT-12: positional CLI arguments function identically to CI environment variables"
 else
     fail "D3, D11 / AT-12: positional CLI arguments check failed (8a_ok=$subcase_8a_ok, 8b_ok=$subcase_8b_ok, out='$LAST_OUT')"
+fi
+
+# --- Scenario 9: Unset or empty required CI environment variable exits 1 ------
+banner "Scenario 9 (D3, D11 / AT-12): Unset or empty required CI environment variable exits 1"
+TOTAL=$((TOTAL + 1))
+run_custom_ci_check "" "$NON_BEHAVIOR_COMMIT" "$EMPTY_BODY" || true
+expected_s9="BASE_SHA is unset or empty"
+if [ "$LAST_RC" -eq 1 ] && [[ "$LAST_OUT" == *"$expected_s9"* ]]; then
+    pass "D3, D11 / AT-12: unset or empty required CI environment variable exits 1 with error"
+else
+    fail "D3, D11 / AT-12: unset or empty required CI environment variable failed (rc=$LAST_RC, expected 1; out='$LAST_OUT')"
+fi
+
+# --- Scenario 10: Non-existent or unreadable PR_BODY_FILE exits 1 -------------
+banner "Scenario 10 (D3, D11 / AT-12): Non-existent or unreadable PR_BODY_FILE exits 1"
+TOTAL=$((TOTAL + 1))
+run_ci_check "$BASE_COMMIT" "$NON_BEHAVIOR_COMMIT" "$WORK/nonexistent_body.txt" || true
+expected_s10="PR_BODY_FILE does not exist"
+if [ "$LAST_RC" -eq 1 ] && [[ "$LAST_OUT" == *"$expected_s10"* ]]; then
+    pass "D3, D11 / AT-12: non-existent PR_BODY_FILE exits 1 with error"
+else
+    fail "D3, D11 / AT-12: non-existent PR_BODY_FILE failed (rc=$LAST_RC, expected 1; out='$LAST_OUT')"
+fi
+
+# --- Scenario 11: Failing git diff (bad commit SHA) exits 1 -------------------
+banner "Scenario 11 (D3, D11 / AT-12): Failing git diff (bad commit SHA) exits 1"
+TOTAL=$((TOTAL + 1))
+run_ci_check "0000000000000000000000000000000000000000" "$NON_BEHAVIOR_COMMIT" "$EMPTY_BODY" || true
+expected_s11="git diff"
+if [ "$LAST_RC" -eq 1 ] && [[ "$LAST_OUT" == *"$expected_s11"* && "$LAST_OUT" == *"failed"* ]]; then
+    pass "D3, D11 / AT-12: failing git diff exits 1 with error"
+else
+    fail "D3, D11 / AT-12: failing git diff failed (rc=$LAST_RC, expected 1; out='$LAST_OUT')"
 fi
 
 # --- Test Summary -------------------------------------------------------------
