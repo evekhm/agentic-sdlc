@@ -21,6 +21,7 @@ role: >-
   debugging genuinely demands it, and say so in the PR.
 
 skills:
+  - deep-review.md
   - trusted-posting.md
   - resume-protocol.md
 

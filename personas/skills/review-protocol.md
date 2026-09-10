@@ -8,6 +8,7 @@ fixes how you apply it.
 
 ## Application rules
 
+- **Execute the verification protocol.** Follow the per-rung checklist in [REVIEW.md](../../REVIEW.md) under `## The verification protocol`.
 - **Evidence arbitrates, never identity.** A finding stands or falls
   on reproducible evidence (file:line, command output, a failing
   case), regardless of which reviewer raised it.

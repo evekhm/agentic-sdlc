@@ -5,11 +5,7 @@ reference this file; they never restate it. Where a compiled persona,
 a workflow prompt, or a posting script disagrees with this document,
 the disagreement is a bug in the derived copy.
 
-**In one line:** every PR gets one full review from both reviewers;
-after that only security and high findings block, security alone
-needs both reviewers to agree, rounds cap at three — and a human can
-merge at any time, with anything still open becoming a follow-up
-issue instead of another round.
+**In one line:** Atlas reviews every PR at every rung; Argus joins at the code gate, on trust-bearing paths, and on deep-review grants (config/execution.yaml); after that only security and high findings block, security alone needs both reviewers to agree, rounds cap at three; and a human can merge at any time, with anything still open becoming a follow-up issue instead of another round.
 
 Scope: this file is the reviewer protocol only. What binds every
 agent regardless of role is in [AGENTS.md](AGENTS.md); why the system
@@ -30,10 +26,7 @@ GitHub write directly.
 - **Atlas** (`evekhm-atlas-app[bot]`) — the independent second opinion,
   the reviewer that makes consensus mean something. Runs round 1 in
   full and afterwards only where the protocol requires it.
-- Both are **comment-only**. Neither ever approves, requests changes,
-  merges, closes, pushes, or edits a label. Authority is a
-  vocabulary: those verbs must not exist in the posting code, and
-  prompt text is not the restraint.
+- Both are **comment-only**, with exactly one exception: applying the deep-review grant label through scripts/ops/post.sh --add-label deep-review on a pull request. Neither ever approves, requests changes, merges, closes, pushes, or edits any other label. Authority is a vocabulary: those verbs must not exist in the posting code, and prompt text is not the restraint.
 - The two reviewers are **deployment-pinned to different model
   families (config fact)**. Which family backs which reviewer is not
   stated in a persona source, a prompt, or this document. A
@@ -44,6 +37,18 @@ GitHub write directly.
 - A human is the sole merge authority on every path, and the `hold`
   label halts all review automation while it is present anywhere the
   work points.
+
+## The verification protocol
+
+The per-rung verifier checklist executed across lifecycle gates:
+
+- **plan:** at plan, the intent lost nothing from the issue;
+- **design:** at design, no open question and every acceptance row runnable without a model;
+- **build:** at build, the contract tests fail at the plan's base;
+- **implement:** at implement, the gates re-run and the job log behind every green check says what the check claims.
+- **code gate additions:** Argus adds the deep checks where it is assigned (code gate, trust-bearing paths, `deep-review`, open `security` row): mutation-test the tests, re-run the gates, read the full diff.
+
+Atlas executes the checklist on every assigned PR; Argus executes the checklist plus deep checks at implement and wherever assigned.
 
 ## Design principles
 
@@ -392,16 +397,18 @@ evidence links, and the final ledger snapshot, then marks the ledger
 closed. Open `security` rows in such an issue are tagged to a human.
 Merging early loses no recorded finding.
 
-## Asking for more — the deep-review grant
+## Asking for more: the deep-review grant
 
 The funnel bounds the automatic loop; it must never bound the human.
-For a review that goes *beyond* the protocol — full depth, full tree,
-every tier, regardless of round count — the sanctioned paths are:
+For a review that goes *beyond* the protocol (full depth, full tree,
+every tier, regardless of round count), the sanctioned paths are:
 
-- a **deep-review label** applied by a repository admin, verified
-  from the label event timeline and consumed on use, so a standing
-  label cannot re-arm the loop (a grant applied by anyone else is
-  refused, not consumed);
+- a **`deep-review` label** applied by a persona App identity
+  (`daedalus`, `odyssey`, `atlas`, `argus`, `cassandra`) through
+  `scripts/ops/post.sh` under criteria DEEP-1..DEEP-7, or by a
+  repository admin, verified from the label event timeline and
+  consumed on use, with a limit of one grant per PR per rung (a second
+  grant on the same rung is refused and removed);
 - a **deep manual dispatch** of the review workflow, which needs no
   label because the dispatch *is* the explicit request;
 - an **explicit human request in the thread** (or a mention) for a
@@ -413,8 +420,8 @@ every tier, regardless of round count — the sanctioned paths are:
 
 A deep round changes **discovery scope only**. It suspends the
 round-cap demotion for that one run; it does not suspend the
-failure-scenario requirement for `high` (a quality rule, not a cost
-rule), and closure rules are unchanged — new blocking findings from a
+failure-scenario requirement for `high` (a quality rule instead of a cost
+rule), and closure rules are unchanged: new blocking findings from a
 deep round block until fixed and verified, and security still needs
 both reviewers. Depth is a paid, explicit decision; it never reopens
 the unbounded loop.

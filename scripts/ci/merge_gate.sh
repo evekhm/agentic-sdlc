@@ -83,7 +83,7 @@ fi
 [ "$AUTONOMOUS" = "true" ] || AUTONOMOUS=false
 
 # --- the pull request --------------------------------------------------------------
-if ! PR_JSON="$(gh pr view "$TARGET" --json number,state,headRefName,headRefOid,headRepository,baseRefName,body,labels,author,closingIssuesReferences)"; then
+if ! PR_JSON="$(gh pr view "$TARGET" --json number,state,headRefName,headRefOid,headRepository,baseRefName,body,labels,author,closingIssuesReferences,files)"; then
     log "cannot read pull request #$TARGET"
     exit 1
 fi
@@ -93,6 +93,22 @@ PR_STATE="$(prq '.state // "OPEN"')"
 [ "$PR_STATE" = "OPEN" ] || finish "#$PR is $PR_STATE — nothing to evaluate"
 HEAD="$(prq '.headRefOid // ""')"
 PR_LABELS="$(prq '[.labels[]?.name] | .[]')"
+
+PR_PATHS_FILE="${PR_PATHS_FILE:-}"
+GATE_TMP_PATHS=""
+if [ -z "$PR_PATHS_FILE" ]; then
+    GATE_TMP_PATHS="$(mktemp)"
+    # `gh pr view --json files` returns at most 100 entries; the pulls/files
+    # endpoint paginates, so the path axis sees every file (R2-1@D5). The view
+    # list is the fallback when the endpoint yields nothing usable.
+    gh api "repos/$R/pulls/$PR/files" --paginate 2>/dev/null \
+        | jq -r 'if type == "array" then .[].filename else empty end' > "$GATE_TMP_PATHS" 2>/dev/null || true
+    if [ ! -s "$GATE_TMP_PATHS" ]; then
+        prq '.files[]?.path // empty' > "$GATE_TMP_PATHS" 2>/dev/null || true
+    fi
+    PR_PATHS_FILE="$GATE_TMP_PATHS"
+    trap '[ -z "${GATE_TMP_PATHS:-}" ] || rm -f "$GATE_TMP_PATHS"' EXIT
+fi
 
 # --- which issue this pull request belongs to (#245) -------------------------------
 # GitHub's own closing references first, then every closing keyword and
@@ -274,6 +290,16 @@ else
     CL="$(awk -v m="$CL_MARK" '$0 == m {f = 1} f {print} /<!-- consensus-ledger-end -->/ {f = 0}' <<<"$CL_BODY")"
     ARGUS_HEAD="$(sed -nE 's/^<!-- reviewed-head:argus:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
     ATLAS_HEAD="$(sed -nE 's/^<!-- reviewed-head:atlas:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
+    ASSIGNED="$(sed -nE 's/^<!-- assigned:([a-z,]+) -->$/\1/p' <<<"$CL" | tail -1)"
+    if [ -z "$ASSIGNED" ]; then
+        # Absent-marker fallback (R3-1): resolve assigned set dynamically through execution.py --subscribers
+        sub_args=( "--subscribers" "pull_request" )
+        [ -z "$STATUS" ] || sub_args+=( "--status-label" "$STATUS" )
+        [ -z "$PR_LABELS" ] || sub_args+=( "--labels" $PR_LABELS )
+        [ -z "$PR_PATHS_FILE" ] || sub_args+=( "--paths-file" "$PR_PATHS_FILE" )
+        assigned_personas="$(python3 "$REPO_ROOT/scripts/ops/execution.py" "${sub_args[@]}" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ',' | sed 's/,$//' || true)"
+        ASSIGNED="${assigned_personas:-argus,atlas}"
+    fi
     n_cl_any="$(grep -c 'ledger-row:' <<<"$CL" || true)"
     CTUP="$(sed -nE 's/^<!-- ledger-row:([A-Za-z0-9@-]+:(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none)) -->$/\1/p' <<<"$CL")"
     n_cl_ok="$(grep -c . <<<"$CTUP" || true)"
@@ -284,14 +310,25 @@ else
         DISPUTED="$(awk -F: '$4 == "dispute" {print $1}' <<<"$CTUP")"
         PENDING_SEC="$(awk -F: '$2 == "security" && $4 == "pending" {print $1}' <<<"$CTUP")"
         AT_OPEN="$(awk -F: '$1 ~ /^AT-/ && $3 == "open" {print $1}' <<<"$CTUP")"
-        if [ -n "$ARGUS_HEAD" ]; then C[11]=1; WHY[11]="ledger carries reviewed-head:argus and the head probe read $HEAD"
-        else WHY[11]="the ledger carries no reviewed-head marker"; fi
+        if [ "$ASSIGNED" = "atlas" ]; then
+            C[11]=1; WHY[11]="atlas-only assignment skips argus requirement"
+        elif [ -n "$ARGUS_HEAD" ]; then
+            C[11]=1; WHY[11]="ledger carries reviewed-head:argus and the head probe read $HEAD"
+        else
+            WHY[11]="the ledger carries no reviewed-head marker"
+        fi
         if [ -z "$BLOCKING" ]; then C[4]=1; WHY[4]="blocking set empty"
         else WHY[4]="blocking set: $(tr '\n' ' ' <<<"$BLOCKING")"; fi
         if [ -n "$DISPUTED" ]; then WHY[5]="dispute on: $(tr '\n' ' ' <<<"$DISPUTED")"
         elif [ -n "$PENDING_SEC" ]; then WHY[5]="consensus axis pending on: $(tr '\n' ' ' <<<"$PENDING_SEC")"
         else C[5]=1; WHY[5]="consensus axis agreed, no dispute"; fi
-        if [ "$ARGUS_HEAD" != "$HEAD" ]; then
+        if [ "$ASSIGNED" = "atlas" ]; then
+            if [ "$ATLAS_HEAD" = "$HEAD" ]; then
+                C[3]=1; WHY[3]="atlas recorded at $HEAD (atlas-only assignment)"
+            else
+                WHY[3]="atlas verdict is at ${ATLAS_HEAD:-none}, head is $HEAD"
+            fi
+        elif [ "$ARGUS_HEAD" != "$HEAD" ]; then
             WHY[3]="argus verdict is at ${ARGUS_HEAD:-none}, head is $HEAD"
         elif [ "$ATLAS_HEAD" = "$HEAD" ]; then
             C[3]=1; WHY[3]="argus and atlas both recorded at $HEAD"
@@ -428,7 +465,11 @@ elif [ "$MERGE_STATE" = "CLEAN" ] || [ "$MERGE_STATE" = "UNSTABLE" ]; then
             failing = ""
             for (i = 1; i <= total; i++) {
                 n = names[i]; s = state[n]; val = (s == "" ? "PENDING" : toupper(s))
-                if (val != "SUCCESS" && val != "NEUTRAL") failing = failing " " n "=" val
+                # SKIPPED is a job whose `if` was false: the personas matrix on a
+                # `labeled` event nobody subscribes to (D2) reports one skipped
+                # check under its unexpanded name. It ran nothing and holds no
+                # verdict; the reviewer obligations live in conjuncts (3) and (4).
+                if (val != "SUCCESS" && val != "NEUTRAL" && val != "SKIPPED") failing = failing " " n "=" val
             }
             printf "%d\t%s\n", total, failing
         }' <<<"$CHECKS_TSV")"

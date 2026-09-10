@@ -1054,6 +1054,7 @@ SPEC_SECTIONS_BASELINE="$(sort <<'BASELINE'
 ### ci.gates
 ### lifecycle.labels
 ### review.policy
+### review.split
 ### ops.spend
 ### ops.dispatch
 ### ops.identity

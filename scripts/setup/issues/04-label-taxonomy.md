@@ -18,3 +18,6 @@ open question 4 is closed by PR, and the labels exist in the repo
 idempotent and re-runnable).
 
 **Depends on:** nothing — claimable any time; blocks Rung 3.
+
+### `deep-review`
+Deep-review grant (#5319E7): brings Argus into review before code gate (e.g. for design, spec, or multi-component reviews). Applied via `post.sh --add-label deep-review`.

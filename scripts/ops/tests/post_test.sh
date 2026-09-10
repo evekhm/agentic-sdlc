@@ -57,12 +57,13 @@ if [ "${1:-}" != "api" ]; then
   echo "stub gh: unexpected subcommand: $*" >&2
   exit 1
 fi
-method="GET"; path=""; body_file=""
+method="GET"; path=""; body_file=""; field_arg=""
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -X) method="$2"; shift 2 ;;
     -F) case "$2" in body=@*) body_file="${2#body=@}" ;; esac; shift 2 ;;
+    -f) field_arg="$2"; shift 2 ;;
     --jq) shift 2 ;;
     -*) shift ;;
     *) path="$1"; shift ;;
@@ -70,7 +71,11 @@ while [ "$#" -gt 0 ]; do
 done
 key="${path//\//_}"
 if [ "$method" = "POST" ]; then
-  printf '%s\t%s\n' "$path" "$(cat "$body_file")" >> "$WRITES"
+  if [ -n "$body_file" ]; then
+    printf '%s\t%s\n' "$path" "$(cat "$body_file")" >> "$WRITES"
+  else
+    printf '%s\t%s\n' "$path" "${field_arg:-}" >> "$WRITES"
+  fi
   # The real API answers a created comment with the comment, including
   # the account that wrote it — which is the only place the identity
   # behind GH_TOKEN is observable to post.sh (R1-3). STUB_POST_LOGIN
@@ -313,6 +318,31 @@ run 1 "the same token is refused for a different persona" -- 29 --as atlas --bod
 has "personas/atlas.yaml names 'evekhm-atlas-app[bot]'" \
   "R1-3: each persona is checked against its own authority.identity"
 unset STUB_POST_LOGIN
+
+banner "AT-19 / AT-20 --add-label deep-review on pull requests (#265)"
+# AT-19: non-deep-review label exits 2
+run 2 "AT-19: --add-label with non-deep-review label exits 2" -- 100 --as argus --add-label hold
+has "post.sh: --add-label accepts only deep-review on a pull request" "AT-19: refused with expected message"
+
+# AT-19: --add-label on an issue (not PR) exits 2
+reset
+issue 100 "status:spec"
+run 2 "AT-19: --add-label on an issue exits 2" -- 100 --as argus --add-label deep-review
+has "post.sh: --add-label accepts only deep-review on a pull request" "AT-19: refused on plain issue"
+
+# AT-20: --add-label deep-review on a pull request succeeds (exit 0)
+reset
+pr 100 "status:spec" "body"
+run 0 "AT-20: --add-label deep-review on PR exits 0" -- 100 --as argus --add-label deep-review
+has "labelled: #100 with deep-review as argus" "AT-20: reported labelled"
+[ "$(grep -c 'repos/test/repo/issues/100/labels' "$WRITES")" = "1" ] || fail "AT-20: label write was not recorded"
+
+# Hold check protects --add-label
+reset
+pr 100 "status:spec,hold" "body"
+run 0 "--add-label on held PR is suppressed" -- 100 --as argus --add-label deep-review
+has "held: #100 carries hold; nothing posted" "hold check prevents labelling"
+no_post "nothing was written when held"
 
 echo
 echo "post_test.sh: all scenarios passed"

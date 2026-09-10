@@ -219,13 +219,16 @@ loop_limits() { # <autonomous> <max-dispatch> <max-cost>
 # D24) since the gate reads them over GraphQL, never from `gh pr view`.
 PR_BODY='Refs #456'; PR_AUTHOR='evekhm-odyssey-app[bot]'; PR_HEADREPO="$GITHUB_REPOSITORY"
 PR_BASE='main'; PR_LABELS='[]'; PR_CLOSING='[]'; PR_HEAD="$H"; PR_STATE='OPEN'; PR_HEADREF='odyssey/456-thing'
+PR_FILES='[]'
 pr_fixture() { # <number>
   jq -nc --argjson n "$1" --arg body "$PR_BODY" --arg author "$PR_AUTHOR" --arg hr "$PR_HEADREPO" \
     --arg base "$PR_BASE" --argjson labels "$PR_LABELS" --argjson closing "$PR_CLOSING" \
     --arg head "$PR_HEAD" --arg headref "$PR_HEADREF" --arg state "$PR_STATE" \
+    --argjson files "$PR_FILES" \
     '{number: $n, state: $state, body: $body, author: {login: $author}, headRefName: $headref,
       headRefOid: $head, headRepository: {nameWithOwner: $hr}, baseRefName: $base,
-      labels: ($labels | map({name: .})), closingIssuesReferences: ($closing | map({number: .}))}' > "$FX/pr-$1.json"
+      labels: ($labels | map({name: .})), closingIssuesReferences: ($closing | map({number: .})),
+      files: ($files | map({path: .}))}' > "$FX/pr-$1.json"
 }
 issue_fixture() { # <number> [label ...]
   local n="$1"; shift
@@ -256,7 +259,7 @@ consensus_ledger() { # <pr> <argus-oid|-> <atlas-oid|-> [assigned-set] [row ...]
 loop_ledger() { # <issue> [row-text ...]   row-text = what follows "loop-ledger-row: "
   local n="$1"; shift
   local out="### Loop ledger for #$n"$'\n'$'\n'"<!-- loop-ledger:$n -->"
-  local r; for r in "$@"; do out="$out"$'\n'"- row <!-- loop-ledger-row: $r -->"; done
+  for r in "$@"; do out="$out"$'\n'"- row <!-- loop-ledger-row: $r -->"; done
   printf '%s\n%s\n' "$out" "<!-- loop-ledger-end -->"
 }
 # D24: mergeStateStatus per pull request, one value per re-read attempt
@@ -295,6 +298,7 @@ mk_green() {
   loop_limits true 12 50.00
   PR_BODY='Refs #456'; PR_AUTHOR='evekhm-odyssey-app[bot]'; PR_HEADREPO="$GITHUB_REPOSITORY"
   PR_BASE='main'; PR_LABELS='[]'; PR_CLOSING='[]'; PR_HEAD="$H"; PR_STATE='OPEN'; PR_HEADREF='odyssey/456-thing'
+  PR_FILES='[]'
   pr_fixture 123
   mergestate_fixture 123 CLEAN
   mergestate_checks 123 "${GREEN_CHECKS[@]}"
@@ -815,6 +819,17 @@ has "conjunct (2): false" "MG-32: superseded success check overridden by newer f
 has "execution — bindings=FAILURE" "MG-32: names the failing check"
 not_merged "MG-32"
 
+banner "MG-32b · D2 D3 · a SKIPPED check (personas matrix on a labeled event nobody subscribes to) passes conjunct 2"
+mk_green
+mergestate_checks 123 \
+  "$(row check merge-gate '' 999 500)" \
+  "$(row check 'execution — bindings' SUCCESS 1001 2001)" \
+  "$(row check '${{ matrix.persona }} via ${{ matrix.placement }}' SKIPPED 1003 2003)" \
+  "$(row status 'argus via gh-actions' SUCCESS '' '')"
+run "MG-32b: exits 0" 123
+has "conjunct (2): true" "MG-32b: the skipped matrix job is not a failing check (2)"
+merged "MG-32b: and the merge proceeds"
+
 banner "MG-33 · D3 · check roll-up deduplication: pending check in roll-up fails conjunct 2"
 mk_green
 mergestate_checks 123 \
@@ -1065,5 +1080,39 @@ for job_name in ["record", "gate"]:
         sys.exit(1)
 print("PASS: MG-43: deterministic target resolution verified across record and gate jobs")
 ' "$REPO" || fail "MG-43 failed"
+
+echo
+banner "MG-44 · D5 · single-reviewer Atlas consensus merges when assigned:atlas"
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" atlas)")"
+run "MG-44: exits 0" 123
+has "conjunct (3): true" "MG-44: conjunct (3) reports true for Atlas-only assignment"
+has "conjunct (11): true" "MG-44: conjunct (11) reports true for Atlas-only assignment"
+merged "MG-44: single-reviewer Atlas consensus merges"
+
+banner "MG-45 · D5 · dual-assigned PR requires Argus consensus"
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" argus,atlas)")"
+run "MG-45: exits 0" 123
+has "conjunct (3): false" "MG-45: conjunct (3) reports false when Argus missing"
+not_merged "MG-45: dual-assigned PR does not merge without Argus"
+
+banner "MG-46 · D5 · absent-marker fallback on trust-bearing path at status:spec resolves to argus,atlas"
+mk_green
+issue_fixture 456 status:spec
+PR_FILES='[".github/workflows/unattended.yml"]'
+pr_fixture 123
+# Consensus ledger with no assigned marker ("-" as assigned-set omits the assigned marker)
+# Atlas has reviewed ($H), Argus has not reviewed (-)
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" -)")"
+run "MG-46: exits 0" 123
+has "conjunct (3): false" "MG-46: fallback resolves to argus,atlas and blocks without Argus"
+has "argus verdict is at none, head is $H" "MG-46: names missing Argus verdict"
+not_merged "MG-46: dual-assigned fallback does not merge without Argus"
+# When Argus also reviews ($H), both Argus and Atlas are recorded
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" -)")"
+run "MG-46b: exits 0" 123
+has "conjunct (3): true" "MG-46b: fallback passes conjunct (3) when both Argus and Atlas have reviewed"
+has "argus and atlas both recorded at $H" "MG-46b: names both reviewers recorded"
 
 echo "merge_gate_test.sh: all scenarios passed"

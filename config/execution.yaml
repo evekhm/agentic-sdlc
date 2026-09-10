@@ -56,6 +56,21 @@ personas:
     events: [pull_request]
     placement: gh-actions
     max_cost_usd: 8.00
+    assigned_when:
+      status_labels: [status:implementing]
+      paths:
+        - .github/workflows/**
+        - scripts/auth/**
+        - scripts/ops/**
+        - scripts/ci/**
+        - scripts/sync_agents.py
+        - scripts/setup/**
+        - personas/**
+        - config/**
+        - REVIEW.md
+        - AGENTS.md
+      labels: [deep-review]
+      open_ledger_tiers: [security]
   # Same number, different enforcement path: agy takes no ceiling flag,
   # so atlas is measured against this after the fact. Atlas's own costs
   # are not in the sample above — its envelope reports .usage rather than

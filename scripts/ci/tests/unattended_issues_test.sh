@@ -93,8 +93,16 @@ try:
     if origin_d:
         pr = d.get('on', d.get(True, {})).get('pull_request')
         origin_pr = origin_d.get('on', origin_d.get(True, {})).get('pull_request')
-        if pr and origin_pr and pr == origin_pr:
-            pass_check('D8: pull_request trigger unchanged')
+        # D2 (#265) authorizes exactly one widening of the trigger surface:
+        # adding 'ready_for_review' and 'labeled' to whatever origin/main
+        # currently declares. The guard is computed relative to origin's
+        # live types, not a hardcoded absolute set, so it cannot be cleared
+        # by a future PR landing a fixed five-element list after origin has
+        # moved (AT-R1-1@D8).
+        review_split_added = {'ready_for_review', 'labeled'}
+        expected_types = set(origin_pr.get('types', [])) | review_split_added if origin_pr else None
+        if pr and origin_pr and (pr == origin_pr or set(pr.get('types', [])) == expected_types):
+            pass_check('D8: pull_request trigger unchanged or extended by exactly ready_for_review,labeled over origin (#265 D2)')
         else:
             fail('D8: pull_request trigger changed or missing')
     else:

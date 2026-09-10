@@ -131,6 +131,7 @@ ensure_label "consensus:pending" "FBCA04" "Security findings awaiting peer revie
 ensure_label "consensus:disputed" "B60205" "Active dispute on one or more blocking findings"
 ensure_label "review:merge-ready" "0E8A16" "No open blocking findings, consensus agreed, reviewed at current head"
 ensure_label "review:verifying"  "1D76DB" "Open blocking findings exist and pull request head is newer than reviewed head"
+ensure_label "deep-review" "5319E7" "Review grant: brings Argus into review before code gate"
 
 if [ "$LABELS_ONLY" -eq 1 ]; then
   echo "==> Done (--labels-only). No issue was read, filed, or pinned."

@@ -575,6 +575,38 @@ the recorder re-reads `hold` on the PR and all linked issues; probe failures fai
 non-issue references are treated as not held with a logged note, and if `hold` is present
 the recorder exits 0 without writing (#25 D13/D14, #291 D1, D2).
 
+### review.split
+Two-tier review assignment and out-of-band deep-review grants (#265, `intent/265-review-split/`).
+Reviewers are dispatched dynamically per pull request:
+- **Atlas** reviews every PR at every lifecycle rung (fast-tier by default).
+- **Argus** reviews PRs meeting any `config/execution.yaml` `assigned_when` condition:
+  1. `status_labels`: `[status:implementing]` (the code gate).
+  2. `paths`: trust-bearing files including workflow files (`.github/workflows/**`), credentials and tokens (`scripts/auth/**`), agent compiler and sync (`scripts/sync_agents.py`), setup scripts (`scripts/setup/**`), review and lifecycle policies (`REVIEW.md`, `personas/lifecycle.json`, `config/execution.yaml`), and repository governance (`AGENTS.md`).
+  3. `labels`: `[deep-review]` (the review grant).
+  4. `open_ledger_tiers`: `[security]` (open security findings awaiting peer concurrence).
+- PRs lacking a status label or with unrecognized labels fail closed to dual assignment.
+- Draft pull requests (`pull_request.draft == true`) skip review dispatch entirely.
+- Synchronize events dispatch assigned reviewers; prior to recorder #8/#9 landing, non-code PRs dispatch Atlas only while code PRs dispatch both.
+- Ready for review events re-evaluate subscriber assignment and dispatch assigned reviewers.
+
+The `deep-review` grant (#265, `personas/skills/deep-review.md`):
+- May be applied on pull requests by personas (`daedalus`, `odyssey`, `atlas`, `argus`, `cassandra`) using `scripts/ops/post.sh <pr> --as <persona> --add-label deep-review`, or by repository admins.
+- `post.sh --add-label` is strictly scoped to `deep-review` on pull requests (exits status 2 on any other label or non-PR target).
+- Criteria DEEP-1..DEEP-7 govern grant application:
+  - **DEEP-1:** Diff touches trust-bearing paths (forces Argus and lifts round-scope cap).
+  - **DEEP-2:** Diff size exceeds 400 lines outside tests/generated targets, or exceeds 12 files. Evaluated mechanically in CI via `execution.py --diff-rules`.
+  - **DEEP-3:** Irreversible or privileged operations (merging, closing, labeling, deleting, credentials, external calls).
+  - **DEEP-4:** Plan deviation or spec-changing repair.
+  - **DEEP-5:** Escalated tier or `risk: high` task.
+  - **DEEP-6:** Review iteration at `review:2` or later, or prior `security` row.
+  - **DEEP-7:** Compiler blast radius (touches sync scripts, skills, or multiple compiled targets).
+- Grants are capped at one per PR per rung. Duplicate grant requests on the same rung are refused and escalated.
+
+Consensus follows assignment (`scripts/ci/merge_gate.sh`, #265):
+- For PRs where only Atlas was assigned (`<!-- assigned:atlas -->` in consensus ledger), conjunct (3) checks Atlas clean verdict at head OID alone, and conjunct (11) is skipped (`C[11]=1`).
+- For dual-assigned PRs (`<!-- assigned:argus,atlas -->`), dual sign-off from both Argus and Atlas is required.
+- If the assigned marker is absent from the ledger, the merge gate falls back to dynamic subscriber resolution via `python3 scripts/ops/execution.py --subscribers pull_request`.
+
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
