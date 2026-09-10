@@ -201,7 +201,7 @@ Deferred to post-v1 by number: Checks 2, 6, 9, 11, 13, 14, 19.
 - **Acceptance criteria proven:** AT-6, AT-7, AT-8, AT-9
 - **Risk:** High (touches issue label state machines and mutexes; triggers DEEP-3 / DEEP-5).
 - **Description:**
-  1. **Check 7 (Decision accounting):** Output prompt inventory of material decisions for session reconciliation; verify all decisions map to an issue, PR, or explicit deferral.
+  1. **Check 7 (Decision accounting):** Output prompt inventory of material decisions for session reconciliation; verify all decisions map to an issue, PR, or explicit deferral. Report `fail` and exit 2 if unrecorded decisions remain or if `WRAP_UNACCOUNTED_DECISIONS` is supplied.
   2. **Check 8 (Claim release & auto-repair):** Scan issues claimed by this session.
      - Fallback lock path: query `$GIT_COMMON_DIR/worktrees/<name>/locked` per `scripts/ops/worktrees.sh:79`.
      - If Done/Decided/Next/Blocked handoff comment exists and `in-progress` remains: under normal execution, remove `in-progress` via GitHub REST API `DELETE repos/<repo>/issues/<n>/labels/in-progress`, print `fixed: removed in-progress from #<n>`, and proceed to exit 0. Under `DRY_RUN=1`, print `would: remove in-progress from #<n>`, report `fail: #<n> carries in-progress (dry-run)`, make zero API write calls, and exit 2.
@@ -324,4 +324,41 @@ Direct inspection of these files confirms the naming contract:
 <primary-checkout>/ops/handoffs/handoff-<seat>-<YYYY-MM-DD>[-n].txt
 ```
 where `<seat>` can contain internal hyphens, `<YYYY-MM-DD>` is the ISO calendar date, and optional suffix `-n` disambiguates multiple distinct sessions writing on the same day for that seat.
+
+---
+
+## 7. Plan Deviation (Implement Rung, 2026-09-10)
+
+Contract test failure accounting correction in `scripts/ops/tests/wrap_test.sh` under operator authorization ([comment 5624183049](https://github.com/evekhm/agentic-sdlc/issues/85#issuecomment-5624183049)):
+- The merged contract suite `scripts/ops/tests/wrap_test.sh` at head 2a6f142 incremented shell variable `FAILURES` inside `( ... )` subshell test bodies, causing the parent shell counter to remain 0 and exit 0 against a stub `wrap.sh` whose body was `exit 0` once AT-14/AT-15 passed.
+- Corrected failure accounting by recording failures to a temporary log file (`$FAIL_LOG`) created at suite startup and cleaned up on EXIT trap, with `fail()` appending `1` to `$FAIL_LOG` and the summary block computing `FAILURES=$(wc -l < "$FAIL_LOG")`. No assertion, fixture, AT body or Decision citation was changed.
+- Acceptance proven: with `WRAP_SH` pointing at a stub whose body is `exit 0`, the suite exits nonzero (exit 1) and its reported count equals its FAIL lines.
+
+Contract test directory navigation guard correction in `scripts/ops/tests/wrap_test.sh` under operator authorization ([comment 5624250817](https://github.com/evekhm/agentic-sdlc/issues/85#issuecomment-5624250817)):
+- Argus Round 3 review on PR #365 identified nineteen `cd "$PRIMARY_REPO"` sites lacking `|| exit` guards, which under `set -uo pipefail` allows a failed directory change to proceed silently in the wrong directory.
+- Added `|| exit 1` guards to all nineteen `cd "$PRIMARY_REPO"` invocation sites in `scripts/ops/tests/wrap_test.sh`. ShellCheck cleanly passes with zero warnings.
+
+Review Round 2 repair sync (`scripts/ops/wrap.sh`, `scripts/ops/tests/wrap_test.sh`, 2026-09-10):
+- **Check 8 claim release and auto-repair (R1-1, D4):** Enforced authentication on comment authors against persona-App bot identities (`-app[bot]`, `[bot]`, or `personas/*.yaml` identities). Evaluated the latest claim comment by an authenticated persona on the issue; required that this latest claim belong to the current session (`SESSION_NAME`) and that an authenticated handoff comment containing all four headers (`Done:`, `Decided:`, `Next:`, `Blocked:`) exist at or after that latest claim comment. Unauthenticated comments, peer session prefix collisions, and superseded claims are ignored and do not mutate issue labels.
+- **Check 17 credential exposure scan (R2-1, D1):** Expanded scan to cover branch commits relative to `origin/main` (`git log -p origin/main..HEAD` / `git log -p -n 10`), uncommitted diffs (`git diff --cached`, `git diff`), tracked repository files via `git grep`, and issue comment bodies. Added explicit `pass: credential scan clean` reporting on clean scans.
+- **Handoff template data population (R1-5, D13):** Populated `## Open Pull Requests`, `## Claimed Issues`, `## Worktrees`, and `## Deferred Items / Candidate Decisions` in the generated handoff artifact from actual execution state gathered by checks rather than static fallback strings.
+- **Check 7 decision accounting (R2-3, D6, D9):** Implemented candidate decision emission from session commit history and verification of unrecorded decisions. Emitted candidate decisions in handoff template.
+- **Check 18 temporary body file cleanup (R2-4, D6):** Replaced substring wildcard globs with exact delimited session token matching (`(^|[-_])"${SESSION_NAME}"(([-_](body|tmp|comment).*)|\.(tmp|md|txt)|$)`) to ensure peer sessions with prefix names (e.g. `wave-2`) are never deleted when a session (e.g. `wave`) closes out.
+- **Contract test regression suite (R2-2):** Added regression assertions to `wrap_test.sh`:
+  - AT-6: Verified `FAIL=0` gate blocks auto-repair when any close-out check fails (mutation 1), and verified `## Claimed Issues` is populated in handoff artifact.
+  - AT-7: Verified `DRY_RUN=true` case-insensitive parsing without mutations (mutation 2).
+  - AT-8: Verified anchored session regex prevents match against peer session prefix (mutation 3), verified unauthenticated comments are ignored, and verified superseding peer claims prevent auto-repair.
+  - AT-12: Verified committed credential detection on branch, verified clean run reports `pass: credential scan clean`, and verified Check 18 temp file isolation preserves peer temp files.
+
+Review Round 3 repair sync (`scripts/ops/wrap.sh`, `scripts/ops/tests/wrap_test.sh`, `docs/SPEC.md`, `.claude/commands/wrap.md`, `intent/85-session-close-out/spec.md`, 2026-09-10):
+- **Check 8 author allowlist and claim session matching (R1-1@D4, R3-4@D2):** Removed loose regex alternative in `is_valid_author`; author validation is strictly constrained to official persona App bot identities (`evekhm-*-app[bot]`) read from `personas/*.yaml` (with verified fallback list in sandbox test environments). Replaced unescaped session name regex concatenation with exact string matching on the captured session token, preventing regex metacharacter misinterpretation.
+- **Worktree hygiene and current working tree cleanliness (AT-R2-2@D1, AT-R2-3@D1):** Added current working tree dirty check to Check 4, ensuring uncommitted worktree modifications refuse close-out. Updated Check 15 to evaluate both `dirty` and `unpushed` statuses against session-owned worktrees, reporting `fail` and setting `FAIL=1` to prevent worktree prune data loss, while preserving `warn` for foreign peer worktrees.
+- **Check 18 dry-run guard (AT-R2-4@D4):** Guarded temporary file removal in Check 18 under `DRY_RUN=1`, printing `would: clean temporary body file <path>` without mutating filesystem state.
+- **Check 17 credential scan scoping (R3-2@D1, R3-3@D1):** Scoped credential scanning to session-owned artifacts (command arguments, committed diffs relative to `origin/main`, uncommitted staged/unstaged changes, and session-authored comments accumulated across all evaluated issues). Removed the whole-tree `git grep HEAD` scan that attributed pre-existing repository code to the session.
+- **Documentation sync for `WRAP_UNACCOUNTED_DECISIONS` (R3-1@D9):** Documented `WRAP_UNACCOUNTED_DECISIONS` interface in `docs/SPEC.md` (`ops.wrap`), `intent/85-session-close-out/spec.md`, `intent/85-session-close-out/plan.md`, and `.claude/commands/wrap.md`.
+- **Contract test regression suite:**
+  - AT-8 Case D (R3-5 / AT-R2-1): Verified that a handoff comment preceding the session's latest claim does not satisfy the handoff requirement.
+  - AT-10 Case B & C (AT-R2-2, AT-R2-3): Verified that dirty or unpushed session-owned worktrees fail close-out with exit 2.
+  - AT-12 Case E (AT-R2-4): Verified that `DRY_RUN=1` preserves session temporary files without deletion.
+
 

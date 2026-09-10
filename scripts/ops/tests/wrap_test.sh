@@ -70,6 +70,8 @@ TODAY="$(date -u +%Y-%m-%d)"
 PRIOR_DATE="2026-01-02"
 export TODAY PRIOR_DATE
 
+FAIL_LOG="$(mktemp "${TMPDIR:-/tmp}/wrap_test_fails.XXXXXX")"
+export FAIL_LOG
 FAILURES=0
 
 banner() { printf '\n=== %s ===\n' "$*"; }
@@ -80,7 +82,7 @@ pass() {
 
 fail() {
     echo "FAIL: $*" >&2
-    FAILURES=$((FAILURES + 1))
+    echo "1" >> "$FAIL_LOG"
 }
 
 # Count log lines matching a regex. Yields 0 for "no matches" and for a
@@ -99,6 +101,7 @@ cleanup() {
     for s in "${SANDBOXES[@]:-}"; do
         [ -n "$s" ] && [ -d "$s" ] && rm -rf "$s"
     done
+    [ -n "${FAIL_LOG:-}" ] && [ -f "$FAIL_LOG" ] && rm -f "$FAIL_LOG"
 }
 trap cleanup EXIT
 
@@ -165,7 +168,7 @@ STUB_WT
     cp "$PRIMARY_REPO/scripts/ops/worktrees.sh" "$SANDBOX_BIN/worktrees.sh"
 
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         "$REAL_GIT" add -A
         "$REAL_GIT" commit -m "initial commit" -q
         "$REAL_GIT" push -q origin main
@@ -281,8 +284,8 @@ JSON
 JSON
     cat > "$FIXTURES/issues_88_comments.json" <<'JSON'
 [
-  {"body":"Claim: odyssey (test-session), stage: implementing."},
-  {"body":"Done: seeded work\nDecided: none\nNext: review\nBlocked: none"}
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Claim: odyssey (test-session), stage: implementing."},
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Done: seeded work\nDecided: none\nNext: review\nBlocked: none"}
 ]
 JSON
     cat > "$FIXTURES/issue_88.json" <<'JSON'
@@ -312,7 +315,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         rc=0
@@ -338,7 +341,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # C2 (R1-6): the child is spawned by this subshell and wrap.sh is
@@ -370,7 +373,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Create a branch with an unpushed commit belonging to this session
@@ -395,7 +398,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Make working directory dirty with an uncommitted edit
@@ -418,7 +421,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Case A: Code defect failure on session PR #42
@@ -442,7 +445,7 @@ JSON
         if [ "$rc" -eq 0 ] && grep -qi "warn" <<<"$out"; then
             pass "AT-5 (D1): wrap.sh reports warn and exits 0 on ambient environment defect"
         else
-            fail "AT-5 (D1): wrap.sh did not warn and exit 0 on ambient environment defect (rc=$rc, out=$out)"
+        fail "AT-5 (D1): wrap.sh did not warn and exit 0 on ambient environment defect (rc=$rc, out=$out)"
         fi
     )
 fi
@@ -456,19 +459,46 @@ else
     seed_session_state
     seed_stale_in_progress
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         : > "$WRITES_LOG"
         : > "$CALLS_LOG"
         rc=0
         out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        ho_file="$(find ops/handoffs -name "handoff-*.txt" | head -1)"
+        has_claimed_in_ho=0
+        if [ -n "$ho_file" ] && grep -A 2 "## Claimed Issues" "$ho_file" 2>/dev/null | grep -q "#88"; then
+            has_claimed_in_ho=1
+        fi
+
         if [ "$rc" -eq 0 ] \
            && grep -qE "fixed: removed in-progress from #88" <<<"$out" \
-           && grep -qE "(DELETE.*labels/in-progress|label remove in-progress)" "$WRITES_LOG"; then
-            pass "AT-6 (D4): wrap.sh removes in-progress, reports fixed, and exits 0"
+           && grep -qE "(DELETE.*labels/in-progress|label remove in-progress)" "$WRITES_LOG" \
+           && [ "$has_claimed_in_ho" -eq 1 ]; then
+            pass "AT-6 (D4): wrap.sh removes in-progress, reports fixed, populates Claimed Issues in handoff, and exits 0"
         else
-            fail "AT-6 (D4): wrap.sh did not auto-repair stale in-progress label (rc=$rc, writes=$(wc -l < "$WRITES_LOG"), out=$out)"
+            fail "AT-6 (D4): wrap.sh did not auto-repair stale in-progress label or populate handoff (rc=$rc, writes=$(wc -l < "$WRITES_LOG"), ho_claimed=$has_claimed_in_ho, out=$out)"
+        fi
+    )
+
+    # Mutation test 1 (R1-1/R1-9/R2-2): auto-repair MUST NOT execute when any check fails
+    setup_sandbox
+    seed_session_state
+    seed_stale_in_progress
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        : > "$WRITES_LOG"
+        : > "$CALLS_LOG"
+        rc=0
+        # Omit WRAP_LEARNINGS so Check Learnings fails with exit 2
+        out="$(unset WRAP_LEARNINGS; "$WRAP_SH" test-session 2>&1)" || rc=$?
+        writes="$(wc -l < "$WRITES_LOG")"
+        if [ "$rc" -eq 2 ] && [ "$writes" -eq 0 ]; then
+            pass "AT-6 (D4, mutation 1): auto-repair suppressed when close-out check fails (rc=2, writes=0)"
+        else
+            fail "AT-6 (D4, mutation 1): auto-repair executed despite check failure (rc=$rc, writes=$writes, out=$out)"
         fi
     )
 fi
@@ -482,7 +512,7 @@ else
     seed_session_state
     seed_stale_in_progress
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         : > "$WRITES_LOG"
@@ -503,23 +533,48 @@ else
             fail "AT-7 (D4): wrap.sh failed DRY_RUN contract on would-fix scenario (rc=$rc, gh_calls=$gh_reads, writes=$writes, out=$out)"
         fi
     )
-fi
 
-# --- AT-8 (D1, Check 8 refusal): missing handoff comment ----------------------
-banner "AT-8 (D1, Check 8 refusal): missing handoff comment"
-if [ ! -x "$WRAP_SH" ]; then
-    fail "AT-8 (D1): $WRAP_SH does not exist or is not executable"
-else
+    # Mutation test 2 (R1-2/R2-2): DRY_RUN=true case parsing
     setup_sandbox
     seed_session_state
     seed_stale_in_progress
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        : > "$WRITES_LOG"
+        : > "$CALLS_LOG"
+        rc=0
+        out="$(DRY_RUN=true "$WRAP_SH" test-session 2>&1)" || rc=$?
+        writes="$(wc -l < "$WRITES_LOG")"
+        if [ "$rc" -eq 2 ] \
+           && grep -qE "would: remove in-progress from #88" <<<"$out" \
+           && [ "$writes" -eq 0 ]; then
+            pass "AT-7 (D4, mutation 2): DRY_RUN=true parsed correctly, zero mutations executed"
+        else
+            fail "AT-7 (D4, mutation 2): DRY_RUN=true parsing failed (rc=$rc, writes=$writes, out=$out)"
+        fi
+    )
+fi
+
+# --- AT-8 (D1, Check 8 refusal): missing handoff comment & claim isolation ----
+banner "AT-8 (D1, Check 8 refusal): missing handoff comment & claim isolation"
+if [ ! -x "$WRAP_SH" ]; then
+    fail "AT-8 (D1): $WRAP_SH does not exist or is not executable"
+else
+    # Case A: Missing handoff comment
+    setup_sandbox
+    seed_session_state
+    seed_stale_in_progress
+    (
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Issue #88 is claimed by test-session and carries no handoff comment
         cat > "$FIXTURES/issues_88_comments.json" <<'JSON'
-[{"body":"Claim: odyssey (test-session), stage: implementing."}]
+[
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Claim: odyssey (test-session), stage: implementing."}
+]
 JSON
         : > "$WRITES_LOG"
         : > "$CALLS_LOG"
@@ -535,6 +590,107 @@ JSON
             fail "AT-8 (D1): wrap.sh did not refuse with exit 2 when handoff comment was missing (rc=$rc, gh_calls=$gh_reads, writes=$writes, out=$out)"
         fi
     )
+
+    # Mutation test 3 (R1-1/R2-2): Anchored session regex prevents peer claim match
+    setup_sandbox
+    seed_session_state
+    seed_stale_in_progress
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        # Issue #88 claimed by test-session-2 (peer), not test-session
+        cat > "$FIXTURES/issues_88_comments.json" <<'JSON'
+[
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Claim: odyssey (test-session-2), stage: implementing."},
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Done: work\nDecided: none\nNext: review\nBlocked: none"}
+]
+JSON
+        : > "$WRITES_LOG"
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        writes="$(wc -l < "$WRITES_LOG")"
+        if [ "$rc" -eq 0 ] && [ "$writes" -eq 0 ] && ! grep -q "from #88" <<<"$out"; then
+            pass "AT-8 (D1, mutation 3): anchored session regex prevents match against peer session prefix (writes=0)"
+        else
+            fail "AT-8 (D1, mutation 3): peer session claim matched or mutated (rc=$rc, writes=$writes, out=$out)"
+        fi
+    )
+
+    # Case B (R1-1): Unauthenticated author / drive-by user is rejected
+    setup_sandbox
+    seed_session_state
+    seed_stale_in_progress
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/issues_88_comments.json" <<'JSON'
+[
+  {"user":{"login":"random-drive-by-user"},"body":"Claim: odyssey (test-session), stage: implementing.\nDone: work\nDecided: none\nNext: review\nBlocked: none"}
+]
+JSON
+        : > "$WRITES_LOG"
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        writes="$(wc -l < "$WRITES_LOG")"
+        if [ "$rc" -eq 0 ] && [ "$writes" -eq 0 ] && ! grep -q "from #88" <<<"$out"; then
+            pass "AT-8 (D1, R1-1): unauthenticated author comment ignored, no auto-repair triggered"
+        else
+            fail "AT-8 (D1, R1-1): unauthenticated comment triggered auto-repair (rc=$rc, writes=$writes, out=$out)"
+        fi
+    )
+
+    # Case C (R1-1): Superseding claim by peer prevents auto-repair
+    setup_sandbox
+    seed_session_state
+    seed_stale_in_progress
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/issues_88_comments.json" <<'JSON'
+[
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Claim: odyssey (test-session), stage: implementing."},
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Done: work\nDecided: none\nNext: review\nBlocked: none"},
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Claim: odyssey (test-session-2), stage: implementing."}
+]
+JSON
+        : > "$WRITES_LOG"
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        writes="$(wc -l < "$WRITES_LOG")"
+        if [ "$rc" -eq 0 ] && [ "$writes" -eq 0 ] && ! grep -q "from #88" <<<"$out"; then
+            pass "AT-8 (D1, R1-1): superseding peer claim respected, no auto-repair on re-claimed issue"
+        else
+            fail "AT-8 (D1, R1-1): auto-repair deleted label on re-claimed issue (rc=$rc, writes=$writes, out=$out)"
+        fi
+    )
+
+    # Case D (AT-R2-1, R3-5): Handoff comment prior to latest claim does not satisfy requirement
+    setup_sandbox
+    seed_session_state
+    seed_stale_in_progress
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/issues_88_comments.json" <<'JSON'
+[
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Done: work\nDecided: none\nNext: review\nBlocked: none"},
+  {"user":{"login":"evekhm-odyssey-app[bot]"},"body":"Claim: odyssey (test-session), stage: implementing."}
+]
+JSON
+        : > "$WRITES_LOG"
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        writes="$(wc -l < "$WRITES_LOG")"
+        if [ "$rc" -eq 2 ] && [ "$writes" -eq 0 ] && grep -q "fail: missing handoff comment on #88" <<<"$out"; then
+            pass "AT-8 (D1, R3-5): handoff prior to latest claim rejected, missing handoff reported (rc=$rc, writes=$writes)"
+        else
+            fail "AT-8 (D1, R3-5): handoff prior to claim incorrectly satisfied requirement (rc=$rc, writes=$writes, out=$out)"
+        fi
+    )
 fi
 
 # --- AT-9 (D1, Check 10): run artifact missing disposition --------------------
@@ -545,7 +701,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Alongside the seeded artifact that does carry a footnote, an
@@ -570,7 +726,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # worktrees.sh reports a dirty peer worktree
@@ -586,6 +742,46 @@ TXT
             fail "AT-10 (D1): wrap.sh did not warn and exit 0 on peer worktree anomaly (rc=$rc, out=$out)"
         fi
     )
+
+    # Case B (AT-R2-2): dirty session worktree fails close-out
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/worktrees.txt" <<'TXT'
+primary                 main         -  0  0 M  safe
+test-session-worktree   my-branch    -  1  0 -  dirty
+TXT
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        if [ "$rc" -eq 2 ] && grep -q "fail: session worktree test-session-worktree is dirty" <<<"$out"; then
+            pass "AT-10 (D1, AT-R2-2): dirty session worktree fails close-out with exit 2"
+        else
+            fail "AT-10 (D1, AT-R2-2): dirty session worktree did not fail close-out (rc=$rc, out=$out)"
+        fi
+    )
+
+    # Case C (AT-R2-3): unpushed session worktree fails close-out
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        cat > "$FIXTURES/worktrees.txt" <<'TXT'
+primary                 main         -  0  0 M  safe
+test-session-worktree   my-branch    -  0  1 -  unpushed
+TXT
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        if [ "$rc" -eq 2 ] && grep -q "fail: session worktree test-session-worktree is unpushed" <<<"$out"; then
+            pass "AT-10 (D1, AT-R2-3): unpushed session worktree fails close-out with exit 2"
+        else
+            fail "AT-10 (D1, AT-R2-3): unpushed session worktree did not fail close-out (rc=$rc, out=$out)"
+        fi
+    )
 fi
 
 # --- AT-11 (D5): Mandatory Learnings step verification ------------------------
@@ -597,7 +793,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         rc=0
         out="$(unset WRAP_LEARNINGS; "$WRAP_SH" test-session 2>&1)" || rc=$?
@@ -612,7 +808,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         rc=0
         out="$(WRAP_LEARNINGS="none" "$WRAP_SH" test-session 2>&1)" || rc=$?
@@ -624,26 +820,107 @@ else
     )
 fi
 
-# --- AT-12 (D1, Check 17): Credential leak detection --------------------------
-banner "AT-12 (D1, Check 17): Credential leak detection"
+# --- AT-12 (D1, Check 17 & Check 18): Credential leak detection & temp isolation
+banner "AT-12 (D1, Check 17 & Check 18): Credential leak detection & temp isolation"
 if [ ! -x "$WRAP_SH" ]; then
     fail "AT-12 (D1): $WRAP_SH does not exist or is not executable"
 else
+    # Case A: Staged credential exposure
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
-        # Introduce a credential pattern in a staged file
         tok_pfx="ghp_"; echo "${tok_pfx}123456789012345678901234567890123456" > secret.txt
         git add secret.txt
         rc=0
         out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
         if [ "$rc" -eq 2 ] && grep -q "fail: credential exposure detected" <<<"$out"; then
-            pass "AT-12 (D1): wrap.sh refuses with exit 2 when credential exposure is detected"
+            pass "AT-12 (D1): wrap.sh refuses with exit 2 when staged credential exposure is detected"
         else
-            fail "AT-12 (D1): wrap.sh did not refuse with exit 2 on credential exposure (rc=$rc, out=$out)"
+            fail "AT-12 (D1): wrap.sh did not refuse with exit 2 on staged credential exposure (rc=$rc, out=$out)"
+        fi
+    )
+
+    # Case B (R2-1): Committed credential exposure on branch
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        tok_pfx="ghp_"; echo "${tok_pfx}999999999012345678901234567890123456" > secret.txt
+        git add secret.txt
+        git commit -m "add credential commit" >/dev/null 2>&1
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        if [ "$rc" -eq 2 ] && grep -q "fail: credential exposure detected" <<<"$out"; then
+            pass "AT-12 (D1, R2-1): wrap.sh refuses with exit 2 when committed credential is on branch"
+        else
+            fail "AT-12 (D1, R2-1): wrap.sh did not detect committed credential on branch (rc=$rc, out=$out)"
+        fi
+    )
+
+    # Case C (R2-1): Clean run reports pass: credential scan clean
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        if [ "$rc" -eq 0 ] && grep -q "pass: credential scan clean" <<<"$out"; then
+            pass "AT-12 (D1, R2-1): wrap.sh reports pass: credential scan clean on clean scan"
+        else
+            fail "AT-12 (D1, R2-1): wrap.sh missing pass: credential scan clean (rc=$rc, out=$out)"
+        fi
+    )
+
+    # Case D (R2-4): Check 18 temp file cleanup isolates session and preserves peer files
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        peer_f1="/tmp/argus-review-test-session-2-body.md"
+        peer_f2="/tmp/test-session-2-body.tmp"
+        my_f="/tmp/test-session-body.tmp"
+        touch "$peer_f1" "$peer_f2" "$my_f"
+        rc=0
+        out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
+        my_cleaned=0
+        peer_preserved=0
+        [ ! -f "$my_f" ] && my_cleaned=1
+        [ -f "$peer_f1" ] && [ -f "$peer_f2" ] && peer_preserved=1
+        rm -f "$peer_f1" "$peer_f2" "$my_f" 2>/dev/null || true
+        if [ "$rc" -eq 0 ] && [ "$my_cleaned" -eq 1 ] && [ "$peer_preserved" -eq 1 ]; then
+            pass "AT-12 (D6, R2-4): Check 18 cleans session temp files while preserving peer session temp files"
+        else
+            fail "AT-12 (D6, R2-4): Check 18 failed isolation (rc=$rc, my_cleaned=$my_cleaned, peer_preserved=$peer_preserved)"
+        fi
+    )
+
+    # Case E (AT-R2-4): DRY_RUN=1 preserves session temp files without deletion
+    setup_sandbox
+    seed_session_state
+    (
+        cd "$PRIMARY_REPO" || exit 1
+        export PATH="$SANDBOX_BIN:$PATH"
+        export WRAP_LEARNINGS="none"
+        dry_f="/tmp/test-session-body.tmp"
+        touch "$dry_f"
+        rc=0
+        out="$(DRY_RUN=1 "$WRAP_SH" test-session 2>&1)" || rc=$?
+        preserved=0
+        [ -f "$dry_f" ] && preserved=1
+        rm -f "$dry_f" 2>/dev/null || true
+        if [ "$preserved" -eq 1 ] && grep -q "would: clean temporary body file" <<<"$out"; then
+            pass "AT-12 (D4, AT-R2-4): DRY_RUN=1 preserves session temp files and reports would-clean"
+        else
+            fail "AT-12 (D4, AT-R2-4): DRY_RUN=1 did not preserve session temp files (preserved=$preserved, out=$out)"
         fi
     )
 fi
@@ -656,7 +933,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Case A: Missing required session argument
@@ -768,7 +1045,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         # C3: my-seat is an established seat in this sandbox, evidenced by a
         # prior-day handoff, so the supplied seat token resolves by exact match.
@@ -808,7 +1085,7 @@ else
     # C1: the only test that keeps the pristine sandbox. No seed_session_state.
     setup_sandbox
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         rc=0
@@ -832,7 +1109,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         echo "prior snapshot" > "ops/handoffs/handoff-my-seat-${PRIOR_DATE}.txt"
         : > "$CALLS_LOG"
@@ -865,7 +1142,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
 
@@ -952,6 +1229,8 @@ fi
 
 # --- Summary ------------------------------------------------------------------
 banner "Wrap Contract Test Summary"
+FAILURES=$(wc -l < "$FAIL_LOG" 2>/dev/null | tr -d ' ')
+FAILURES="${FAILURES:-0}"
 if [ "$FAILURES" -gt 0 ]; then
     echo "Total contract test failures: $FAILURES (EXPECTED RED at build rung)" >&2
     exit 1

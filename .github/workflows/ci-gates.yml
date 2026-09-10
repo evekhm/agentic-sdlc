@@ -116,6 +116,8 @@ jobs:
           bash scripts/ops/tests/review_split_contract_test.sh
           bash scripts/ci/tests/review_split_gate_contract_test.sh
 
+      - name: Wrap contract tests
+        run: bash scripts/ops/tests/wrap_test.sh
       - name: Harness contract tests
         run: bash scripts/ops/tests/harness_test.sh
 
