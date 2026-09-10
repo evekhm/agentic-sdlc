@@ -710,3 +710,22 @@ autonomous merges fired today under the merge actor
 went live as the systemd user unit `poll.service`, and its first
 self-directed launch claimed #308. One ledger defect, #331, forced a
 by-hand merge of PR #327, the poller's own implementation PR.
+
+Status snapshot (2026-09-10, ~05:20 UTC, main at `1f57021`): the
+operator reset the scope to four capabilities, YOLO end to end, wrap
+and handoff on both harnesses, one statusline on both harnesses, and
+seat personas that start on Antigravity, plus the rule that every
+persona the loop names lives in `personas/` (`nestor` is missing).
+[CRITICAL_PATH.md](CRITICAL_PATH.md) revision ten is rewritten around
+those gates. Twelve autonomous merges landed on 2026-09-09; the
+intent-stage PRs #342, #343 and #344 still merged by hand because
+#321's fix (PR #350) is in its first fix round. Two lessons from the
+day. First, an advisor ruling posted on an issue thread is advisory
+to the runner reviewers: PR #352 merged the #330 spec with none of the
+ruling applied, both reviewers clean, so a ruling that must land has
+to become blocking review rows or a checklist the reviewers hold. An
+amendment round now follows. Second, any comment on a PR re-runs the
+gate, and the recorder replays every old dispute row (#331), so a
+hand-cleared escalation returns within a minute of the next comment;
+clear, push, and stay silent until the reviews land. PR #319 lost two
+clears to this before the third stuck.
