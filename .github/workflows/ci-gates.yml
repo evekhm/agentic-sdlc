@@ -118,6 +118,8 @@ jobs:
 
       - name: Wrap contract tests
         run: bash scripts/ops/tests/wrap_test.sh
+      - name: Harness contract tests
+        run: bash scripts/ops/tests/harness_test.sh
 
   spec-check:
     name: spec-check — docs/SPEC.md obligation

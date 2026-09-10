@@ -880,11 +880,18 @@ if a valid terminal `WORK-RESULT:` line is observed; if no valid
 `WORK-RESULT:` line is present, or if status is SUCCESS with no
 `WORK-RESULT:` line, `work.sh` fails closed with exit 1. The `/work` door is a hand-authored
 `.claude/commands/work.md` whose body is exactly
-`` !`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
+`` !`scripts/ops/digest.sh $ARGUMENTS; echo "---"; HEADLESS=1
+scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
 $?]"` ``, in the `` !`…` `` form that runs it rather than describing
 it, with `allowed-tools` widened to match the mode-prefixed line so it
 runs without a prompt: a command body is otherwise injected as a prompt
-and whether the script runs at all is the model's discretion. The door
+and whether the script runs at all is the model's discretion.
+`scripts/ops/digest.sh <issue-or-pr-number>` runs first (#407): it is
+read-only and fail-open, so it never blocks or changes the dispatch
+that follows, and on any lookup failure it degrades to an
+`(unavailable)`-style line per field rather than aborting. It prints
+the number's title and state, its labels, any open pull request
+referencing it, and the most recent comment. The door
 names the mode because its body runs in the harness's own non-TTY bash
 before the turn, where the interactive row cannot start; the trailing
 `echo` makes the body exit 0 whatever the script returned, so a
@@ -896,7 +903,8 @@ session's working directory and a session sitting in a worktree gets
 that worktree's copy; an operator who wants their terminal to *be* the
 session runs `scripts/ops/work.sh <n>` from a terminal, which is not a
 thing a slash command can be.
-Tests: `scripts/ops/tests/work_test.sh` and
+Tests: `scripts/ops/tests/work_test.sh`,
+`scripts/ops/tests/digest_test.sh`, and
 `scripts/ops/tests/smoke_launch_test.sh` against stubs, and
 `scripts/ops/smoke_launch.sh <scratch-issue>` for one real launch per
 harness present in `config/deployments.yaml` — three named observables
@@ -944,6 +952,54 @@ has since overwritten is not evidence — and a re-read that could not be
 performed after three attempts is reported as a failed read rather than
 as a moved ref, so a transient API error is not misreported as an
 overwrite.
+
+### ops.intake
+`scripts/ops/intake.sh --kind idea|bug --title <title> --body-file
+<file> [--file]` is the shared mechanics behind the `/idea` and `/bug`
+command doors (#407). It owns no search logic of its own: it delegates
+both of `tracker_search.sh`'s passes as given — the file-scoped pass
+over `--body-file`'s own path, and the keyword pass over `--terms`
+taken from the title's words split on whitespace. The body-file path
+is never a tracked path in the repository, so the file-scoped pass
+reports "none" for every fresh intake by construction; this is a
+deliberate simplification, not a bug, and the keyword pass over the
+title's words is where a real prior-art match is expected to surface.
+The search always runs, `--file` or not, so a caller that re-invokes
+with `--file` after already reading a clear search gets it re-checked
+for free, and a caller that races and finds a new match on the
+`--file` call is refused just as it would be on the search-only call.
+A bad `--kind` (anything but `idea` or `bug`), or a missing or
+unreadable `--title` or `--body-file`, exits 1. A search that finds no
+matches exits 0 without `--file`, having printed what it searched; a
+search that finds matches exits 2, printing them and filing nothing,
+whether or not `--file` was given. Only a clear search combined with
+`--file` runs `gh issue create --title <title> --body-file <file>
+--label intent:new`, with `--label bug` added for `--kind bug`.
+
+`.claude/commands/idea.md` and `.claude/commands/bug.md` are the two
+Claude Code doors onto `intake.sh` (#407). Unlike `/work`'s pure
+`` !`…` `` run-block (`ops.dispatch`), each is a prompt-form command
+body, because drafting an issue's title and body and judging
+duplicate-versus-new from `tracker_search.sh`'s matches needs the
+session's own judgment, where dispatching an already-resolved persona
+does not. Each treats any `Given design:`, `Given spec:`, or `Given
+code:` section in its input as authoritative and verbatim: never
+re-derived, never re-questioned; only a genuine gap those sections
+leave uncovered earns a clarifying question, and `/bug` additionally
+requires reproduction steps, expected behavior, actual behavior, and
+evidence before it drafts anything, asking for exactly the missing
+piece(s) in one question when a Given section does not already supply
+them. Both first call `intake.sh` without `--file` against a
+placeholder body to run the search alone. On a match (exit 2), the
+session reads the matches, including their comment threads (AGENTS.md,
+"Before filing an issue," step 4), and either extends the existing
+thread or files a new issue naming its relationship to the match
+explicitly (absorbs/refines/depends on/supersedes) — never a silent
+duplicate. On clear (exit 0), the session composes the real body and
+calls `intake.sh --kind idea|bug --title <title> --body-file <file>
+--file` once, which files the issue and, for `--kind bug`, applies
+both the `intent:new` and `bug` labels in that one call.
+Tests: `scripts/ops/tests/intake_test.sh`.
 
 ### ops.identity
 A dispatched session runs as its own persona, never as the operator
@@ -1299,6 +1355,42 @@ acquires a per-PR lock (`${poll_state_dir}/poll-pr-<pr>.lock`), and dispatches
 branch author and issue stage, preserving the PR's exact branch slug `<author>/<n>-<slug>`.
 If VM credentials for a persona are missing during preflight, the poller logs a notice and skips
 that persona's rows without failing or terminating (D4).
+
+## Harness Instrumentation & Context Observability
+
+### harness.statusline
+
+The statusline command (`scripts/ops/harness/statusline.sh`, #330) renders context consumption, session spend, token accumulation, cache health, and model metadata across both Claude Code and Antigravity harnesses.
+- **Context ceiling:** Evaluates used input tokens against an absolute working ceiling (`AGENTIC_CONTEXT_CEILING` / `CLAUDE_CONTEXT_CEILING`, default 200,000 tokens) rather than the model's 1M context window size.
+- **Wrap thresholds:** Emits graduated visual warning tags in terminal chrome:
+  - `>= 60%` (120K tokens): yellow `wrap soon` indicating runway to reach a clean stopping point.
+  - `>= 70%` (140K tokens): red `WRAP NOW` marking the practical limit for handoff capture before compaction.
+  - `>= 90%` (180K tokens): red `COMPACTING` indicating backstop territory where conversational state is at risk.
+- **Cost omission:** When a payload carries no cost (e.g. internal quota accounts with `.cost = null`), the `$` segment is completely omitted, rendering token metrics without fabricated costs. Explicit zero costs render as `$0.00`.
+- **Token accumulator:** Displays session running sums `tok <in> in/<out> out/<tot> tot` with `<tot> = <in> + <out>`. On Claude Code, advances only when `prompt_cache.requests` changes; on Antigravity, tracks running output tokens directly.
+- **Cache health:** Displays cache hit ratio, `cold` indicator if warm is false, TTL if present, and cache write tokens (`cw <n>`) when reported.
+
+### harness.sidechannel
+
+Because harness hook events receive no token counts directly, `statusline.sh` writes an atomic side-channel state file to `$CTX_DIR/<session_id>.json` (default `~/.claude/context/<session_id>.json`, fallback `/tmp/agentic-context/`):
+- Includes `session_id`, `used_tokens`, `output_tokens`, `total_tokens`, `accum_input_tokens`, `accum_output_tokens`, `accum_total_tokens`, `ceiling`, `pct`, `window_size`, `cost_usd`, `duration_ms`, `seat`, `cache` breakdown (`hit_pct`, `warm`, `ttl`, `write_tokens`, `requests`, `misses`), and reserved snapshot fields `pre_compact_mechanical_ts: null` and `pre_compact_narrative_ts: null`.
+- Written atomically via temporary PID dotfiles (`.$sid.$$`) and `mv -f` so external readers never encounter partial writes.
+- Payloads with empty session and conversation IDs exit cleanly with code 0 and produce no side-channel file.
+
+### harness.priming
+
+The `SessionStart` hook (`scripts/ops/harness/session-start.sh`) primes new harness sessions with handoff state:
+- When `$AGENTIC_SEAT` or `$CLAUDE_SEAT` is set, injects the newest handoff for that seat into session context.
+- If the handoff file exceeds `$AGENTIC_HANDOFF_MAX_BYTES` (default 60,000 bytes), injection is gated and emits a warning pointer instead (`too large to inject`).
+- When seat is unset, emits a one-line operator pointer without injecting handoff text, preventing generic sessions from unintentionally inheriting seat-specific state.
+- Housekeeping: prunes context files older than 7 days from `$CTX_DIR` on session start.
+
+### harness.resolver
+
+Handoff and prompt resolution (`scripts/ops/harness/newest-handoff.sh` and `newest-dated.sh`) provide unified state resolution:
+- `newest-dated.sh` extracts `YYYY-MM-DD[-n]` suffixes, sorting unsuffixed files as `-001` to correct ASCII `-` vs `.` sort ordering.
+- `newest-handoff.sh` resolves the primary checkout via `git rev-parse --path-format=absolute --git-common-dir`, ensuring linked worktrees locate shared state in `ops/handoffs/`. Supports `--seats` and `--last` queries.
+- `install.sh` provides idempotent dual-harness registration with `--check` drift verification and `--uninstall` cleanup. Project settings in `<repo>/.claude/settings.json` use `${CLAUDE_PROJECT_DIR}` for worktree portability.
 
 ## Agreed, not yet built
 

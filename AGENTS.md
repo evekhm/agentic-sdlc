@@ -493,9 +493,14 @@ conversation lean.
 - **200K is the working ceiling for any single context** — main
   session or subagent, on every harness. Crossing it either re-prices
   the whole request at a long-context premium (both vendors) or
-  degrades quality, usually both. When a session approaches the
-  ceiling, compact or hand off to a fresh session; the harness file
-  states the exact mechanics and pricing for its vendor.
+  degrades quality, usually both. Statusline instrumentation
+  (`scripts/ops/harness/statusline.sh`, #330) tracks this against
+  `AGENTIC_CONTEXT_CEILING` (default 200,000) and displays visual warning tags:
+  yellow `wrap soon` at 60% (120K), red `WRAP NOW` at 70% (140K), and red
+  `COMPACTING` at 90% (180K). Side-channel state is written to
+  `$AGENTIC_CTX_DIR/<session_id>.json` for external observers and hooks.
+  When a session approaches the ceiling, compact or hand off to a fresh session;
+  the harness file states the exact mechanics and pricing for its vendor.
 - One session per phase. When work shifts phase (design →
   implementation, implementation → review) or scope changes
   materially, say so and recommend ending the session and starting

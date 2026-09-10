@@ -198,7 +198,7 @@ ctx <used>K/<ceiling>K <pct>%[ <TAG>]  [$<cost>]  tok <in> in/<out> out/<tot> to
 | **D14** | AT-5 | P2 | T6 | Atomic write mechanics with `.sid.$$` temporary file rename |
 | **D15** | AT-5 | P2 | T6 | Fallback write location `/tmp/agentic-context/` on write refusal |
 | **D16** | AT-13 | P8 | T7 | Cross-harness configuration drift check |
-| **D17** | AT-1, AT-2, AT-3, AT-20, AT-21 | P7 | T1, T6 | Byte-for-byte fixture verification across all 5 live recorded payloads |
+| **D17** | AT-1, AT-2, AT-3, AT-20, AT-21 | P7 | T1, T6 | Byte-for-byte fixture verification against test suite fixture payloads |
 
 ---
 
@@ -219,3 +219,29 @@ Odyssey must:
    python3 scripts/ops/execution.py --check
    ```
 5. Apply `deep-review` label via `scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review` (Criteria DEEP-1, DEEP-3, DEEP-5).
+
+---
+
+## 7. Plan Sync & Implementation Results
+
+- **Task 1 (Daedalus):** Contract test suite `scripts/ops/tests/harness_test.sh` created with 21 contract tests and 5 fixtures (verified RED at build).
+- **Task 2 (Odyssey):** Updated `.gitignore` to allow tracking `.claude/settings.json` and anchored `ops/` to `/ops/` so that nested paths like `scripts/ops/` remain trackable. Documented `scripts/ops/harness/` tools in `scripts/README.md` per repository conventions.
+- **Task 3 (Odyssey):** Implemented `scripts/ops/harness/newest-dated.sh` with date and `-n` suffix sorting (`-001` unsuffixed).
+- **Task 4 (Odyssey):** Implemented `scripts/ops/harness/newest-handoff.sh` with `git-common-dir` primary checkout resolution and `--seats`/`--last` queries.
+- **Task 5 (Odyssey):** Implemented `scripts/ops/harness/session-start.sh` with seated handoff injection, 60KB gate, unseated operator pointer, and 7-day context prune.
+- **Task 6 (Odyssey):** Implemented `scripts/ops/harness/statusline.sh` covering display contract, wrap thresholds (60/70/90%), absent cost omission, dual-harness token accumulator, and atomic side-channel JSON writing.
+- **Task 7 (Odyssey):** Implemented `scripts/ops/harness/install.sh` (`--check`, `--uninstall`, drift verification) and tracked project settings `<repo>/.claude/settings.json` using `${CLAUDE_PROJECT_DIR}`.
+- **Task 8 (Odyssey):** Wired `harness_test.sh` into `.github/workflows/ci-gates.yml` under `execution`.
+- **Task 9 (Odyssey):** Updated `intent/330-statusline-instrumentation/spec.md` AT-2 description and documented AT-15..AT-21.
+- **Task 10 (Odyssey):** Upserted living system spec in `docs/SPEC.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `scripts/README.md`.
+- **Verification:** All 21 contract tests pass (21/21 GREEN). All local CI gates pass.
+
+### Fix Round 1 (Odyssey)
+- **R1-1 (high):** Fixed `scripts/ops/harness/newest-dated.sh` octal evaluation bug for zero-padded numeric suffixes (`-08`, `-09`) by forcing base-10 arithmetic expansion (`$(( 10#... ))`).
+- **R1-4 (normal):** In `scripts/ops/harness/statusline.sh`, safely generated side-channel JSON via `jq -n --arg` to prevent unescaped string interpolation and rejected session IDs containing `/` to prevent path traversal.
+- **R1-5 (normal):** In `scripts/ops/harness/session-start.sh`, expanded 7-day prune pattern to include orphaned temporary dotfiles (`.*.[0-9]*`).
+- **R1-6 (normal):** Synchronized `.gitignore` `/ops/` root anchoring and `scripts/README.md` documentation in plan sync above.
+- **R1-10 (suggestion):** Corrected 'list spend' to 'list-rate spend' in `CLAUDE.md` and noted Claude-specific cache write tokens `cw <n>`.
+- **AT-R1-1 & AT-R1-2 (normal):** Aligned Antigravity cache denominator across `spec.md`, `GEMINI.md`, and `statusline.sh`, and documented context path directory overrides and fallback in `CLAUDE.md`.
+- **Model Normalization (D12):** In `statusline.sh`, normalized model display name by stripping a trailing parenthetical equal to effort before appending `[<effort>]`, reconciling D12 and AT-2 per advisor ruling (#330 comment 5623886843). Corrected line 201 fixture verification claim.
+
