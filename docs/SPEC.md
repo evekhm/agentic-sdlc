@@ -543,12 +543,17 @@ The ladder is written end to end here; `review:1..3` and
 
 ### review.policy
 `REVIEW.md` is the review protocol the reviewer personas compile
-against (PR #14, #267, #291). It defines: four authoritative severity tiers
+against (PR #14, #267, #291, #354). It defines: four authoritative severity tiers
 (`security`/`high`/`normal`/`suggestion`) with a closed `high` list
 and a mandatory sibling failure-scenario requirement (`<!-- failure-scenario:<id> -->`);
-high findings lacking a concrete failure scenario are mechanically demoted
-by the recorder to `normal` with table note `[demoted from high: missing failure_scenario marker] on <id>` (#291 D4),
-while findings with status `withdrawn` or peer state `dispute` are exempt (#291 D5).
+failure-scenario marker presence is evaluated against normalized base finding IDs
+(`token.split('@', 1)[0]`), symmetrically accepting both bare (`R1-1`) and decision-cited
+(`R1-1@D7`) marker spellings (#354 D1, D2). Full finding IDs (including decision citations
+`@<Dn>`) are preserved in ledger row markers, markdown ledger tables, and demotion audit
+notes (#354 D3). High findings lacking a concrete failure scenario are mechanically demoted
+by the recorder to `normal` with table note `[demoted from high: missing failure_scenario marker] on <id>` (#291 D4, #354 D3)
+and an explicit diagnostic line emitted to stdout (#354 D5), while findings with status `withdrawn`
+or peer state `dispute` are exempt (#291 D5, #354 D7).
 Findings with non-enum severities fail validation loudly: the recorder logs the
 refusal, appends `[refused: <id>: invalid severity <x>]`, creates no row, and
 exits 0. Review verdicts are posted as structured blocks

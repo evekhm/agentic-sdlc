@@ -278,6 +278,7 @@ def main():
         for reviewer, verdict, block, reviewed_head, block_round in accepted_blocks_by_comment.get(c_idx, []):
             # Extract sibling failure scenarios
             failure_scenarios = set(re.findall(r'<!-- failure-scenario:([A-Za-z0-9@-]+) -->', block))
+            failure_scenarios_base = {fs.split('@', 1)[0] for fs in failure_scenarios}
 
             # Parse finding lines
             finding_matches = re.finditer(r'<!-- finding:([A-Za-z0-9@-]+):([A-Za-z0-9]+):([A-Za-z0-9]+):([A-Za-z0-9]+) -->', block)
@@ -302,9 +303,11 @@ def main():
 
                 # Check high failure scenario marker (D5) keyed on block: any high finding without sibling marker is demoted
                 if fsev == "high" and fpr != "dispute" and fst != "withdrawn":
-                    if fid not in failure_scenarios:
+                    base_fid = fid.split('@', 1)[0]
+                    if base_fid not in failure_scenarios_base:
                         fsev = "normal"
                         audit_notes.append(f"[demoted from high: missing failure_scenario marker] on {fid}")
+                        print(f"finding {fid}: demoted from high to normal: missing failure_scenario marker")
 
                 is_new = (fid not in initial_existing_row_ids and fid not in rows)
 
