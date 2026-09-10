@@ -571,7 +571,19 @@ reporting `fixed` on an open row records concurrence while status remains `open`
 discoverer verifies. Maintainers (`OWNER`, `MEMBER`, `COLLABORATOR` excluding bots) may retier
 findings via `@(argus|atlas) retier <id> <severity>`, updating severity with note
 `[retiered to <severity> by @<user>]`; unauthorized commands are rejected with
-`[refused: retier by @<user>: unauthorized]`. The two reviewers are deployment-pinned to
+`[refused: retier by @<user>: unauthorized]`. An authorized maintainer retier is terminal
+for that finding ID within a recorder run, and a later verdict block footer from the discovering
+reviewer never overrides it in either direction (#361 D4). Finding severity in the consensus ledger
+is mutable across rounds by the discovering reviewer (`reviewer == discoverer`) (#361 D1).
+Downward severity transitions are unrestricted across all rounds, while upward escalation of
+existing findings to `high` in round 4 or later demotes to `normal` per the post-round-3 funnel
+cap (#361 D2). Existing `high` findings re-encountered without sibling failure-scenario markers
+demote to `normal` with audit note `[demoted from high: missing failure_scenario marker] on <id>`
+and stdout logging (#361 D3). Existing `security` rows cannot be downgraded via review verdict
+footers; maintainer retier directives are required (#361 D4). Peer reviewers (`reviewer != discoverer`)
+cannot alter finding severity (#361 D5). Severity modifications by the discoverer append
+`[severity updated to {new_sev} by @{reviewer} on {fid}]` to the consensus ledger and emit a
+diagnostic log to stdout (#361 D6). The two reviewers are deployment-pinned to
 different model families; which family backs which reviewer is a
 `config/` fact and appears nowhere in the policy. The consensus ledger
 is maintained by Themis via `scripts/ci/review_recorder.sh` (invoking `scripts/ci/review_recorder.py`),
