@@ -14,7 +14,7 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-WRAP_SH="$REPO/scripts/ops/wrap.sh"
+WRAP_SH="${WRAP_SH:-$REPO/scripts/ops/wrap.sh}"
 CLAUDE_DOOR="$REPO/.claude/commands/wrap.md"
 SPEC_MD="$REPO/docs/SPEC.md"
 AGENTS_MD="$REPO/AGENTS.md"
@@ -22,7 +22,7 @@ CI_GATES="$REPO/.github/workflows/ci-gates.yml"
 
 FAILURES=0
 
-banner() { printf '\n=== %s ===\n' "$*"; }
+banner() { printf "\n=== %s ===\n" "$*"; }
 
 pass() {
     echo "PASS: $*"
@@ -42,6 +42,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Resolve real binaries dynamically from host PATH (outside any test shim)
+REAL_GIT="$(command -v git || echo /usr/bin/git)"
+REAL_GH="$(command -v gh || echo /usr/bin/gh)"
+REAL_JQ="$(command -v jq || echo /usr/bin/jq)"
+REAL_GAWK="$(command -v gawk || command -v awk || echo /usr/bin/gawk)"
+
 setup_sandbox() {
     SANDBOX="$(mktemp -d)"
     SANDBOX_BIN="$SANDBOX/bin"
@@ -52,6 +58,15 @@ setup_sandbox() {
     : > "$CALLS_LOG"
     : > "$WRITES_LOG"
 
+    # Export stub configuration so PATH shim processes inherit them (R1-2, R1-3)
+    export SANDBOX
+    export SANDBOX_BIN
+    export FIXTURES
+    export CALLS_LOG
+    export WRITES_LOG
+    export GITHUB_REPO="test/repo"
+    export GITHUB_REPOSITORY="test/repo"
+
     # Git upstream bare repo and primary working checkout
     ORIGIN_REPO="$SANDBOX/origin.git"
     PRIMARY_REPO="$SANDBOX/primary"
@@ -59,6 +74,7 @@ setup_sandbox() {
     git clone "$ORIGIN_REPO" "$PRIMARY_REPO" >/dev/null 2>&1
     git -C "$PRIMARY_REPO" config user.name "Tester"
     git -C "$PRIMARY_REPO" config user.email "tester@example.com"
+    git -C "$PRIMARY_REPO" config remote.origin.gh-repo "test/repo"
     (
         cd "$PRIMARY_REPO"
         mkdir -p ops/handoffs runs
@@ -71,9 +87,17 @@ setup_sandbox() {
     # PATH stub: gh
     cat > "$SANDBOX_BIN/gh" <<'STUB_GH'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$CALLS_LOG"
-if [[ "$*" =~ (POST|PATCH|DELETE) ]] || [[ "$*" =~ "pr create" ]] || [[ "$*" =~ "issue create" ]]; then
-    printf '%s\n' "$*" >> "$WRITES_LOG"
+# Prepend command name so logged calls match anchors ^gh ... (R1-2)
+printf 'gh %s
+' "$*" >> "$CALLS_LOG"
+if [[ "$*" =~ (POST|PATCH|DELETE) ]] || [[ "$*" =~ "pr create" ]] || [[ "$*" =~ "issue create" ]] || [[ "$*" =~ "label remove" ]] || [[ "$*" =~ "issue edit" ]]; then
+    printf 'gh %s
+' "$*" >> "$WRITES_LOG"
+fi
+
+if [ "${1:-}" = "repo" ] && [ "${2:-}" = "view" ]; then
+    echo "test/repo"
+    exit 0
 fi
 
 if [ "${1:-}" = "api" ]; then
@@ -91,16 +115,62 @@ if [ "${1:-}" = "api" ]; then
         esac
     done
     clean_ep="${endpoint%%\?*}"
-    clean_ep="${clean_ep//\//_}"
-    clean_ep="${clean_ep//:/_}"
+    clean_ep="${clean_ep#/}"
+    clean_slug="${clean_ep//\//_}"
+    clean_slug="${clean_slug//:/_}"
 
     if [ "$method" = "DELETE" ]; then
         exit 0
     fi
-    if [ -f "$FIXTURES/${clean_ep}.json" ]; then
-        cat "$FIXTURES/${clean_ep}.json"
+
+    # Match exact slugified endpoint
+    if [ -f "$FIXTURES/${clean_slug}.json" ]; then
+        cat "$FIXTURES/${clean_slug}.json"
         exit 0
     fi
+
+    # Match short endpoint slug (stripping repos/<owner>/<repo>/ or repos/:owner/:repo/)
+    short_slug="$(echo "$clean_slug" | sed -E 's/^repos_[^_]+_[^_]+_//')"
+    if [ -f "$FIXTURES/${short_slug}.json" ]; then
+        cat "$FIXTURES/${short_slug}.json"
+        exit 0
+    fi
+
+    # Direct keyword matches for common GitHub API endpoints (R1-3)
+    if [[ "$clean_ep" =~ issues/([0-9]+)/labels ]]; then
+        num="${BASH_REMATCH[1]}"
+        if [ -f "$FIXTURES/issues_${num}_labels.json" ]; then
+            cat "$FIXTURES/issues_${num}_labels.json"
+            exit 0
+        fi
+    fi
+    if [[ "$clean_ep" =~ issues/([0-9]+)/comments ]]; then
+        num="${BASH_REMATCH[1]}"
+        if [ -f "$FIXTURES/issues_${num}_comments.json" ]; then
+            cat "$FIXTURES/issues_${num}_comments.json"
+            exit 0
+        fi
+    fi
+    if [[ "$clean_ep" =~ issues/([0-9]+)$ ]]; then
+        num="${BASH_REMATCH[1]}"
+        if [ -f "$FIXTURES/issue_${num}.json" ]; then
+            cat "$FIXTURES/issue_${num}.json"
+            exit 0
+        fi
+    fi
+    if [[ "$clean_ep" =~ (pulls|pull_requests) ]]; then
+        if [ -f "$FIXTURES/pr_list.json" ]; then
+            cat "$FIXTURES/pr_list.json"
+            exit 0
+        fi
+    fi
+    if [[ "$clean_ep" =~ issues$ ]]; then
+        if [ -f "$FIXTURES/issue_list.json" ]; then
+            cat "$FIXTURES/issue_list.json"
+            exit 0
+        fi
+    fi
+
     echo "{}"
     exit 0
 fi
@@ -108,6 +178,15 @@ fi
 if [ "${1:-}" = "pr" ] && [ "${2:-}" = "list" ]; then
     if [ -f "$FIXTURES/pr_list.json" ]; then
         cat "$FIXTURES/pr_list.json"
+    else
+        echo "[]"
+    fi
+    exit 0
+fi
+
+if [ "${1:-}" = "issue" ] && [ "${2:-}" = "list" ]; then
+    if [ -f "$FIXTURES/issue_list.json" ]; then
+        cat "$FIXTURES/issue_list.json"
     else
         echo "[]"
     fi
@@ -131,7 +210,8 @@ STUB_GH
     # PATH stub: worktrees.sh
     cat > "$SANDBOX_BIN/worktrees.sh" <<'STUB_WT'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$CALLS_LOG"
+printf 'worktrees.sh %s
+' "$*" >> "$CALLS_LOG"
 if [ -f "$FIXTURES/worktrees.txt" ]; then
     cat "$FIXTURES/worktrees.txt"
 else
@@ -141,13 +221,33 @@ exit 0
 STUB_WT
     chmod +x "$SANDBOX_BIN/worktrees.sh"
 
-    # PATH stub: git wrapper (logs commands, delegates to real git)
-    cat > "$SANDBOX_BIN/git" <<'STUB_GIT'
+    # PATH stub: git wrapper (logs commands, delegates to real git) (R1-2, R1-8)
+    cat > "$SANDBOX_BIN/git" <<STUB_GIT
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$CALLS_LOG"
-exec /usr/bin/git "$@"
+printf 'git %s
+' "\$*" >> "\$CALLS_LOG"
+exec "$REAL_GIT" "\$@"
 STUB_GIT
     chmod +x "$SANDBOX_BIN/git"
+}
+
+# Fixture helper for non-empty sessions that produced state (R1-1)
+# Establishes a valid run artifact with disposition so Check 10 passes
+# and D12(c) short-circuit is not triggered during close-out tests.
+setup_session_with_state() {
+    setup_sandbox
+    (
+        cd "$PRIMARY_REPO"
+        mkdir -p runs ops/handoffs
+        cat > runs/session-artifact.md <<'EOF'
+# Session Artifact
+Artifact produced during test-session.
+<!-- disposition: kept for audit -->
+EOF
+        git add runs/session-artifact.md
+        git commit -m "record test session artifact" -q
+        git push -q origin main
+    )
 }
 
 # --- AT-1 (D7, Exit 0): Clean session close-out -------------------------------
@@ -155,17 +255,19 @@ banner "AT-1 (D7, Exit 0): Clean session close-out"
 if [ ! -x "$WRAP_SH" ]; then
     fail "AT-1 (D7): $WRAP_SH does not exist or is not executable"
 else
-    setup_sandbox
+    # Non-empty session that produced state must close out cleanly (R1-1)
+    setup_session_with_state
     (
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         rc=0
         out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
-        if [ "$rc" -eq 0 ] && grep -qE '^(status: )?closed$' <<<"$out" && ! grep -q "not closed" <<<"$out" && grep -q "handoff:" <<<"$out"; then
+        handoff_count="$(find "$PRIMARY_REPO/ops/handoffs" -maxdepth 1 -name "handoff-*.txt" 2>/dev/null | wc -l || :)"
+        if [ "$rc" -eq 0 ] && grep -qE '^(status: )?closed$' <<<"$out" && ! grep -q "not closed" <<<"$out" && grep -q "handoff:" <<<"$out" && [ "$handoff_count" -ge 1 ]; then
             pass "AT-1 (D7): wrap.sh prints closed, outputs handoff block, and exits 0"
         else
-            fail "AT-1 (D7): wrap.sh failed clean close-out check (rc=$rc, out=$out)"
+            fail "AT-1 (D7): wrap.sh failed clean close-out check (rc=$rc, handoffs=$handoff_count, out=$out)"
         fi
     )
 fi
@@ -179,7 +281,7 @@ else
     (
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
-        # Spawn an active child process belonging to this subshell process group
+        # Spawn an active child process belonging to this subshell process group ($PPID tree) (R1-6)
         sleep 5 &
         child_pid=$!
         rc=0
@@ -284,20 +386,26 @@ else
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
-        # Issue #88 claimed by test-session has in-progress label AND a valid handoff comment
-        cat > "$FIXTURES/repos_test_repo_issues_88_labels.json" <<'JSON'
-[{"name":"in-progress"},{"name":"status:implementing"}]
-JSON
-        cat > "$FIXTURES/repos_test_repo_issues_88_comments.json" <<'JSON'
-[
+        # Issue #88 claimed by test-session has in-progress label AND a valid handoff comment (R1-3)
+        labels_json='[{"name":"in-progress"},{"name":"status:implementing"}]'
+        comments_json='[
   {"body":"Claim: odyssey (test-session), stage: implementing."},
-  {"body":"Done: completed work\nDecided: D1\nNext: review\nBlocked: none"}
-]
+  {"body":"Done: completed work
+Decided: D1
+Next: review
+Blocked: none"}
+]'
+        echo "$labels_json" > "$FIXTURES/repos_test_repo_issues_88_labels.json"
+        echo "$labels_json" > "$FIXTURES/issues_88_labels.json"
+        echo "$comments_json" > "$FIXTURES/repos_test_repo_issues_88_comments.json"
+        echo "$comments_json" > "$FIXTURES/issues_88_comments.json"
+        cat > "$FIXTURES/issue_list.json" <<'JSON'
+[{"number":88,"title":"issue 88","labels":[{"name":"in-progress"},{"name":"status:implementing"}]}]
 JSON
         : > "$WRITES_LOG"
         rc=0
         out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
-        if [ "$rc" -eq 0 ] && grep -qE "fixed: removed in-progress from #88" <<<"$out" && grep -qE "DELETE.*labels/in-progress" "$WRITES_LOG"; then
+        if [ "$rc" -eq 0 ] && grep -qE "fixed: removed in-progress from #88" <<<"$out" && grep -qE "(DELETE.*labels/in-progress|label remove in-progress)" "$WRITES_LOG"; then
             pass "AT-6 (D4): wrap.sh removes in-progress, reports fixed, and exits 0"
         else
             fail "AT-6 (D4): wrap.sh did not auto-repair stale in-progress label (rc=$rc, out=$out)"
@@ -315,19 +423,27 @@ else
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
-        cat > "$FIXTURES/repos_test_repo_issues_88_labels.json" <<'JSON'
-[{"name":"in-progress"},{"name":"status:implementing"}]
-JSON
-        cat > "$FIXTURES/repos_test_repo_issues_88_comments.json" <<'JSON'
-[
+        labels_json='[{"name":"in-progress"},{"name":"status:implementing"}]'
+        comments_json='[
   {"body":"Claim: odyssey (test-session), stage: implementing."},
-  {"body":"Done: completed work\nDecided: D1\nNext: review\nBlocked: none"}
-]
+  {"body":"Done: completed work
+Decided: D1
+Next: review
+Blocked: none"}
+]'
+        echo "$labels_json" > "$FIXTURES/repos_test_repo_issues_88_labels.json"
+        echo "$labels_json" > "$FIXTURES/issues_88_labels.json"
+        echo "$comments_json" > "$FIXTURES/repos_test_repo_issues_88_comments.json"
+        echo "$comments_json" > "$FIXTURES/issues_88_comments.json"
+        cat > "$FIXTURES/issue_list.json" <<'JSON'
+[{"number":88,"title":"issue 88","labels":[{"name":"in-progress"},{"name":"status:implementing"}]}]
 JSON
         : > "$WRITES_LOG"
+        : > "$CALLS_LOG"
         rc=0
         out="$(DRY_RUN=1 "$WRAP_SH" test-session 2>&1)" || rc=$?
-        if [ "$rc" -eq 2 ] && grep -qE "would: remove in-progress from #88" <<<"$out" && grep -qE "fail: #88 carries in-progress \(dry-run\)" <<<"$out" && [ ! -s "$WRITES_LOG" ]; then
+        # Non-empty CALLS_LOG proves gh was queried; empty WRITES_LOG proves zero mutation calls (R1-3)
+        if [ "$rc" -eq 2 ] && grep -qE "would: remove in-progress from #88" <<<"$out" && grep -qE "fail: #88 carries in-progress \(dry-run\)" <<<"$out" && [ ! -s "$WRITES_LOG" ] && [ -s "$CALLS_LOG" ]; then
             pass "AT-7 (D4): wrap.sh prints would-fix, reports fail, exits 2, and makes zero write calls under DRY_RUN=1"
         else
             fail "AT-7 (D4): wrap.sh failed DRY_RUN contract on would-fix scenario (rc=$rc, out=$out)"
@@ -345,16 +461,20 @@ else
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
         # Issue #88 claimed by test-session has in-progress but NO handoff comment
-        cat > "$FIXTURES/repos_test_repo_issues_88_labels.json" <<'JSON'
-[{"name":"in-progress"}]
-JSON
-        cat > "$FIXTURES/repos_test_repo_issues_88_comments.json" <<'JSON'
-[{"body":"Claim: odyssey (test-session), stage: implementing."}]
+        labels_json='[{"name":"in-progress"}]'
+        comments_json='[{"body":"Claim: odyssey (test-session), stage: implementing."}]'
+        echo "$labels_json" > "$FIXTURES/repos_test_repo_issues_88_labels.json"
+        echo "$labels_json" > "$FIXTURES/issues_88_labels.json"
+        echo "$comments_json" > "$FIXTURES/repos_test_repo_issues_88_comments.json"
+        echo "$comments_json" > "$FIXTURES/issues_88_comments.json"
+        cat > "$FIXTURES/issue_list.json" <<'JSON'
+[{"number":88,"title":"issue 88","labels":[{"name":"in-progress"}]}]
 JSON
         : > "$WRITES_LOG"
+        : > "$CALLS_LOG"
         rc=0
         out="$("$WRAP_SH" test-session 2>&1)" || rc=$?
-        if [ "$rc" -eq 2 ] && grep -qE "fail: missing handoff comment on #88" <<<"$out" && [ ! -s "$WRITES_LOG" ]; then
+        if [ "$rc" -eq 2 ] && grep -qE "fail: missing handoff comment on #88" <<<"$out" && [ ! -s "$WRITES_LOG" ] && [ -s "$CALLS_LOG" ]; then
             pass "AT-8 (D1): wrap.sh reports fail on missing handoff comment, makes no modifications, and exits 2"
         else
             fail "AT-8 (D1): wrap.sh did not refuse with exit 2 when handoff comment was missing (rc=$rc, out=$out)"
@@ -389,7 +509,8 @@ banner "AT-10 (D1, Check 15): peer worktree anomaly warning"
 if [ ! -x "$WRAP_SH" ]; then
     fail "AT-10 (D1): $WRAP_SH does not exist or is not executable"
 else
-    setup_sandbox
+    # Peer worktree anomaly evaluated on a session with state (R1-1)
+    setup_session_with_state
     (
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
@@ -414,11 +535,11 @@ banner "AT-11 (D5): Mandatory Learnings step verification"
 if [ ! -x "$WRAP_SH" ]; then
     fail "AT-11 (D5): $WRAP_SH does not exist or is not executable"
 else
-    setup_sandbox
+    # Case A: WRAP_LEARNINGS unset on non-empty session (R1-1)
+    setup_session_with_state
     (
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
-        # Case A: WRAP_LEARNINGS unset
         rc=0
         out="$(unset WRAP_LEARNINGS; "$WRAP_SH" test-session 2>&1)" || rc=$?
         if [ "$rc" -eq 2 ] && grep -q "fail: learnings step omitted" <<<"$out"; then
@@ -426,8 +547,13 @@ else
         else
             fail "AT-11 (D5): wrap.sh did not refuse when learnings step was omitted (rc=$rc, out=$out)"
         fi
+    )
 
-        # Case B: WRAP_LEARNINGS attested as none
+    # Case B: WRAP_LEARNINGS attested as none on non-empty session (R1-1)
+    setup_session_with_state
+    (
+        cd "$PRIMARY_REPO"
+        export PATH="$SANDBOX_BIN:$PATH"
         rc=0
         out="$(WRAP_LEARNINGS="none" "$WRAP_SH" test-session 2>&1)" || rc=$?
         if [ "$rc" -eq 0 ] && grep -q "pass: learnings accounted for" <<<"$out"; then
@@ -489,12 +615,18 @@ else
             fail "AT-13 (D7): wrap.sh did not exit 1 outside a git repository (rc=$rc, out=$out)"
         fi
 
-        # Case C: Missing required binary (e.g. jq missing from PATH)
+        # Case C: Missing required binary (e.g. jq missing from PATH) (R1-8)
         RESTRICTED_BIN="$SANDBOX/restricted_bin"
         mkdir -p "$RESTRICTED_BIN"
-        ln -s /usr/bin/git "$RESTRICTED_BIN/git"
-        ln -s /usr/bin/gh "$RESTRICTED_BIN/gh"
-        ln -s /usr/bin/gawk "$RESTRICTED_BIN/gawk"
+        for util in bash sh env sed grep cat date mktemp rm; do
+            u_path="$(command -v "$util" 2>/dev/null || :)"
+            [ -n "$u_path" ] && [ -x "$u_path" ] && ln -sf "$u_path" "$RESTRICTED_BIN/$util"
+        done
+        [ -n "$REAL_GIT" ] && [ -x "$REAL_GIT" ] && ln -sf "$REAL_GIT" "$RESTRICTED_BIN/git"
+        [ -n "$REAL_GH" ] && [ -x "$REAL_GH" ] && ln -sf "$REAL_GH" "$RESTRICTED_BIN/gh"
+        [ -n "$REAL_GAWK" ] && [ -x "$REAL_GAWK" ] && ln -sf "$REAL_GAWK" "$RESTRICTED_BIN/gawk"
+        # Verify valid non-dangling symlinks
+        [ -x "$RESTRICTED_BIN/bash" ] && [ -x "$RESTRICTED_BIN/git" ] && [ -x "$RESTRICTED_BIN/gh" ] && [ -x "$RESTRICTED_BIN/gawk" ]
         # Note: jq is omitted
         rc=0
         out="$(PATH="$RESTRICTED_BIN" "$WRAP_SH" test-session 2>&1)" || rc=$?
@@ -598,6 +730,7 @@ banner "AT-17 (D12): Empty session short-circuit"
 if [ ! -x "$WRAP_SH" ]; then
     fail "AT-17 (D12): $WRAP_SH does not exist or is not executable"
 else
+    # Pristine clean sandbox with zero session state (R1-1)
     setup_sandbox
     (
         cd "$PRIMARY_REPO"
@@ -626,16 +759,19 @@ else
         rc=0
         out="$("$WRAP_SH" test-session my-seat --snapshot 2>&1)" || rc=$?
 
-        # Verify network probes (git fetch, gh pr list) and worktree enumeration (worktrees.sh) did NOT run
+        # Verify network probes (git fetch, gh pr list) and worktree enumeration (worktrees.sh) did NOT run (R1-2)
         network_git="$(grep -E '^git fetch' "$CALLS_LOG" | wc -l || :)"
         network_gh="$(grep -E '^gh pr list' "$CALLS_LOG" | wc -l || :)"
         wt_calls="$(grep -E '^worktrees\.sh' "$CALLS_LOG" | wc -l || :)"
         total_gated=$((network_git + network_gh + wt_calls))
 
-        if [ "$rc" -eq 0 ] && [ "$total_gated" -eq 0 ]; then
-            pass "AT-18 (D12): wrap.sh gates expensive network and worktree probes under --snapshot (calls: 0)"
+        # Verify that cheap probes ran, proving calls.log logging is active (R1-2)
+        cheap_calls="$(grep -E '^git status' "$CALLS_LOG" | wc -l || :)"
+
+        if [ "$rc" -eq 0 ] && [ "$total_gated" -eq 0 ] && [ "$cheap_calls" -ge 1 ]; then
+            pass "AT-18 (D12): wrap.sh gates expensive network and worktree probes under --snapshot (gated: 0, cheap: $cheap_calls)"
         else
-            fail "AT-18 (D12): wrap.sh executed expensive probes under --snapshot (git_fetch=$network_git, gh_pr=$network_gh, wt=$wt_calls, rc=$rc)"
+            fail "AT-18 (D12): wrap.sh probe gating failed under --snapshot (git_fetch=$network_git, gh_pr=$network_gh, wt=$wt_calls, cheap=$cheap_calls, rc=$rc)"
         fi
     )
 fi
@@ -645,13 +781,19 @@ banner "AT-19 (D13): Seat resolution order, resume block, and pointers"
 if [ ! -x "$WRAP_SH" ]; then
     fail "AT-19 (D13): $WRAP_SH does not exist or is not executable"
 else
-    setup_sandbox
+    # Seat resolution evaluated on a session with state (R1-1)
+    setup_session_with_state
     (
         cd "$PRIMARY_REPO"
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
 
-        # 1. Argument seat resolution
+        # Pre-seed existing handoff files so custom-seat and env-seat resolve as established seats (D13)
+        today="$(date +%Y-%m-%d)"
+        touch "$PRIMARY_REPO/ops/handoffs/handoff-custom-seat-${today}.txt"
+        touch "$PRIMARY_REPO/ops/handoffs/handoff-env-seat-${today}.txt"
+
+        # 1. Argument seat resolution (matching existing handoff)
         rc=0
         out_arg="$("$WRAP_SH" test-session custom-seat 2>&1)" || rc=$?
         has_arg_resume=0
@@ -667,7 +809,7 @@ else
             has_env_resume=1
         fi
 
-        # 3. Typo refusal: ad-hoc slug without existing handoff refuses with exit 2
+        # 3. Typo refusal: ad-hoc slug without existing handoff refuses with exit 2 (D13, AT-19)
         rc=0
         out_typo="$("$WRAP_SH" test-session non-existent-adhoc 2>&1)" || rc=$?
         typo_refused=0

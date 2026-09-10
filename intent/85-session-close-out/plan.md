@@ -2,7 +2,7 @@
 
 **Issue:** #85 · **Spec:** `intent/85-session-close-out/spec.md` (Approved, D1–D15, AT-1–AT-19)  
 **Author:** daedalus (`evekhm-daedalus-app[bot]`)  
-**Base commit:** `04c0abdc64829ffc56c22f4c1bc61cb306afa087`  
+**Base commit:** `e9c987baa08701de0e223bf8410ec6be0e8432d7` (spec's base: `04c0abdc64829ffc56c22f4c1bc61cb306afa087`)  
 **Target branch for implementation (Odyssey):** `odyssey/85-session-close-out`
 
 ---
@@ -38,7 +38,7 @@ The solution is a single user command, `/wrap`, typed by an operator in Claude C
 |---|---|---|---|
 | **athena** | plan / design | `intent/**` | Authored `intent.md` and approved `spec.md` (PR #346, amended via PR #357). |
 | **daedalus** | build | `intent/**`, `scripts/*/tests/**` | Authors `plan.md` and commits hermetic contract tests in `scripts/ops/tests/wrap_test.sh`. Daedalus never writes production code (`scripts/ops/wrap.sh`, harness doors, or `docs/SPEC.md`). |
-| **odyssey** | implement | `scripts/ops/wrap.sh`, `.claude/commands/wrap.md`, `scripts/ops/tests/wrap_test.sh`, `.github/workflows/ci-gates.yml` (solely to wire `wrap_test.sh` per D15), `scripts/ci/compiler_roundtrip.sh`, `docs/SPEC.md`, `AGENTS.md`, `intent/85-session-close-out/spec.md` | Implements the plan at base commit `04c0abdc64829ffc56c22f4c1bc61cb306afa087`, turning contract tests green, updating `docs/SPEC.md` (`ops.wrap`), updating `AGENTS.md`, and passing all CI gates. |
+| **odyssey** | implement | `scripts/ops/wrap.sh`, `.claude/commands/wrap.md`, `scripts/ops/tests/wrap_test.sh`, `.github/workflows/ci-gates.yml` (solely to wire `wrap_test.sh` per D15), `scripts/ci/compiler_roundtrip.sh`, `docs/SPEC.md`, `AGENTS.md`, `intent/85-session-close-out/spec.md` | Implements the plan at base commit `e9c987baa08701de0e223bf8410ec6be0e8432d7` (spec's base: `04c0abdc64829ffc56c22f4c1bc61cb306afa087`), turning contract tests green, updating `docs/SPEC.md` (`ops.wrap`), updating `AGENTS.md`, and passing all CI gates. |
 | **argus / atlas** | review | comments only | Review pull requests against spec and plan using independent models. |
 | **themis** | autonomous merge | GitHub Actions (`merge-gate.yml`) | Evaluates conjuncts and autonomously merges pull requests upon consensus. |
 
@@ -67,6 +67,7 @@ In `scripts/ops/wrap.sh`, every check evaluates to one of four states (`pass`, `
 - `wrap.sh` requires the session name as its first positional argument: `scripts/ops/wrap.sh <session-name> [seat-or-slug] [--snapshot]`.
 - App identities and branch prefixes are rejected as join keys because parallel sessions share them.
 - Session lifecycle scope (D3): A session bounds all actions under that session name from claim to close-out. Check 1 verifies child processes of that session context have exited. Check 16 rolls up spend metrics for transcripts generated during that session.
+- **Process attribution rule for Check 1 (D1, D3):** Active processes are attributed to the session if: (a) in an interactive or subshell invocation, they are active child processes belonging to the caller's process tree (children of `$PPID`, excluding `wrap.sh` itself `$$` and its direct subshell pipeline children), or (b) their PID is recorded as active in a worktree lock file (`$GIT_COMMON_DIR/worktrees/<name>/locked` per `scripts/ops/worktrees.sh:81-83`) for a worktree owned by this session. Any active process matching either condition triggers `fail: child processes still running` and exits 2.
 
 ### P3 · Single Permitted Auto-Repair and DRY_RUN Contract (D4)
 - `wrap.sh` executes exactly **one** automated mutation: removing a lingering `in-progress` label from an issue claimed by this session when a valid Done/Decided/Next/Blocked handoff comment already exists.
@@ -94,7 +95,7 @@ Shipped in v1 (12 checks + Learnings step):
 - Check 16: Session spend measurement via side-channel (both modes)
 - Check 17: Credential leak detection (both modes)
 - Check 18: Temporary body file cleanup under `/tmp` (close-out only)
-- Learnings Step: Mandatory operational knowledge harvest (both modes)
+- Learnings Step: Mandatory operational knowledge harvest (close-out only)
 
 Deferred to post-v1 by number: Checks 2, 6, 9, 11, 13, 14, 19.
 
@@ -186,7 +187,7 @@ Deferred to post-v1 by number: Checks 2, 6, 9, 11, 13, 14, 19.
 - **Decisions implemented:** D1, D3, D6
 - **Acceptance criteria proven:** AT-2, AT-3, AT-4, AT-5
 - **Description:**
-  1. **Check 1 (In-flight processes):** Scan process table for active child processes or subagents spawned under this session's PID tree; report `fail` and exit 2 (`refused: child processes still running`) if any remain active.
+  1. **Check 1 (In-flight processes):** Scan process table for active child processes or subagents belonging to the session: (a) active child processes spawned under the harness/caller PID tree (`$PPID`, excluding `wrap.sh` and its direct subshell pipeline children), and (b) active PIDs recorded in worktree lock files (`$GIT_COMMON_DIR/worktrees/<name>/locked`). If any active process remains running, report `fail` and exit 2 (`refused: child processes still running`).
   2. **Check 3 (Branch sync):** Check git status of worktrees belonging to this session; report `fail` and exit 2 (`refused: unpushed commits on <branch>`) if local HEAD diverges from remote HEAD.
   3. **Check 4 (Primary checkout):** Check primary checkout branch and git status; report `fail` and exit 2 (`refused: primary checkout dirty or behind origin/main`) if dirty or behind `origin/main`.
   4. **Check 5 (Session PRs):** Query `gh pr list --author @me`; apply three-way derivation rule: code defect fails and exits 2 (`refused: PR #<n> checks failing`); ambient environment defect (#167) reports `warn` and exits 0; foreign unmerged PR reports `warn`.
