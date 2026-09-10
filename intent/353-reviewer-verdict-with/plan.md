@@ -131,7 +131,7 @@ In `scripts/ci/review_recorder.py`:
 ### P7 · Refused Verdict Diagnostic Visibility in Merge Gate Conjunct (3) (D7)
 In `scripts/ci/merge_gate.sh`:
 1. During evaluation of conjunct (3) (Review Consensus):
-   - Parse `refused-verdict` markers from `$CL` / `$LEDGER_BODY`:
+   - Parse `refused-verdict` markers from `$CL` (the consensus ledger body, `merge_gate.sh:288-293`; `$LEDGER_BODY` is a different artifact):
      `<!-- refused-verdict:(argus|atlas):([0-9a-f]{40}):([a-z0-9-]+) -->`
    - For each required reviewer lacking an accepted verdict at `$HEAD` (`ARGUS_HEAD != HEAD` or `ATLAS_HEAD != HEAD`):
      - Check if a refusal marker exists for that reviewer at `$HEAD`:
@@ -249,7 +249,7 @@ In `scripts/ci/merge_gate.sh`:
   2. When Argus or Atlas review is not at `$HEAD`, format `WHY[3]` incorporating `<reviewer> verdict at $HEAD was refused by recorder (<reason_code>); ledger recorded head is ${RECORDED_HEAD:-none}`.
   3. Handle dual refusals joined by `; `.
 - **Done-When:**
-  MG-47, MG-48, MG-49 pass green.
+  The three new banners MG-47, MG-48, MG-49 pass green when the suite reaches them. MG-38 (plan(#308), 42c6828) is #308's outstanding contract and still fails at merge base, and `fail()` aborts the suite at its first failure, so a full-suite PASS is out of scope for #353; do not touch `.github/workflows/**` to reach it (D10).
 
 ---
 
@@ -297,7 +297,7 @@ In `scripts/ci/merge_gate.sh`:
   6. `bash scripts/ops/tests/execution_test.sh` -> PASS
   7. `bash scripts/ops/tests/placement_test.sh` -> PASS
   8. `bash scripts/ops/tests/post_test.sh` -> PASS
-  9. `bash scripts/ci/tests/merge_gate_test.sh` -> PASS
+  9. `bash scripts/ci/tests/merge_gate_test.sh` -> MG-47, MG-48, MG-49 green (MG-38 is #308's red and aborts the suite ahead of them; see T4 Done-When)
 - **Done-When:**
   All test suites and CI gate checks exit 0 cleanly.
 
@@ -329,7 +329,7 @@ In `scripts/ci/merge_gate.sh`:
 - **Base commit:** `29b6b40b31d9fd150c1bdac875008c2db3f49d25` (or the commit merging this plan)
 - **PR Title:** `fix(review): enforce reviewer run-id provenance injection and surface verdict refusals (#353)`
 - **PR Body Requirements:**
-  - Reference: `Refs #353` (or `Closes #353`)
+  - Reference: `Refs #353` only. No closing keyword anywhere in the PR body, commit messages or comments (docs/SPEC.md:448, #245).
   - Deep Review grant: apply `deep-review` grant label (DEEP-7: alters `personas/skills/review-protocol.md`; DEEP-3: alters `scripts/ops/post.sh`)
   - Summary of implemented tasks T2, T3, T4, T5, T6, T7
   - Proof that all 25 scenarios in `scripts/ci/tests/review_recorder_test.sh` pass green
