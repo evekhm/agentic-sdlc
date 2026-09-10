@@ -249,7 +249,23 @@ In `scripts/ci/merge_gate.sh`:
   2. When Argus or Atlas review is not at `$HEAD`, format `WHY[3]` incorporating `<reviewer> verdict at $HEAD was refused by recorder (<reason_code>); ledger recorded head is ${RECORDED_HEAD:-none}`.
   3. Handle dual refusals joined by `; `.
 - **Done-When:**
-  The three new banners MG-47, MG-48, MG-49 pass green when the suite reaches them. MG-38 (plan(#308), 42c6828) is #308's outstanding contract and still fails at merge base, and `fail()` aborts the suite at its first failure, so a full-suite PASS is out of scope for #353; do not touch `.github/workflows/**` to reach it (D10).
+  The observable command is a scratch copy of the suite with `fail()` made non-fatal, because `fail()` (`scripts/ci/tests/merge_gate_test.sh:33`) exits the suite at MG-38 (plan(#308), 42c6828, #308's outstanding contract, tracked as #386) some 700 lines before MG-47:
+  ```bash
+  sed 's/^fail() { .*/fail() { echo "FAIL: $*" >\&2; FAILED=1; }/' scripts/ci/tests/merge_gate_test.sh > /tmp/mgt-nonfatal.sh \
+    && bash /tmp/mgt-nonfatal.sh 2>&1 | grep -E '^(PASS|FAIL): MG-4[789]'
+  ```
+  Done when that output contains no `FAIL:` line for MG-47, MG-48 or MG-49. The suite file itself is not edited and `.github/workflows/**` is not touched (D10).
+- **Build-gate evidence (RED at the plan head `5b8f37e`, same command):**
+  ```text
+  FAIL: MG-47 (D7): conjunct (3) reports false when Argus verdict refused at HEAD (expected to find: conjunct (3): false)
+  FAIL: MG-47 (D7, AT-353-9): explanatory refused verdict diagnostic reported (expected to find: argus verdict at aaaaaaaa... was refused by recorder (run-head-sha-mismatch); ledger recorded head is ...)
+  FAIL: MG-48 (D7): conjunct (3) reports false when Atlas verdict refused at HEAD (expected to find: conjunct (3): false)
+  FAIL: MG-48 (D7, AT-353-10): explanatory Atlas refused verdict diagnostic reported (expected to find: atlas verdict at aaaaaaaa... was refused by recorder (run-workflow-path-mismatch); ...)
+  FAIL: MG-49 (D7): conjunct (3) reports false when both reviewers refused at HEAD (expected to find: conjunct (3): false)
+  FAIL: MG-49 (D7): dual refusal diagnostics joined by semicolon (expected to find: argus verdict at aaaaaaaa... was refused by recorder (commit-not-in-history); ledger recorded head is bbb...)
+  ```
+  The `PR does not merge` guard of each scenario already passes at the head (the gate declines today for the wrong reason); the D7 assertions are the RED half.
+- **Plan sync (AT-353-9, AT-353-10):** the Approved rows read "`bash scripts/ci/tests/merge_gate_test.sh` passes with exit code 0". That form is unreachable in this tree until #308 lands MG-38's contract (#386 tracks the abort class). This plan does not narrow the rows: they stay the acceptance, and the implement PR states that the exit-0 form is blocked on #308/#386 and proves D7 through the scratch command above. When #386 gives the suite an expected-red list or a scenario filter, the exit-0 form becomes observable without any change to this plan.
 
 ---
 
@@ -297,9 +313,9 @@ In `scripts/ci/merge_gate.sh`:
   6. `bash scripts/ops/tests/execution_test.sh` -> PASS
   7. `bash scripts/ops/tests/placement_test.sh` -> PASS
   8. `bash scripts/ops/tests/post_test.sh` -> PASS
-  9. `bash scripts/ci/tests/merge_gate_test.sh` -> MG-47, MG-48, MG-49 green (MG-38 is #308's red and aborts the suite ahead of them; see T4 Done-When)
+  9. The T4 scratch command (`fail()` non-fatal copy, `grep -E '^(PASS|FAIL): MG-4[789]'`) -> no `FAIL:` line for MG-47, MG-48, MG-49; paste the output into the implement PR body next to the note that the exit-0 form of AT-353-9/10 waits on #308/#386 (see T4 Plan sync)
 - **Done-When:**
-  All test suites and CI gate checks exit 0 cleanly.
+  Items 1-8 exit 0; item 9 shows no `FAIL:` line for MG-47, MG-48, MG-49 under the scratch command, with the output pasted into the implement PR body.
 
 ---
 
