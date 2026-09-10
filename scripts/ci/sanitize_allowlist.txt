@@ -15,6 +15,5 @@ home scripts/ops/session_spend.sh          # refuses to scan the home directory;
 home scripts/ops/tests/session_spend_test.sh  # exercises that refusal in every spelling
 home intent/5-compiler/spec.md             # D8 states the rule the compiler enforces
 home intent/6-ci-gates/spec.md             # D3 states the rule this gate enforces
-home intent/416-commands-work-idea-bug/spec.md  # D8 states the sanitizer patterns the compiler enforces
 home .github/workflows/unattended.yml     # the runner puts ITS OWN bin dir on GITHUB_PATH, read at run time; never a literal path (#146)
 home scripts/ci/install_harness.sh        # installs into and checks the caller's own bin dir; the variable IS the mechanism (#146)
