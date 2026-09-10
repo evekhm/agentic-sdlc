@@ -1145,6 +1145,7 @@ refused_cl_atlas="$(cat <<EOF
 <!-- reviewed-head:argus:$H -->
 <!-- reviewed-head:atlas:$H0 -->
 <!-- assigned:argus,atlas -->
+<!-- ledger-row:AT-353-10:normal:open:none -->
 <!-- refused-verdict:atlas:$H:run-workflow-path-mismatch -->
 <!-- consensus-ledger-end -->
 EOF

@@ -140,7 +140,7 @@ In `scripts/ci/merge_gate.sh`:
        `WHY[3]="<reviewer> verdict at $HEAD was refused by recorder (<reason_code>); ledger recorded head is ${RECORDED_HEAD:-none}"`
      - If both Argus and Atlas have refused verdicts at `$HEAD`, format both joined by semicolon:
        `WHY[3]="argus verdict at $HEAD was refused by recorder (<reason_1>); ledger recorded head is ${ARGUS_HEAD:-none}; atlas verdict at $HEAD was refused by recorder (<reason_2>); ledger recorded head is ${ATLAS_HEAD:-none}"`
-   - Refusal markers at `$HEAD` take precedence over carry-forward evaluation: if Atlas carries a refused verdict at `$HEAD`, carry-forward does not suppress the refusal diagnostic.
+   - Refusal markers at `$HEAD` take precedence among diagnostics only: when Atlas carries a refused verdict at `$HEAD` and carry-forward is already unavailable under D7 (ii)-(v), `WHY[3]` reports the refusal instead of the carry-forward reason. A refusal marker never by itself defeats an otherwise valid carry-forward; that would change the merge decision, which D7 does not grant (Argus R1-2@D7, design gate). MG-48's fixture therefore blocks carry-forward with an open AT row (D7 (ii)) so the scenario tests the diagnostic alone; conjunct (3)'s decision is not touched by this plan.
    - If no refusal marker exists at `$HEAD`, preserve existing behavior:
      `WHY[3]="<reviewer> verdict is at ${RECORDED_HEAD:-none}, head is $HEAD"`
 
@@ -256,22 +256,22 @@ In `scripts/ci/merge_gate.sh`:
     && bash scripts/ci/tests/.mgt-nonfatal.sh 2>&1 | grep -E '^(PASS|FAIL): MG-4[789]'; rm -f scripts/ci/tests/.mgt-nonfatal.sh
   ```
   Done when that output contains no `FAIL:` line for MG-47, MG-48 or MG-49 (twelve lines, all `PASS:`). The suite file itself is not edited, the scratch copy is removed and never committed, and `.github/workflows/**` is not touched (D10).
-- **Build-gate evidence (RED at the plan head `82f2dec`, the exact output of the command above, run from a checkout of that head):**
+- **Build-gate evidence (RED at the head of this plan branch: the exact, unedited output of the command above, run in the checkout that produced this commit, whose `scripts/` tree is the one the commit carries):**
   ```text
   PASS: MG-47: exits 0 (exit 0)
   PASS: MG-47 (D7): conjunct (3) reports false when Argus verdict refused at HEAD
-  FAIL: MG-47 (D7, AT-353-9): explanatory refused verdict diagnostic reported (expected to find: argus verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (run-head-sha-mismatch); ledger recorded head is none)
+  FAIL: MG-47 (D7, AT-353-9): explanatory refused verdict diagnostic reported (expected to find: argus verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (run-head-sha-mismatch); ledger recorded head is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
   PASS: MG-47 (D7): PR does not merge with refused Argus verdict
   PASS: MG-48: exits 0 (exit 0)
-  FAIL: MG-48 (D7): conjunct (3) reports false when Atlas verdict refused at HEAD (expected to find: conjunct (3): false)
+  PASS: MG-48 (D7): conjunct (3) reports false when Atlas verdict refused at HEAD
   FAIL: MG-48 (D7, AT-353-10): explanatory Atlas refused verdict diagnostic reported (expected to find: atlas verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (run-workflow-path-mismatch); ledger recorded head is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
-  FAIL: MG-48 (D7): PR does not merge with refused Atlas verdict (unexpected write matching: ^gh pr merge)
+  PASS: MG-48 (D7): PR does not merge with refused Atlas verdict
   PASS: MG-49: exits 0 (exit 0)
   PASS: MG-49 (D7): conjunct (3) reports false when both reviewers refused at HEAD
-  FAIL: MG-49 (D7): dual refusal diagnostics joined by semicolon (expected to find: argus verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (commit-not-in-history); ledger recorded head is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
+  FAIL: MG-49 (D7): dual refusal diagnostics joined by semicolon (expected to find: argus verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (commit-not-in-history); ledger recorded head is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; atlas verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (missing-run-id); ledger recorded head is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
   PASS: MG-49 (D7): PR does not merge with dual refused verdicts
   ```
-  Reading: MG-47 and MG-49 already decline conjunct (3) at the head (no Argus verdict at `$HEAD`), so their RED is the missing diagnostic. MG-48 is RED on all three D7 assertions: with `reviewed-head:atlas:$H0` present, Atlas carry-forward holds today, conjunct (3) reads true and the gate merges; T4's refusal marker check at `$HEAD` is what turns that scenario. That is the D7 behaviour the implement rung must add.
+  Reading: all three scenarios already decline conjunct (3) at the head (MG-47 and MG-49: no Argus verdict at `$HEAD`; MG-48: carry-forward blocked by the open AT row, D7 (ii)), so every RED line is the missing diagnostic and nothing else. The implement rung changes `WHY[3]` formatting only; it does not change which way conjunct (3) decides.
 - **Plan sync (AT-353-9, AT-353-10):** the Approved rows read "`bash scripts/ci/tests/merge_gate_test.sh` passes with exit code 0". That form is unreachable in this tree until #308 lands MG-38's contract (#386 tracks the abort class). This plan does not narrow the rows: they stay the acceptance, and the implement PR states that the exit-0 form is blocked on #308/#386 and proves D7 through the scratch command above. When #386 gives the suite an expected-red list or a scenario filter, the exit-0 form becomes observable without any change to this plan.
 
 ---
