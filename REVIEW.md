@@ -260,6 +260,7 @@ that caps the bill.
     inserting the marker after `reviewed-head`). Reviewer models may omit the marker
     or emit `0` as a placeholder.
   - `<round>` is the integer review round counter (`1`, `2`, `3`, ...).
+  - Each finding line matches `^<!-- finding:([A-Za-z0-9@-]+):(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none) -->$`.
   - Findings citing spec decisions use format `<id>@<Dn>` (e.g. `R1-1@D4`) or `<id>@none` when uncited.
   - Each `high` finding must be immediately accompanied by its sibling marker `<!-- failure-scenario:<id> -->`.
   - The discovering reviewer may update finding severity across rounds via the finding footer marker (subject to round funnel caps, failure-scenario validation, and security tier protections).
