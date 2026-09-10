@@ -760,7 +760,9 @@ the lifecycle moved #361 to `status:in-review`. #353's implement PR
 #388 merged the same way at 10:39:54Z as `4bdbc48` after an Argus and
 Atlas round on `e4fe14f`; its lifecycle run did not rank the issue
 (the D17 slug miss, #382), so the label moved by hand. The verifier's
-post-merge smoke of that head was BLOCK by 33 seconds: the diff
+smoke of that head was BLOCK and landed 33 seconds before the merge; a
+verifier comment carries no verdict marker, so it never holds a gate
+and only advises the seat and humans. The row: the diff
 deleted REVIEW.md's finding-line grammar bullet, the only statement of
 the enum the merge gate declines against, with no task, decision or
 Plan Sync entry. PR #389 restores it, and Argus's own normal row for
