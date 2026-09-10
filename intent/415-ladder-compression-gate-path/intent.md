@@ -1,6 +1,6 @@
 # Intent: Owner-Authorized Ladder Compression Gate Path and Protocol
 
-**Issue:** #415 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #415 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
