@@ -1,0 +1,20 @@
+{
+  "session_id": "claude-1m-zero-cost",
+  "model": {
+    "id": "Opus 5"
+  },
+  "cost": {
+    "total_cost_usd": 0.0
+  },
+  "context_window": {
+    "total_input_tokens": 12000,
+    "total_output_tokens": 10,
+    "context_window_size": 1000000
+  },
+  "prompt_cache": {
+    "hit_ratio": 0.0,
+    "warm": false,
+    "cache_write_tokens": 11000,
+    "requests": 1
+  }
+}

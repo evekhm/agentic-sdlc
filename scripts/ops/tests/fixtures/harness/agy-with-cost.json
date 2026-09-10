@@ -1,0 +1,22 @@
+{
+  "session_id": "agy-with-cost",
+  "conversation_id": "agy-with-cost",
+  "model": {
+    "id": "gemini-3.8-pro",
+    "display_name": "Gemini 3.8 Pro",
+    "effort": "medium"
+  },
+  "cost": {
+    "total_usd": 2.45
+  },
+  "context_window": {
+    "total_input_tokens": 50000,
+    "total_output_tokens": 5000,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 50000,
+      "cache_read_input_tokens": 25000,
+      "output_tokens": 5000
+    }
+  }
+}

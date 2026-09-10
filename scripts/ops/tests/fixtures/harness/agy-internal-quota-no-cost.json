@@ -1,0 +1,19 @@
+{
+  "session_id": "agy-internal-quota",
+  "conversation_id": "agy-internal-quota",
+  "model": {
+    "id": "gemini-3.8-flash",
+    "display_name": "Gemini 3.8 Flash",
+    "effort": "high"
+  },
+  "context_window": {
+    "total_input_tokens": 107000,
+    "total_output_tokens": 45175,
+    "context_window_size": 200000,
+    "current_usage": {
+      "input_tokens": 107000,
+      "cache_read_input_tokens": 100580,
+      "output_tokens": 45175
+    }
+  }
+}

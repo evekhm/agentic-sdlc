@@ -1,0 +1,24 @@
+{
+  "session_id": "claude-200k",
+  "model": {
+    "display_name": "Fable 5.1"
+  },
+  "cost": {
+    "total_cost_usd": 81.40
+  },
+  "context_window": {
+    "total_input_tokens": 105300,
+    "total_output_tokens": 4,
+    "context_window_size": 200000
+  },
+  "prompt_cache": {
+    "hit_ratio": 0.88,
+    "warm": true,
+    "ttl": "5m",
+    "cache_write_tokens": 3500000,
+    "requests": 1
+  },
+  "effort": {
+    "level": "high"
+  }
+}
