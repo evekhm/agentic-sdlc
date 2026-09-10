@@ -834,7 +834,14 @@ asks whether the number was worked, not which layer declined. Exit 2 is
 produced, never forwarded — a child's own status of 2 maps to 1 like
 any other non-zero. Exit 1 is unusable input, an environment that
 cannot start the row, or an unobservable outcome; exit 0 is
-launched-and-ok or printed. The `/work` door is a hand-authored
+launched-and-ok or printed. Superseding #43 D14 (#312 D1, D2, D6),
+process exit code `rc == 0` is required for error demotion; `rc != 0`
+always fails closed with exit 1. When `rc == 0`, a non-SUCCESS harness
+envelope status (such as a transport stream interruption) is demoted
+to a warning logged to stderr (`==> warning: $launch_persona's harness reported status $status with error: $err; terminal WORK-RESULT observed, proceeding.`)
+if a valid terminal `WORK-RESULT:` line is observed; if no valid
+`WORK-RESULT:` line is present, or if status is SUCCESS with no
+`WORK-RESULT:` line, `work.sh` fails closed with exit 1. The `/work` door is a hand-authored
 `.claude/commands/work.md` whose body is exactly
 `` !`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
 $?]"` ``, in the `` !`…` `` form that runs it rather than describing
@@ -1139,6 +1146,7 @@ the consensus axis is agreed, neither `hold` nor `blocked` is present, the
 merger is a different identity from the author, the target rung outranks every
 rung the loop ledger records, and the ledger's head marker is present. With the
 flag off the same evaluation runs and nothing is written.
+When evaluating conjuncts 9 and 10, an issue carrying only `intent:new` with no `status:*` label resolves as ladder rung 1 (`status:planning`, artifact `intent.md`), enabling initial intent pull requests to merge autonomously once reviewer consensus is reached (#321, D1); if an explicit single `status:*` label is present alongside `intent:new`, the `status:*` label takes precedence (D5); unranked issues lacking both `status:*` and `intent:new` fail closed (D5). Budget refusals on `intent:new` issues record `refusal:budget rung:1` (D4).
 
 Before merge evaluation executes, `.github/workflows/merge-gate.yml` runs
 a dedicated `record` job (`scripts/ci/review_recorder.sh <pr>`) ahead of `gate`
@@ -1169,7 +1177,11 @@ least one such check existing. Check roll-up evaluation queries `databaseId`
 on `CheckRun`. Foreign check runs with the same name are deduplicated by
 selecting the entry with the highest `databaseId`, ensuring superseded runs
 (such as cancelled checks replaced by successful retries) do not block
-conjunct (2) (#298). The merge gate excludes its own run by workflow run
+conjunct (2) (#298). Foreign check runs on the head commit are evaluated
+without name or context exclusions (#64 D24, #312 D3), admitting `SUCCESS`
+and `NEUTRAL` conclusions; transient check failures are remediated via
+GitHub Actions retry mechanisms (`gh run rerun <run_id> --failed`) updating
+the check run on the head (#312 D4). The merge gate excludes its own run by workflow run
 databaseId. `UNKNOWN` is retried up to three times before it is treated
 as unevaluable; `BEHIND` is the one false conjunct that escalates, with
 reason-code `behind`, gated by `autonomous_merge` (D18 governs it like any

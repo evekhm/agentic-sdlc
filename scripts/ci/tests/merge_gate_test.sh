@@ -877,7 +877,7 @@ comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456)" 2026-01-03T00:00:
 mkdir -p "$FX/tree/intent/456-thing"
 run "MG-38: intent:new issue with absent intent.md fails conjunct 9" 123
 has "conjunct (9): false" "MG-38 (D1, D2): missing intent.md fails conjunct 9"
-has "intent/456-thing/intent.md is absent at $HEAD" "MG-38 (D1, D2): names the missing artifact"
+has "intent/456-thing/intent.md is absent at $H" "MG-38 (D1, D2): names the missing artifact"
 not_merged "MG-38 (D1, D2): missing intent artifact does not merge"
 
 banner "MG-39 · D1 D3 · AT-3 · intent:new with HIGHEST_MERGED_RANK >= 1 fails conjunct 10"
@@ -906,7 +906,7 @@ banner "MG-41 · D4 · AT-5 · intent:new exceeding budget records refusal:budge
 mk_green; issue_fixture 456 intent:new
 comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:1 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:60.00")" 2026-01-03T00:00:00Z 700)"
 run "MG-41: intent:new exceeding budget records refusal:budget 1" 123
-wrote "refusal:budget 1" "MG-41 (D4): records refusal:budget at rung 1"
+wrote "refusal:budget rung:1" "MG-41 (D4): records refusal:budget at rung 1"
 not_merged "MG-41 (D4): over-budget intent PR does not merge"
 
 banner "MG-42 · D5 · AT-6 · issue with both status:spec and intent:new evaluates as status:spec"
