@@ -430,7 +430,7 @@ issue thread joins rungs. Close-out is
 [#85](https://github.com/evekhm/agentic-sdlc/issues/85), priming and
 the statusline are
 [#330](https://github.com/evekhm/agentic-sdlc/issues/330), the nudge
-that wraps before the context ceiling is
+that keeps the handoff current as the context fills is
 [#329](https://github.com/evekhm/agentic-sdlc/issues/329), and the
 shared store that keys handoffs per user and per seat so a seat
 resumes on any machine is
