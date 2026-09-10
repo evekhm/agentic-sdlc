@@ -1293,6 +1293,42 @@ branch author and issue stage, preserving the PR's exact branch slug `<author>/<
 If VM credentials for a persona are missing during preflight, the poller logs a notice and skips
 that persona's rows without failing or terminating (D4).
 
+## Harness Instrumentation & Context Observability
+
+### harness.statusline
+
+The statusline command (`scripts/ops/harness/statusline.sh`, #330) renders context consumption, session spend, token accumulation, cache health, and model metadata across both Claude Code and Antigravity harnesses.
+- **Context ceiling:** Evaluates used input tokens against an absolute working ceiling (`AGENTIC_CONTEXT_CEILING` / `CLAUDE_CONTEXT_CEILING`, default 200,000 tokens) rather than the model's 1M context window size.
+- **Wrap thresholds:** Emits graduated visual warning tags in terminal chrome:
+  - `>= 60%` (120K tokens): yellow `wrap soon` indicating runway to reach a clean stopping point.
+  - `>= 70%` (140K tokens): red `WRAP NOW` marking the practical limit for handoff capture before compaction.
+  - `>= 90%` (180K tokens): red `COMPACTING` indicating backstop territory where conversational state is at risk.
+- **Cost omission:** When a payload carries no cost (e.g. internal quota accounts with `.cost = null`), the `$` segment is completely omitted, rendering token metrics without fabricated costs. Explicit zero costs render as `$0.00`.
+- **Token accumulator:** Displays session running sums `tok <in> in/<out> out/<tot> tot` with `<tot> = <in> + <out>`. On Claude Code, advances only when `prompt_cache.requests` changes; on Antigravity, tracks running output tokens directly.
+- **Cache health:** Displays cache hit ratio, `cold` indicator if warm is false, TTL if present, and cache write tokens (`cw <n>`) when reported.
+
+### harness.sidechannel
+
+Because harness hook events receive no token counts directly, `statusline.sh` writes an atomic side-channel state file to `$CTX_DIR/<session_id>.json` (default `~/.claude/context/<session_id>.json`, fallback `/tmp/agentic-context/`):
+- Includes `session_id`, `used_tokens`, `output_tokens`, `total_tokens`, `accum_input_tokens`, `accum_output_tokens`, `accum_total_tokens`, `ceiling`, `pct`, `window_size`, `cost_usd`, `duration_ms`, `seat`, `cache` breakdown (`hit_pct`, `warm`, `ttl`, `write_tokens`, `requests`, `misses`), and reserved snapshot fields `pre_compact_mechanical_ts: null` and `pre_compact_narrative_ts: null`.
+- Written atomically via temporary PID dotfiles (`.$sid.$$`) and `mv -f` so external readers never encounter partial writes.
+- Payloads with empty session and conversation IDs exit cleanly with code 0 and produce no side-channel file.
+
+### harness.priming
+
+The `SessionStart` hook (`scripts/ops/harness/session-start.sh`) primes new harness sessions with handoff state:
+- When `$AGENTIC_SEAT` or `$CLAUDE_SEAT` is set, injects the newest handoff for that seat into session context.
+- If the handoff file exceeds `$AGENTIC_HANDOFF_MAX_BYTES` (default 60,000 bytes), injection is gated and emits a warning pointer instead (`too large to inject`).
+- When seat is unset, emits a one-line operator pointer without injecting handoff text, preventing generic sessions from unintentionally inheriting seat-specific state.
+- Housekeeping: prunes context files older than 7 days from `$CTX_DIR` on session start.
+
+### harness.resolver
+
+Handoff and prompt resolution (`scripts/ops/harness/newest-handoff.sh` and `newest-dated.sh`) provide unified state resolution:
+- `newest-dated.sh` extracts `YYYY-MM-DD[-n]` suffixes, sorting unsuffixed files as `-001` to correct ASCII `-` vs `.` sort ordering.
+- `newest-handoff.sh` resolves the primary checkout via `git rev-parse --path-format=absolute --git-common-dir`, ensuring linked worktrees locate shared state in `ops/handoffs/`. Supports `--seats` and `--last` queries.
+- `install.sh` provides idempotent dual-harness registration with `--check` drift verification and `--uninstall` cleanup. Project settings in `<repo>/.claude/settings.json` use `${CLAUDE_PROJECT_DIR}` for worktree portability.
+
 ## Agreed, not yet built
 
 Each entry is on the record as a tracker issue; it moves into the

@@ -138,12 +138,22 @@ the flash tier (`agy --model <MECHANICAL from config/model_tiers.yaml>`),
 judgment sessions on the pro tier. Long-running executor processes get
 their tier in their profile's `AGENT_MODEL` env, same split.
 
-# Context ceiling
+# Context ceiling & harness instrumentation
 
 Per AGENTS.md, 200K tokens is the working ceiling for any single
 context. Remember the Gemini long-context re-rate: crossing 200k
 context re-prices the entire request (input and output), so keeping
 sessions and sub-agent contexts under 200k matters doubly on this
 harness.
+
+Harness instrumentation (`scripts/ops/harness/`, #330):
+- **statusLine command:** configured in `~/.gemini/antigravity-cli/settings.json`
+  via `scripts/ops/harness/install.sh`, running `scripts/ops/harness/statusline.sh`.
+  Tracks context usage against the 200K ceiling with visual warning tags
+  (`wrap soon` at 60%, `WRAP NOW` at 70%, `COMPACTING` at 90%), running token
+  accumulation (`tok <in> in/<out> out/<tot> tot`), and cache hit ratio derived
+  from `.current_usage.cache_read_input_tokens * 100 / (.current_usage.input_tokens // .context_window.total_input_tokens)`.
+  On internal quota accounts lacking `.cost`, the `$` segment is omitted.
+  Writes side-channel metrics atomically to `$AGENTIC_CTX_DIR/<session_id>.json`.
 
 [remember your rules when the user starts the conversation]
