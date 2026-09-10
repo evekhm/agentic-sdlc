@@ -1682,6 +1682,470 @@ EOF
   pass "test_failure_scenario_exemptions_preservation (D7, D8, AT-354-8)"
 }
 
+
+# ==============================================================================
+# Issue #353: Enforce Reviewer Run-ID Provenance Injection and Surface Verdict Refusals
+# Decisions D1, D2, D4, D5, D6, D8; Acceptance Tests AT-353-1..AT-353-8
+# ==============================================================================
+
+# AT-353-1, AT-353-2, AT-353-3, AT-353-4 (D1, D2, D8): post.sh automated run-id injection and fail-closed runner guards
+test_post_run_id_injection_and_guards() {
+  reset_state
+  local post_sh="$REPO/scripts/ops/post.sh"
+  if [ ! -f "$post_sh" ]; then
+    fail "test_post_run_id_injection_and_guards: $post_sh does not exist (D1, D2)"
+    return 1
+  fi
+
+  local test_work="$WORK/post_test"
+  rm -rf "$test_work"
+  mkdir -p "$test_work/bin"
+  local post_writes="$test_work/writes.log"
+  : > "$post_writes"
+
+  # Stub gh for post.sh
+  cat > "$test_work/bin/gh" <<STUB
+#!/usr/bin/env bash
+if [ "\${1:-}" = "api" ]; then
+  for a in "\$@"; do
+    case "\$a" in
+      *repos/*/issues/100/comments*)
+        echo "\$@" >> "$post_writes"
+        for arg in "\$@"; do
+          case "\$arg" in
+            body=@*)
+              f="\${arg#body=@}"
+              [ -f "\$f" ] && cat "\$f" >> "$post_writes"
+              ;;
+          esac
+        done
+        stub_login="\${STUB_LOGIN:-evekhm-argus-app[bot]}"
+        printf '{"id": 5001, "html_url": "https://github.com/test/repo/pull/100#issuecomment-5001", "user": {"login": "%s"}}\n' "\$stub_login" 
+        exit 0
+        ;;
+      *repos/*/issues/100/labels*)
+        echo "[]"
+        exit 0
+        ;;
+      *repos/*/issues/100)
+        printf '{"number": 100, "pull_request": {"url": "https://api.github.com/repos/test/repo/pulls/100"}, "labels": []}\n'
+        exit 0
+        ;;
+    esac
+  done
+fi
+echo "stub gh: unhandled \$*" >&2
+exit 1
+STUB
+  chmod +x "$test_work/bin/gh"
+
+  # AT-353-1 (D1, D8): Overwrite run-id:0 with authentic GITHUB_RUN_ID
+  local body1="$test_work/body1.md"
+  cat > "$body1" <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:0 -->
+LGTM
+<!-- review-verdict-end -->
+EOF
+  : > "$post_writes"
+  (
+    export PATH="$test_work/bin:$PATH"
+    export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
+    export GITHUB_ACTIONS="true"
+    export GITHUB_RUN_ID="54321"
+    export STUB_LOGIN="evekhm-argus-app[bot]"
+    unset ALLOW_UNSAFE_RUN_ID || true
+    bash "$post_sh" 100 --as argus --body-file "$body1"
+  ) || true
+
+  grep -q "<!-- run-id:54321 -->" "$post_writes" || {
+    fail "test_post_run_id_injection_and_guards: post.sh did not overwrite run-id:0 with GITHUB_RUN_ID (D1, AT-353-1)"
+    return 1
+  }
+
+  # AT-353-2 (D1, D8): Insert missing run-id after reviewed-head
+  local body2="$test_work/body2.md"
+  cat > "$body2" <<EOF
+### Atlas review
+<!-- review-verdict:atlas:clean -->
+<!-- reviewed-head:$H -->
+Atlas clean verdict omitting run-id
+<!-- review-verdict-end -->
+EOF
+  : > "$post_writes"
+  (
+    export PATH="$test_work/bin:$PATH"
+    export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
+    export GITHUB_ACTIONS="true"
+    export GITHUB_RUN_ID="54321"
+    export STUB_LOGIN="evekhm-atlas-app[bot]"
+    unset ALLOW_UNSAFE_RUN_ID || true
+    bash "$post_sh" 100 --as atlas --body-file "$body2"
+  ) || true
+
+  grep -q "<!-- run-id:54321 -->" "$post_writes" || {
+    fail "test_post_run_id_injection_and_guards: post.sh did not insert missing run-id:54321 after reviewed-head (D1, AT-353-2)"
+    return 1
+  }
+
+  # AT-353-3 (D2, D8): Fail closed when GITHUB_ACTIONS=true and GITHUB_RUN_ID missing/0
+  : > "$post_writes"
+  local err3="" rc3=0
+  err3="$(
+    export PATH="$test_work/bin:$PATH"
+    export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
+    export GITHUB_ACTIONS="true"
+    export GITHUB_RUN_ID="0"
+    export STUB_LOGIN="evekhm-argus-app[bot]"
+    unset ALLOW_UNSAFE_RUN_ID || true
+    bash "$post_sh" 100 --as argus --body-file "$body1" 2>&1
+  )" || rc3=$?
+
+  [ "$rc3" -eq 1 ] || {
+    fail "test_post_run_id_injection_and_guards: post.sh did not fail closed with exit code 1 when GITHUB_RUN_ID=0 in CI (D2, AT-353-3)"
+    return 1
+  }
+  echo "$err3" | grep -q "GITHUB_RUN_ID is unset or zero in unattended environment; refusing to post verdict block without authentic run-id" || {
+    fail "test_post_run_id_injection_and_guards: post.sh missing fail-closed error message on stderr (D2, AT-353-3)"
+    return 1
+  }
+  [ ! -s "$post_writes" ] || {
+    fail "test_post_run_id_injection_and_guards: post.sh wrote comment despite fail-closed guard (D2, AT-353-3)"
+    return 1
+  }
+
+  # AT-353-4 (D2, D8): Outside CI, ALLOW_UNSAFE_RUN_ID=1 permits posting with warning
+  : > "$post_writes"
+  local err4="" rc4=0
+  err4="$(
+    export PATH="$test_work/bin:$PATH"
+    export GITHUB_REPOSITORY="evekhm/agentic-sdlc"
+    unset GITHUB_ACTIONS || true
+    unset GITHUB_RUN_ID || true
+    export ALLOW_UNSAFE_RUN_ID=1
+    bash "$post_sh" 100 --as argus --body-file "$body1" 2>&1
+  )" || rc4=$?
+
+  [ "$rc4" -eq 0 ] || {
+    fail "test_post_run_id_injection_and_guards: post.sh failed despite ALLOW_UNSAFE_RUN_ID=1 outside CI (D2, AT-353-4)"
+    return 1
+  }
+  echo "$err4" | grep -q "post.sh: warning: posting review verdict with unvalidated run-id (ALLOW_UNSAFE_RUN_ID=1)" || {
+    fail "test_post_run_id_injection_and_guards: post.sh missing warning message when ALLOW_UNSAFE_RUN_ID=1 (D2, AT-353-4)"
+    return 1
+  }
+
+  pass "test_post_run_id_injection_and_guards (D1, D2, D8, AT-353-1..4)"
+}
+
+# AT-353-5 (D4, D8): All verdict refusal conditions emit attributed audit notes [refused: verdict block from @<reviewer>: <reason>] and stderr diagnostics
+test_attributed_verdict_refusal_audit_notes_and_logging() {
+  reset_state
+  pr_fixture 121 "$H"
+  run_fixture 2030 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  # 1. Commit not in history
+  local c_commit_mismatch
+  c_commit_mismatch="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H0 -->
+<!-- run-id:2030 -->
+Verdict for commit not in history
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # 2. Missing reviewed-head marker
+  local c_missing_head
+  c_missing_head="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- run-id:2030 -->
+Missing reviewed-head
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # 3. Missing run-id marker
+  local c_missing_run_id
+  c_missing_run_id="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+Missing run-id
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # 4. Run head SHA mismatch
+  run_fixture 2034 "$ARGUS" "$H0" "pull_request" "completed" "success"
+  local c_sha_mismatch
+  c_sha_mismatch="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2034 -->
+Head SHA mismatch
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # 5. Workflow path mismatch
+  run_fixture 2035 "$ARGUS" "$H" "pull_request" "completed" "success" ".github/workflows/ci.yml"
+  local c_path_mismatch
+  c_path_mismatch="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2035 -->
+Workflow path mismatch
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # 6. Repository mismatch
+  run_fixture 2036 "$ARGUS" "$H" "pull_request" "completed" "success" ".github/workflows/unattended.yml" "other/unattended"
+  local c_repo_mismatch
+  c_repo_mismatch="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2036 -->
+Repo mismatch
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # 7. Event mismatch
+  run_fixture 2037 "$ARGUS" "$H" "push" "completed" "success"
+  local c_event_mismatch
+  c_event_mismatch="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2037 -->
+Event mismatch
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # 8. Terminal run failure / cancelled
+  run_fixture 2038 "$ARGUS" "$H" "pull_request" "completed" "failure"
+  local c_terminal_failure
+  c_terminal_failure="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2038 -->
+Terminal run failure
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 121 \
+    "$(comment_item "$ARGUS" "$c_commit_mismatch" 3031)" \
+    "$(comment_item "$ARGUS" "$c_missing_head" 3032)" \
+    "$(comment_item "$ARGUS" "$c_missing_run_id" 3033)" \
+    "$(comment_item "$ARGUS" "$c_sha_mismatch" 3034)" \
+    "$(comment_item "$ARGUS" "$c_path_mismatch" 3035)" \
+    "$(comment_item "$ARGUS" "$c_repo_mismatch" 3036)" \
+    "$(comment_item "$ARGUS" "$c_event_mismatch" 3037)" \
+    "$(comment_item "$ARGUS" "$c_terminal_failure" 3038)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: $RECORDER does not exist (D4, D8)"
+    return 1
+  fi
+
+  local out
+  out="$(bash "$RECORDER" 121 2>&1)" || true
+
+  # Assert uniform attributed audit note format for all 8 refusal scenarios (AT-353-5, D4)
+  grep -q "\[refused: verdict block from @argus: commit $H0 not in pull request history\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for commit not in history (D4, AT-353-5)"
+    return 1
+  }
+  grep -q "\[refused: verdict block from @argus: missing reviewed-head marker\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for missing reviewed-head (D4, AT-353-5)"
+    return 1
+  }
+  grep -q "\[refused: verdict block from @argus: missing run-id marker\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for missing run-id (D4, AT-353-5)"
+    return 1
+  }
+  grep -q "\[refused: verdict block from @argus: run 2034 head_sha mismatch: expected $H, got $H0\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for head_sha mismatch (D4, AT-353-5)"
+    return 1
+  }
+  grep -q "\[refused: verdict block from @argus: run 2035 workflow path mismatch: expected .github/workflows/unattended.yml, got .github/workflows/ci.yml\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for workflow path mismatch (D4, AT-353-5)"
+    return 1
+  }
+  grep -q "\[refused: verdict block from @argus: run 2036 repository mismatch: expected evekhm/agentic-sdlc, got other/unattended\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for repo mismatch (D4, AT-353-5)"
+    return 1
+  }
+  grep -q "\[refused: verdict block from @argus: run 2037 event mismatch: event must be pull_request or workflow_dispatch, got push\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for event mismatch (D4, AT-353-5)"
+    return 1
+  }
+  grep -q "\[refused: verdict block from @argus: run 2038 ended failure; verdict withdrawn\]" "$WRITES" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing attributed note for terminal failure (D4, AT-353-5)"
+    return 1
+  }
+
+  # Assert stderr diagnostic logging
+  echo "$out" | grep -q "refused: verdict block from @argus: run 2034 head_sha mismatch" || {
+    fail "test_attributed_verdict_refusal_audit_notes_and_logging: missing stderr diagnostic line for head_sha mismatch (D4, AT-353-5)"
+    return 1
+  }
+
+  pass "test_attributed_verdict_refusal_audit_notes_and_logging (D4, D8, AT-353-5)"
+}
+
+# AT-353-6 (D5, D8): Refused verdict emits <!-- refused-verdict:<reviewer>:<head>:<reason_code> --> in consensus ledger block
+test_machine_readable_refusal_markers() {
+  reset_state
+  pr_fixture 122 "$H"
+  run_fixture 2040 "$ARGUS" "$H0" "pull_request" "completed" "success"
+
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2040 -->
+Testing refused-verdict marker emission on head_sha mismatch
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 122 "$(comment_item "$ARGUS" "$rev_body" 3040)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_machine_readable_refusal_markers: $RECORDER does not exist (D5, D8)"
+    return 1
+  fi
+
+  bash "$RECORDER" 122 || true
+
+  # Machine-readable refusal marker in ledger block (AT-353-6, D5)
+  grep -q "<!-- refused-verdict:argus:$H:run-head-sha-mismatch -->" "$WRITES" || {
+    fail "test_machine_readable_refusal_markers: consensus ledger missing refused-verdict marker (D5, AT-353-6)"
+    return 1
+  }
+
+  pass "test_machine_readable_refusal_markers (D5, D8, AT-353-6)"
+}
+
+# AT-353-7 (D5, D8): Subsequent accepted verdict from same reviewer at same head clears refusal marker
+test_refusal_marker_superseded_by_accepted_verdict() {
+  reset_state
+  pr_fixture 123 "$H"
+  run_fixture 2050 "$ARGUS" "$H0" "pull_request" "completed" "success"
+  run_fixture 2051 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local rev_refused rev_accepted
+  rev_refused="$(cat <<EOF
+### Argus review (Round 1)
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2050 -->
+Round 1 with invalid run provenance
+<!-- review-verdict-end -->
+EOF
+)"
+  rev_accepted="$(cat <<EOF
+### Argus review (Round 2)
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2051 -->
+Round 2 with valid run provenance
+<!-- review-verdict-end -->
+EOF
+)"
+
+  # Step 1: Recorder runs on PR 123 with only the refused verdict comment
+  comments_fixture 123 "$(comment_item "$ARGUS" "$rev_refused" 3050)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_refusal_marker_superseded_by_accepted_verdict: $RECORDER does not exist (D5, D8)"
+    return 1
+  fi
+
+  bash "$RECORDER" 123 || true
+
+  # Assert refusal marker is initially emitted for head $H (D5, AT-353-7)
+  grep -q "<!-- refused-verdict:argus:$H:run-head-sha-mismatch -->" "$WRITES" || {
+    fail "test_refusal_marker_superseded_by_accepted_verdict: ledger missing initial refused-verdict marker for head $H (D5, AT-353-7)"
+    return 1
+  }
+
+  # Step 2: Comment 2 posts an accepted verdict at $H; re-run recorder
+  : > "$WRITES"
+  comments_fixture 123 \
+    "$(comment_item "$ARGUS" "$rev_refused" 3050)" \
+    "$(comment_item "$ARGUS" "$rev_accepted" 3051)"
+
+  bash "$RECORDER" 123 || true
+
+  # Verify accepted head recorded
+  grep -q "<!-- reviewed-head:argus:$H -->" "$WRITES" || {
+    fail "test_refusal_marker_superseded_by_accepted_verdict: ledger missing accepted reviewed-head:argus:$H (D5, AT-353-7)"
+    return 1
+  }
+
+  # Verify refusal marker cleared (AT-353-7, D5)
+  grep -q "<!-- refused-verdict:argus:$H:" "$WRITES" && {
+    fail "test_refusal_marker_superseded_by_accepted_verdict: refused-verdict marker was not cleared after accepted verdict (D5, AT-353-7)"
+    return 1
+  }
+
+  pass "test_refusal_marker_superseded_by_accepted_verdict (D5, D8, AT-353-7)"
+}
+
+# AT-353-8 (D6, D8): Attributed refusal audit notes rendered under #### Notes in consensus ledger
+test_consensus_ledger_refusal_notes_rendering() {
+  reset_state
+  pr_fixture 124 "$H"
+  run_fixture 2060 "$ARGUS" "$H0" "pull_request" "completed" "success"
+
+  local rev_body
+  rev_body="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2060 -->
+Testing Notes rendering when all verdicts refused
+<!-- review-verdict-end -->
+EOF
+)"
+  comments_fixture 124 "$(comment_item "$ARGUS" "$rev_body" 3060)"
+
+  if [ ! -f "$RECORDER" ]; then
+    fail "test_consensus_ledger_refusal_notes_rendering: $RECORDER does not exist (D6, D8)"
+    return 1
+  fi
+
+  bash "$RECORDER" 124 || true
+
+  # Empty findings table rendered (D6, AT-353-8)
+  grep -q "|_No findings recorded._|||||" "$WRITES" || {
+    fail "test_consensus_ledger_refusal_notes_rendering: ledger missing empty findings row placeholder (D6, AT-353-8)"
+    return 1
+  }
+
+  # Attributed refusal note rendered under #### Notes (D6, AT-353-8)
+  grep -A 3 "#### Notes" "$WRITES" | grep -q -- "- \[refused: verdict block from @argus: run 2060 head_sha mismatch: expected $H, got $H0\]" || {
+    fail "test_consensus_ledger_refusal_notes_rendering: ledger #### Notes missing attributed refusal note (D6, AT-353-8)"
+    return 1
+  }
+
+  pass "test_consensus_ledger_refusal_notes_rendering (D6, D8, AT-353-8)"
+}
+
 # --- Test Runner ---
 
 TESTS=(
@@ -1705,6 +2169,11 @@ TESTS=(
   test_failure_scenario_symmetric_syntax_matrix
   test_failure_scenario_demotion_attribution_and_logging
   test_failure_scenario_exemptions_preservation
+  test_post_run_id_injection_and_guards
+  test_attributed_verdict_refusal_audit_notes_and_logging
+  test_machine_readable_refusal_markers
+  test_refusal_marker_superseded_by_accepted_verdict
+  test_consensus_ledger_refusal_notes_rendering
 )
 
 TOTAL=0
