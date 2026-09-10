@@ -1353,7 +1353,7 @@ fi
 
 status="$(printf '%s' "$raw" | process_status "$launch_harness" 2>/dev/null)" || status=""
 [ -n "$status" ] || status="ERROR"
-if [ "$rc" -ne 0 ] || [ "$status" != "SUCCESS" ]; then
+if [ "$rc" -ne 0 ]; then
     echo "==> $launch_persona's session did not complete (exit $rc, status $status)." >&2
     exit 1
 fi
@@ -1361,7 +1361,19 @@ fi
 text="$(printf '%s' "$raw" | response_text "$launch_harness" 2>/dev/null)" || text=""
 result_line="$(printf '%s\n' "$text" \
     | grep -E '^[[:space:]]*WORK-RESULT:' | tail -1)" || result_line=""
-if [ -z "$result_line" ]; then
+
+if [ "$status" != "SUCCESS" ]; then
+    if [ -z "$result_line" ]; then
+        echo "==> $launch_persona's session did not complete (exit 0, status $status)." >&2
+        exit 1
+    fi
+    err="$(printf '%s' "$raw" | jq -r '(.error // "")' 2>/dev/null | tr '\n' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    if [ -n "$err" ]; then
+        echo "==> warning: $launch_persona's harness reported status $status with error: $err; terminal WORK-RESULT observed, proceeding." >&2
+    else
+        echo "==> warning: $launch_persona's harness reported status $status (no error detail); terminal WORK-RESULT observed, proceeding." >&2
+    fi
+elif [ -z "$result_line" ]; then
     # A launcher that returns 0 for an outcome it could not observe is
     # lying, and a session that ran out of turns leaves exactly this
     # trace (D14).
