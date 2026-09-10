@@ -473,6 +473,50 @@ PR here (agent or human), regardless of harness:
   verify each added or changed statement against the diff that ships
   it, and flag spec statements the diff does not support.
 
+## The changelog (CHANGELOG.md)
+
+[CHANGELOG.md](CHANGELOG.md) at the repository root documents notable
+behavioral and user-facing changes shipped to `main` in
+reverse-chronological order. It gives human operators and automated
+actors an accessible, plain-English chronological trail of what was built
+and why, complementing the capability-keyed living spec
+([docs/SPEC.md](docs/SPEC.md)):
+
+- **Any PR that changes system behavior updates CHANGELOG.md in the same
+  PR**: add a curated entry under today's date heading (`## YYYY-MM-DD`).
+  If a heading for today's date already exists at the top of the file,
+  prepend within that section; otherwise, prepend a new `## YYYY-MM-DD`
+  heading immediately below the preamble.
+- **Entry structure**: each entry occupies an H3 subsection citing the PR
+  and issue:
+  `### [PR #<n>](https://github.com/evekhm/agentic-sdlc/pull/<n>): <Descriptive Title> ([#<issue>](https://github.com/evekhm/agentic-sdlc/issues/<issue>))`
+  (plain text `### PR #<n>: <Descriptive Title> (#<issue>)` is an
+  acceptable fallback).
+- **Entry content**: exactly 1 to 3 concise, declarative sentences
+  explaining: (1) what capability or behavior changed, (2) why the
+  change was made (the motivating problem or requirement), and (3) the
+  operational or user-visible impact on operators, personas, or workflows.
+  Entries must never include raw commit SHAs, file lists, diff snippets,
+  or author vanity attributions.
+- A PR that touches behavior-bearing paths without changing user-facing
+  or system behavior (refactor, comments, test-only changes, build stage
+  contract test additions) declares that in the PR body with the
+  machine marker line `Changelog: none — <reason>` (or
+  `Changelog-impact: none — <reason>`). A non-empty reason is mandatory
+  following the separator. Note that future Daedalus build PRs touching
+  `scripts/*/tests/**` incur the changelog obligation and must carry a
+  valid marker (e.g. `Changelog: none — build stage contract tests only`).
+- CI enforces this: `scripts/ci/changelog_check.sh`, run by the
+  `changelog-check` job in `.github/workflows/ci-gates.yml`, fails a PR
+  that touches behavior-bearing paths unless the diff touches
+  CHANGELOG.md or the body carries a valid marker. Run it before you
+  push — `bash scripts/ci/changelog_check.sh <base-ref>` — rather than
+  discovering it as a red X.
+- Changelog entries are claims and are reviewed like claims: reviewers
+  verify each entry against the diff, verify bypass reasons on marker
+  lines, and flag inaccurate, low-quality, or frivolous entries as
+  normal defects.
+
 ## Context and cost discipline
 
 Long sessions on large-context models burn money through cache reads:
