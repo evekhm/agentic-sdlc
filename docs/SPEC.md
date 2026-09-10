@@ -297,8 +297,11 @@ emitter per harness; sanitize before write, refusing any output
 carrying a home path, a token shape, an inline credential value, or a
 site-specific string named at run time in `SYNC_AGENTS_DENY` (never
 committed — hard-coding what you are hiding is the leak itself).
-A persona is emitted only for its pinned harness; a sub-agent is
-emitted for every harness, because it inherits its dispatcher's.
+Every source, persona or sub-agent, is emitted for every harness, so
+an operator can start any persona interactively on either one; the
+pin in `config/deployments.yaml` is validated by the build and tells
+the dispatcher which harness launches the persona unattended, never
+where its definition exists (#5 D2, amended 2026-09-10).
 Every emitted file carries a generated-file marker, which is also how
 the build prunes targets no source emits. Modes: default builds,
 `--check` reports drift and exits 1, `--verify` re-parses the emitted

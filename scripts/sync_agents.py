@@ -24,10 +24,12 @@ Pipeline, per persona x per harness:
   5. Sanitize before write: refuse to emit anything carrying a
      secret-like string or a local home path.
 
-Which targets get emitted (config/deployments.yaml, D3):
-  * kind: persona  -> only the harness it is pinned to.
-  * kind: subagent -> BOTH harnesses; sub-agents carry no pin because
-    they run inside their dispatching persona's harness.
+Which targets get emitted (#5 D2 as amended 2026-09-10):
+  * every source, persona or sub-agent, compiles for EVERY harness, so
+    any persona can be started interactively on either harness. The
+    pin in config/deployments.yaml is workflow glue — it tells the
+    dispatcher which harness launches the persona unattended — and is
+    validated here, but it never limits where the definition exists.
 
 Usage:
   python3 scripts/sync_agents.py            build into the repo
@@ -381,23 +383,30 @@ class Resolver:
         return str(model)
 
     def harness_for(self, persona: dict) -> list[str]:
-        """Pinned harness for a persona; both harnesses for a sub-agent (D3)."""
+        """Every harness, for every source (D2 as amended 2026-09-10).
+
+        A persona compiles for BOTH harnesses so an operator can start it
+        interactively on either one; the pin in deployments.yaml is the
+        workflow glue (which harness the dispatcher launches unattended),
+        never a limit on where the agent definition exists. The pin is
+        still validated here because the dispatcher and the reviewer
+        constraint both depend on it.
+        """
         name = persona["name"]
-        if persona["kind"] == "subagent":
-            return self.harnesses()
-        pin = self.pins.get(name)
-        if not isinstance(pin, dict) or not pin.get("harness"):
-            raise BuildError(
-                f"config/deployments.yaml: persona '{name}' has no harness pin."
-            )
-        harness = str(pin["harness"])
-        if harness not in self.harness_models:
-            raise BuildError(
-                f"config/deployments.yaml: persona '{name}' is pinned to unknown "
-                f"harness '{harness}' (model_tiers.yaml knows "
-                f"{sorted(self.harness_models)})."
-            )
-        return [harness]
+        if persona["kind"] == "persona":
+            pin = self.pins.get(name)
+            if not isinstance(pin, dict) or not pin.get("harness"):
+                raise BuildError(
+                    f"config/deployments.yaml: persona '{name}' has no harness pin."
+                )
+            harness = str(pin["harness"])
+            if harness not in self.harness_models:
+                raise BuildError(
+                    f"config/deployments.yaml: persona '{name}' is pinned to unknown "
+                    f"harness '{harness}' (model_tiers.yaml knows "
+                    f"{sorted(self.harness_models)})."
+                )
+        return self.harnesses()
 
     def tools(self, persona: dict, harness: str) -> tuple[list[str], list[tuple[str, str]]]:
         """(concrete tools in declared order, [(capability, fallback text)])."""

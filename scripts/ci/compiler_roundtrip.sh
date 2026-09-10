@@ -11,8 +11,10 @@
 #                     asserted to carry the resolved model, the mapped
 #                     tools, and the full text of every declared skill
 #   5. new persona  — a throwaway source compiles end-to-end in a temp
-#                     tree (pinned harness only, generated fallback for
-#                     an optional capability the harness cannot map)
+#                     tree (both harnesses regardless of the pin, a
+#                     generated fallback for an optional capability one
+#                     harness cannot map, and a refusal when the pin is
+#                     missing)
 #   6. sanitizer    — a source carrying a home path is REFUSED
 #   7. lifecycle    — invalid rungs, duplicate labels, and advances_on
 #                     invariants are refused
@@ -82,7 +84,7 @@ step "4. roundtrip: emitted targets carry model, tools, and full skill text"
 python3 "$COMPILER" --verify || fail "emitted targets lost a resolved fact"
 
 # --- 5. a brand-new persona goes end-to-end -----------------------------------
-step "5. new persona: a throwaway source compiles on its pinned harness"
+step "5. new persona: a throwaway source compiles on both harnesses"
 SRC="$TMP/src"
 mkdir -p "$SRC"
 cp -r "$REPO/personas" "$REPO/config" "$SRC/"
@@ -120,8 +122,11 @@ limits:
   timeout_mins: 1
 YAML
 
-# Pin it to the harness that has NO native ask_user tool, so the build
-# must generate the fallback instruction from config/tools.yaml.
+# The pin is workflow glue for the dispatcher and is validated by the
+# build, but it never limits emission: every persona compiles for
+# every harness (#5 D2 as amended 2026-09-10). Antigravity has NO
+# native ask_user tool, so that target must carry the generated
+# fallback from config/tools.yaml.
 sed -i '/^personas:/a\  throwaway: { harness: antigravity }' "$SRC/config/deployments.yaml"
 
 python3 "$COMPILER" --root "$SRC" --out "$TMP/new" >/dev/null \
@@ -129,10 +134,23 @@ python3 "$COMPILER" --root "$SRC" --out "$TMP/new" >/dev/null \
 
 AGENT="$TMP/new/.agents/agents/throwaway"
 [ -d "$AGENT" ] || fail "no antigravity target emitted for the throwaway persona"
-if [ -f "$TMP/new/.claude/agents/throwaway.md" ]; then
-  fail "throwaway is pinned to one harness but was emitted for both"
+CLAUDE_AGENT="$TMP/new/.claude/agents/throwaway.md"
+[ -f "$CLAUDE_AGENT" ] || fail "no claude-code target emitted for the throwaway persona"
+echo "  ok: emitted for both harnesses regardless of the pin"
+assert_in 'name: throwaway' "$CLAUDE_AGENT" \
+  "the claude-code target carries the persona name"
+assert_not_in '### ask_user' "$CLAUDE_AGENT" \
+  "the claude-code target maps ask_user natively, so no fallback is generated"
+
+# A persona with no pin at all is still refused: the dispatcher needs it.
+UNPINNED="$TMP/unpinned-src"
+cp -r "$SRC" "$UNPINNED"
+sed -i '/^  throwaway: { harness: antigravity }$/d' "$UNPINNED/config/deployments.yaml"
+if python3 "$COMPILER" --root "$UNPINNED" --out "$TMP/unpinned-out" >/dev/null 2>"$TMP/unpinned.err"; then
+  fail "a persona without a harness pin compiled"
 fi
-echo "  ok: emitted for the pinned harness only"
+assert_in "persona 'throwaway' has no harness pin" "$TMP/unpinned.err" \
+  "a persona without a harness pin is refused with a named error"
 
 # The model is a config value, not a constant. Resolve it from the same
 # source tree the compiler just read, so re-pinning a tier in

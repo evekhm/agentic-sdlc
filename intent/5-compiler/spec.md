@@ -28,7 +28,7 @@ harness; **sanitize** before any byte reaches disk.
 | ID | Decision |
 |----|----------|
 | D1 | The build is pure and deterministic: no timestamps, no machine state, no network, no ordering that depends on filesystem iteration. Sources are processed sorted by name; emitted mappings use sorted keys. Two consecutive builds are byte-identical, which is what makes the #6 drift gate a plain rebuild-and-diff. |
-| D2 | Emission targets follow the deployment pin: a `kind: persona` source is emitted ONLY for the harness it is pinned to in `config/deployments.yaml`; a `kind: subagent` source is emitted for EVERY harness, because sub-agents carry no pin and inherit their dispatcher's harness (#2, D3). |
+| D2 | Every source is emitted for EVERY harness. A `kind: persona` source still requires a pin in `config/deployments.yaml`, and the build refuses a missing or unknown one, because the dispatcher (#36) and the distinct-reviewer constraint (#2 D4) resolve through it; the pin is workflow glue, not a limit on where the definition exists. A `kind: subagent` source carries no pin and inherits its dispatcher's harness (#2, D3). **Amended 2026-09-10 (operator ruling).** The clause originally read *"a `kind: persona` source is emitted ONLY for the harness it is pinned to"*. That made an interactive `claude` session unable to run as `athena`, `atlas`, `daedalus` or `odyssey` at all, and `agy` unable to run as `argus` or `cassandra`, because the agent definition did not exist on the other harness. The operator must be able to start any persona on either harness; only the unattended launch follows the pin. |
 | D3 | The instruction body is assembled once and is identical across harnesses, in fixed order: role contract → skills inlined verbatim in declared order → authority and bounds → execution caps and escalation grade → pointer to AGENTS.md → generated capability fallbacks. Only the fallback section can differ between harnesses, and only because a fallback exists exactly where a harness lacks a tool. |
 | D4 | Fallback text is GENERATED from the `fallback` field in `config/tools.yaml` for optional capabilities the target harness cannot map. A REQUIRED capability with no mapping is a build failure, never a silent omission. Fallbacks are never hand-written into a target. |
 | D5 | Prose in the body is hard-wrapped to 72 columns deterministically; skill files are inlined VERBATIM and unwrapped, so the roundtrip can assert the full skill text survived compilation byte for byte. |
@@ -42,18 +42,20 @@ harness; **sanitize** before any byte reaches disk.
 
 ## Acceptance
 
-- `python3 scripts/sync_agents.py` compiles all 11 sources into 30
-  target files: 9 Claude agent files (4 pinned personas + 5
-  sub-agents) and 7 Antigravity agent directories (2 pinned personas
-  + 5 sub-agents).
+- `python3 scripts/sync_agents.py` compiles every source into one
+  Claude agent file and one Antigravity agent directory each: with 11
+  sources (6 personas + 5 sub-agents) that is 11 Claude agent files
+  and 11 Antigravity agent directories (amended 2026-09-10; before the
+  D2 amendment a persona compiled for its pinned harness only).
 - `python3 scripts/sync_agents.py --check` exits 0 against the
   committed targets, and exits 1 with a per-file drift report when a
   source or a pin changes without a rebuild.
 - `bash scripts/ci/compiler_roundtrip.sh` exits 0, covering: schema
   check, determinism (two builds diffed), no drift, re-parse of every
   emitted target, a throwaway persona compiled end-to-end in a temp
-  tree (pinned harness only, generated fallback for an optional
-  unmapped capability), a sanitizer refusal that writes nothing, and a
+  tree (both harnesses regardless of the pin, a generated fallback for
+  an optional capability one harness cannot map, and a refusal when
+  the pin is missing), a sanitizer refusal that writes nothing, and a
   run-time `SYNC_AGENTS_DENY` refusal.
 - A home-path and token-shape grep over the emitted targets returns
   nothing (the sanitizer's own rules, run independently).
