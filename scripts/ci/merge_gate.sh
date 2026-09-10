@@ -465,7 +465,11 @@ elif [ "$MERGE_STATE" = "CLEAN" ] || [ "$MERGE_STATE" = "UNSTABLE" ]; then
             failing = ""
             for (i = 1; i <= total; i++) {
                 n = names[i]; s = state[n]; val = (s == "" ? "PENDING" : toupper(s))
-                if (val != "SUCCESS" && val != "NEUTRAL") failing = failing " " n "=" val
+                # SKIPPED is a job whose `if` was false: the personas matrix on a
+                # `labeled` event nobody subscribes to (D2) reports one skipped
+                # check under its unexpanded name. It ran nothing and holds no
+                # verdict; the reviewer obligations live in conjuncts (3) and (4).
+                if (val != "SUCCESS" && val != "NEUTRAL" && val != "SKIPPED") failing = failing " " n "=" val
             }
             printf "%d\t%s\n", total, failing
         }' <<<"$CHECKS_TSV")"

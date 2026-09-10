@@ -819,6 +819,17 @@ has "conjunct (2): false" "MG-32: superseded success check overridden by newer f
 has "execution — bindings=FAILURE" "MG-32: names the failing check"
 not_merged "MG-32"
 
+banner "MG-32b · D2 D3 · a SKIPPED check (personas matrix on a labeled event nobody subscribes to) passes conjunct 2"
+mk_green
+mergestate_checks 123 \
+  "$(row check merge-gate '' 999 500)" \
+  "$(row check 'execution — bindings' SUCCESS 1001 2001)" \
+  "$(row check '${{ matrix.persona }} via ${{ matrix.placement }}' SKIPPED 1003 2003)" \
+  "$(row status 'argus via gh-actions' SUCCESS '' '')"
+run "MG-32b: exits 0" 123
+has "conjunct (2): true" "MG-32b: the skipped matrix job is not a failing check (2)"
+merged "MG-32b: and the merge proceeds"
+
 banner "MG-33 · D3 · check roll-up deduplication: pending check in roll-up fails conjunct 2"
 mk_green
 mergestate_checks 123 \
