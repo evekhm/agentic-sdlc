@@ -45,7 +45,9 @@ orchestrator, the harnesses, the playbook mapping, how to run it):
 6. **The playbook, and what this adds** — stages and plays, the
    mapping onto the rungs, the five additions.
 7. **Running it yourself** — prerequisites (D11), who may file (D9),
-   the one command (D5), what a merge means (D8).
+   the one command (D5), how a session ends and its successor resumes
+   (the handoff; added 2026-09-10 by the product owner), what a merge
+   means (D8).
 8. **Where the rules live** — the document map (D3).
 
 Every issue or pull request README cites is a link to its tracker

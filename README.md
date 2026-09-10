@@ -416,6 +416,26 @@ and dispatches that persona under its own identity. It refuses when
 the item is on hold, closed, blocked, claimed or in contradictory
 state. Full contract: [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`.
 
+**A session ends with a handoff.** A session is ephemeral and its
+context is the expensive part, so nothing it settled may live only in
+its transcript. Before it ends, the session wraps: `/wrap` in Claude
+Code, the close-out script in any harness. The wrap runs the session
+checklist, records what the session learned, and writes a dated
+handoff for its seat under `ops/handoffs/`, outside git. The next
+session for that seat opens with that handoff as its first input,
+injected at start by the harness hook or loaded by the seat launcher,
+so a successor never starts cold and never re-derives what its
+predecessor already decided. The handoff joins sessions the way the
+issue thread joins rungs. Close-out is
+[#85](https://github.com/evekhm/agentic-sdlc/issues/85), priming and
+the statusline are
+[#330](https://github.com/evekhm/agentic-sdlc/issues/330), the nudge
+that wraps before the context ceiling is
+[#329](https://github.com/evekhm/agentic-sdlc/issues/329), and the
+shared store that keys handoffs per user and per seat so a seat
+resumes on any machine is
+[#399](https://github.com/evekhm/agentic-sdlc/issues/399).
+
 When the owner steps in at a gate, the action means the same thing
 everywhere:
 
