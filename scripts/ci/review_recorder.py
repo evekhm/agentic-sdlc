@@ -98,6 +98,14 @@ def main():
     initial_existing_row_ids = set()
     rows = {}  # fid -> {severity, status, peer}
     audit_notes = []
+    refused_verdicts = {}  # (reviewer, reviewed_head) -> reason_code
+
+    def record_refusal(reviewer, reviewed_head, reason, code):
+        msg = f"refused: verdict block from @{reviewer}: {reason}"
+        print(msg, file=sys.stderr)
+        audit_notes.append(f"[{msg}]")
+        if reviewed_head and re.match(r'^[0-9a-f]{40}$', reviewed_head):
+            refused_verdicts[(reviewer, reviewed_head)] = code
 
     for c in comments:
         body = c.get("body", "")
@@ -132,6 +140,10 @@ def main():
                 fid, sev, st, pr_val = m_row.groups()
                 rows[fid] = {"severity": sev, "status": st, "peer": pr_val}
                 initial_existing_row_ids.add(fid)
+            m_refused = re.match(r'^<!-- refused-verdict:(argus|atlas):([0-9a-f]{40}):([a-z0-9-]+) -->$', line)
+            if m_refused:
+                r_rev, r_sha, r_code = m_refused.groups()
+                refused_verdicts[(r_rev, r_sha)] = r_code
 
     prev_ledger_heads = {}
     if prev_argus_head:
@@ -172,20 +184,19 @@ def main():
             # Extract reviewed-head
             h_match = re.search(r'<!-- reviewed-head:([0-9a-f]{40}) -->', block)
             if not h_match:
-                audit_notes.append(f"[refused: verdict block from @{reviewer}: missing reviewed-head marker]")
+                record_refusal(reviewer, None, "missing reviewed-head marker", "missing-reviewed-head")
                 continue
             reviewed_head = h_match.group(1)
 
             # Validate commit in PR history
             if reviewed_head not in valid_commits:
-                print(f"refused: verdict block from @{reviewer}: commit {reviewed_head} not in pull request history", file=sys.stderr)
-                audit_notes.append(f"[refused: verdict block from @{reviewer}: commit {reviewed_head} not in pull request history]")
+                record_refusal(reviewer, reviewed_head, f"commit {reviewed_head} not in pull request history", "commit-not-in-history")
                 continue
 
             # Extract run-id
             r_match = re.search(r'<!-- run-id:([0-9]+) -->', block)
             if not r_match:
-                audit_notes.append(f"[refused: verdict block from @{reviewer}: missing run-id marker]")
+                record_refusal(reviewer, reviewed_head, "missing run-id marker", "missing-run-id")
                 continue
             run_id = r_match.group(1)
 
@@ -212,20 +223,21 @@ def main():
 
             # Check 4 provenance predicates
             if run_head_sha != reviewed_head:
-                audit_notes.append(f"[refused: run {run_id} head_sha mismatch: expected {reviewed_head}, got {run_head_sha}]")
+                record_refusal(reviewer, reviewed_head, f"run {run_id} head_sha mismatch: expected {reviewed_head}, got {run_head_sha}", "run-head-sha-mismatch")
                 continue
             if run_path != ".github/workflows/unattended.yml":
-                audit_notes.append(f"[refused: run {run_id} workflow path mismatch: expected .github/workflows/unattended.yml, got {run_path}]")
+                record_refusal(reviewer, reviewed_head, f"run {run_id} workflow path mismatch: expected .github/workflows/unattended.yml, got {run_path}", "run-workflow-path-mismatch")
                 continue
             if run_repo != repo:
-                audit_notes.append(f"[refused: run {run_id} repository mismatch: expected {repo}, got {run_repo}]")
+                record_refusal(reviewer, reviewed_head, f"run {run_id} repository mismatch: expected {repo}, got {run_repo}", "run-repo-mismatch")
                 continue
             if run_event not in ("pull_request", "workflow_dispatch"):
-                audit_notes.append(f"[refused: run {run_id} event mismatch: event must be pull_request or workflow_dispatch, got {run_event}]")
+                record_refusal(reviewer, reviewed_head, f"run {run_id} event mismatch: event must be pull_request or workflow_dispatch, got {run_event}", "run-event-mismatch")
                 continue
 
             # Terminal conclusion failure or cancelled causes withdrawal
             if run_status == "completed" and run_concl in ("failure", "cancelled"):
+                record_refusal(reviewer, reviewed_head, f"run {run_id} ended {run_concl}; verdict withdrawn", "run-terminal-failure")
                 audit_notes.append(f"[run {run_id} ended {run_concl}; verdict withdrawn]")
                 if reviewer in last_accepted_heads and last_accepted_heads[reviewer] != reviewed_head:
                     accepted_heads[reviewer] = last_accepted_heads[reviewer]
@@ -238,6 +250,7 @@ def main():
             # Provenance passed! Accept verdict block
             accepted_heads[reviewer] = reviewed_head
             last_accepted_heads[reviewer] = reviewed_head
+            refused_verdicts.pop((reviewer, reviewed_head), None)
 
             # Extract round
             round_match = re.search(r'<!-- round:([0-9]+) -->', block)
@@ -408,6 +421,8 @@ def main():
     for fid in sorted(rows.keys()):
         r = rows[fid]
         lines.append(f"<!-- ledger-row:{fid}:{r['severity']}:{r['status']}:{r['peer']} -->")
+    for (r_rev, r_head), r_code in sorted(refused_verdicts.items()):
+        lines.append(f"<!-- refused-verdict:{r_rev}:{r_head}:{r_code} -->")
     lines.append("<!-- consensus-ledger-end -->")
     lines.append("")
 
