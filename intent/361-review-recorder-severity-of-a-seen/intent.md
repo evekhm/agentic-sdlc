@@ -1,6 +1,6 @@
 # Intent: Update Finding Severity from Reviewer Verdict Blocks in Consensus Recorder
 
-**Issue:** #361 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Proposed
+**Issue:** #361 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
