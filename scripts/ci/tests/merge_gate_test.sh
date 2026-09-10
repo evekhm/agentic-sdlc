@@ -1115,4 +1115,63 @@ run "MG-46b: exits 0" 123
 has "conjunct (3): true" "MG-46b: fallback passes conjunct (3) when both Argus and Atlas have reviewed"
 has "argus and atlas both recorded at $H" "MG-46b: names both reviewers recorded"
 
+
+# ==============================================================================
+# Issue #353: Enforce Reviewer Run-ID Provenance Injection and Surface Verdict Refusals
+# Decisions D7, D8; Acceptance Tests AT-353-9, AT-353-10
+# ==============================================================================
+
+banner "MG-47 · D7 · conjunct (3) reports argus verdict refused by recorder (AT-353-9)"
+mk_green
+refused_cl_argus="$(cat <<EOF
+<!-- consensus-ledger:123 -->
+<!-- reviewed-head:argus:$H0 -->
+<!-- reviewed-head:atlas:$H -->
+<!-- assigned:argus,atlas -->
+<!-- refused-verdict:argus:$H:run-head-sha-mismatch -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+comments_fixture 123 "$(comment "$MERGER" "$refused_cl_argus")"
+run "MG-47: exits 0" 123
+has "conjunct (3): false" "MG-47 (D7): conjunct (3) reports false when Argus verdict refused at HEAD"
+has "argus verdict at $H was refused by recorder (run-head-sha-mismatch); ledger recorded head is $H0" "MG-47 (D7, AT-353-9): explanatory refused verdict diagnostic reported"
+not_merged "MG-47 (D7): PR does not merge with refused Argus verdict"
+
+banner "MG-48 · D7 · conjunct (3) reports atlas verdict refused by recorder when carry-forward blocked (AT-353-10)"
+mk_green
+refused_cl_atlas="$(cat <<EOF
+<!-- consensus-ledger:123 -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H0 -->
+<!-- assigned:argus,atlas -->
+<!-- ledger-row:AT-353-10:normal:open:none -->
+<!-- refused-verdict:atlas:$H:run-workflow-path-mismatch -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+comments_fixture 123 "$(comment "$MERGER" "$refused_cl_atlas")"
+run "MG-48: exits 0" 123
+has "conjunct (3): false" "MG-48 (D7): conjunct (3) reports false when Atlas verdict refused at HEAD"
+has "atlas verdict at $H was refused by recorder (run-workflow-path-mismatch); ledger recorded head is $H0" "MG-48 (D7, AT-353-10): explanatory Atlas refused verdict diagnostic reported"
+not_merged "MG-48 (D7): PR does not merge with refused Atlas verdict"
+
+banner "MG-49 · D7 · conjunct (3) reports dual refusals when both argus and atlas are refused at HEAD"
+mk_green
+refused_cl_dual="$(cat <<EOF
+<!-- consensus-ledger:123 -->
+<!-- reviewed-head:argus:$H0 -->
+<!-- reviewed-head:atlas:$H0 -->
+<!-- assigned:argus,atlas -->
+<!-- refused-verdict:argus:$H:commit-not-in-history -->
+<!-- refused-verdict:atlas:$H:missing-run-id -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+comments_fixture 123 "$(comment "$MERGER" "$refused_cl_dual")"
+run "MG-49: exits 0" 123
+has "conjunct (3): false" "MG-49 (D7): conjunct (3) reports false when both reviewers refused at HEAD"
+has "argus verdict at $H was refused by recorder (commit-not-in-history); ledger recorded head is $H0; atlas verdict at $H was refused by recorder (missing-run-id); ledger recorded head is $H0" "MG-49 (D7): dual refusal diagnostics joined by semicolon"
+not_merged "MG-49 (D7): PR does not merge with dual refused verdicts"
+
 echo "merge_gate_test.sh: all scenarios passed"
