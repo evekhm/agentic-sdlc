@@ -252,6 +252,8 @@ def main():
     effective_round = max(max_accepted_head_round, existing_round_from_labels, prev_ledger_round)
 
     # Pass 2: apply maintainer retiers and process findings in accepted blocks
+    # D4: finding ids settled by an authorized maintainer retier in this run
+    retiered_fids = set()
     for c_idx, c in enumerate(comments):
         body = c.get("body", "")
         user_obj = c.get("user", {})
@@ -271,6 +273,7 @@ def main():
                 elif rfid in rows:
                     rows[rfid]["severity"] = rsev
                     audit_notes.append(f"[retiered to {rsev} by @{author_login}]")
+                    retiered_fids.add(rfid)
             else:
                 audit_notes.append(f"[refused: retier by @{author_login}: unauthorized]")
 
@@ -330,6 +333,9 @@ def main():
                 else:
                     discoverer = "argus"
 
+                # D1: remember the recorded severity before this pass touches the row (None = new row)
+                old_sev = rows[fid]["severity"] if fid in rows else None
+
                 if fsev == "security":
                     if fid not in rows:
                         init_st = fst
@@ -363,6 +369,27 @@ def main():
                             rows[fid]["status"] = fst
                         if fpr == "dispute":
                             rows[fid]["peer"] = "dispute"
+
+                # D1/D2/D4: the discovering reviewer may move a recorded finding's severity
+                if old_sev is not None and reviewer == discoverer and fid not in retiered_fids:
+                    # D4: Security tier protection against unilateral footer downgrades
+                    if old_sev == "security" and fsev != "security":
+                        print(f"finding {fid}: footer severity change from security to {fsev} ignored; security rows require maintainer retier")
+                    else:
+                        new_sev = fsev
+                        # D2: Post-cap funnel rules: in round 4+, upward transition to high demoted to normal
+                        if effective_round >= 4 and old_sev in ("normal", "suggestion") and new_sev == "high":
+                            new_sev = "normal"
+                        if old_sev != new_sev:
+                            rows[fid]["severity"] = new_sev
+                            audit_notes.append(f"[severity updated to {new_sev} by @{reviewer} on {fid}]")
+                            print(f"finding {fid}: severity updated from {old_sev} to {new_sev} by @{reviewer}")
+                            # D4: Non-security elevation to security requires peer confirmation
+                            if new_sev == "security":
+                                rows[fid]["peer"] = "pending"
+                elif old_sev is not None and reviewer == discoverer and fid in retiered_fids:
+                    # P4: an authorized maintainer retier is terminal for this finding id
+                    print(f"finding {fid}: footer severity {fsev} ignored; retiered to {rows[fid]['severity']} by maintainer")
 
     if verdict_blocks_found == 0 and existing_comment_id is None:
         print(f"no verdict blocks on #{pr}, recorder writes nothing")

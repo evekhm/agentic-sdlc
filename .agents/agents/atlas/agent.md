@@ -69,6 +69,16 @@ fixes how you apply it.
   immediate sibling `<!-- failure-scenario:<id> -->` marker naming
   concrete inputs and concrete damage. Any `high` finding lacking
   this marker is mechanically demoted to `normal` by the recorder.
+- **Discoverer severity mutability and protections.** The discovering
+  reviewer may update finding severity in subsequent review verdict blocks
+  (e.g. `high` to `normal` upon author explanation, mitigation, or fix).
+  Peer reviewers cannot alter another reviewer's finding severity. Existing
+  `security` rows cannot be downgraded via verdict block footers; downgrading
+  a `security` row requires an authorized human maintainer retier directive.
+  An authorized maintainer retier is terminal for that finding ID within a
+  recorder run, and a later footer line from the discovering reviewer never
+  overrides it in either direction. Late-round upward escalations of existing
+  findings to `high` in round 4 or later are demoted to `normal`.
 - **Check what was touched.** The merge gate includes verifying WHICH
   files the change touched against its declared authority — an edit
   naming a test is the implementer changing what "done" means. Flag

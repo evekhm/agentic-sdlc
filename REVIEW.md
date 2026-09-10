@@ -132,7 +132,14 @@ Enforcement (recorder execution via scripts/ci/review_recorder.sh):
   (`@argus retier <id> <severity>` or `@atlas retier <id> <severity>`,
   e.g. `@argus retier R2-1 normal`); the recorder records the override
   and recomputes labels. Human overrides are not debatable by either
-  reviewer.
+  reviewer, and an authorized maintainer retier is terminal for that finding ID
+  within a recorder run (a later reviewer footer never overrides it in either direction).
+- The discovering reviewer may update finding severity across review rounds in its
+  verdict block footers (downward transitions across all rounds; upward escalation
+  to `high` capped to `normal` in round 4+). Peer reviewers cannot alter finding severity.
+  Existing `security` rows cannot be downgraded via verdict block footers; downgrading
+  a `security` row requires an authorized maintainer retier directive. Any re-encountered
+  `high` finding without a sibling failure-scenario marker demotes to `normal`.
 
 ## The round funnel
 
@@ -252,6 +259,7 @@ that caps the bill.
   - Each finding line matches `^<!-- finding:([A-Za-z0-9@-]+):(security|high|normal|suggestion):(open|fixed|withdrawn):(pending|agree|dispute|none) -->$`.
   - Findings citing spec decisions use format `<id>@<Dn>` (e.g. `R1-1@D4`) or `<id>@none` when uncited.
   - Each `high` finding must be immediately accompanied by its sibling marker `<!-- failure-scenario:<id> -->`.
+  - The discovering reviewer may update finding severity across rounds via the finding footer marker (subject to round funnel caps, failure-scenario validation, and security tier protections).
 - Both reviewers are stateless between runs. Every conversational
   comment is therefore self-contained: the finding IDs, the head it
   refers to, and the evidence. The thread is the only memory.
