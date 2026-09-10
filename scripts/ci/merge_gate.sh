@@ -98,7 +98,14 @@ PR_PATHS_FILE="${PR_PATHS_FILE:-}"
 GATE_TMP_PATHS=""
 if [ -z "$PR_PATHS_FILE" ]; then
     GATE_TMP_PATHS="$(mktemp)"
-    prq '.files[]?.path // empty' > "$GATE_TMP_PATHS" 2>/dev/null || true
+    # `gh pr view --json files` returns at most 100 entries; the pulls/files
+    # endpoint paginates, so the path axis sees every file (R2-1@D5). The view
+    # list is the fallback when the endpoint yields nothing usable.
+    gh api "repos/$R/pulls/$PR/files" --paginate 2>/dev/null \
+        | jq -r 'if type == "array" then .[].filename else empty end' > "$GATE_TMP_PATHS" 2>/dev/null || true
+    if [ ! -s "$GATE_TMP_PATHS" ]; then
+        prq '.files[]?.path // empty' > "$GATE_TMP_PATHS" 2>/dev/null || true
+    fi
     PR_PATHS_FILE="$GATE_TMP_PATHS"
     trap '[ -z "${GATE_TMP_PATHS:-}" ] || rm -f "$GATE_TMP_PATHS"' EXIT
 fi
