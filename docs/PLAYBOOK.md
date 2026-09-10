@@ -784,3 +784,11 @@ zero blocking rows; #397 was filed, the lifecycle advancer withholding
 the dispatch row while `in-progress` is held and never retrying it;
 and the poller restarted with the #337 fix and fired its first
 self-directed fix round, on PR #365.
+
+Status snapshot (2026-09-10, ~20:10 UTC, main at `019986c`): #330's
+implement PR #403 merged as `019986c` after three review rounds, one
+fix round the poller fired itself, and a by-hand `merge-gate.yml`
+dispatch because no gate run followed the round-3 verdict; the
+fixtures and spec amendment round 2 are still owed, and #405 was filed
+on test suites that cannot prove their verdict comes from the code
+under test.
