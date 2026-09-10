@@ -32,10 +32,11 @@ bin/
 # Local scratch — run artifacts never get committed (AGENTS.md)
 runs/
 # Local operator state — charters, handoffs, wave prompts, launchers (AGENTS.md)
-ops/
+/ops/
 # Local harness/IDE state
 .claude/*
 !.claude/agents/
 !.claude/commands/
+!.claude/settings.json
 .idea/
 __pycache__/

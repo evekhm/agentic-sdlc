@@ -219,3 +219,19 @@ Odyssey must:
    python3 scripts/ops/execution.py --check
    ```
 5. Apply `deep-review` label via `scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review` (Criteria DEEP-1, DEEP-3, DEEP-5).
+
+---
+
+## 7. Plan Sync & Implementation Results
+
+- **Task 1 (Daedalus):** Contract test suite `scripts/ops/tests/harness_test.sh` created with 21 contract tests and 5 fixtures (verified RED at build).
+- **Task 2 (Odyssey):** Updated `.gitignore` to allow tracking `.claude/settings.json`.
+- **Task 3 (Odyssey):** Implemented `scripts/ops/harness/newest-dated.sh` with date and `-n` suffix sorting (`-001` unsuffixed).
+- **Task 4 (Odyssey):** Implemented `scripts/ops/harness/newest-handoff.sh` with `git-common-dir` primary checkout resolution and `--seats`/`--last` queries.
+- **Task 5 (Odyssey):** Implemented `scripts/ops/harness/session-start.sh` with seated handoff injection, 60KB gate, unseated operator pointer, and 7-day context prune.
+- **Task 6 (Odyssey):** Implemented `scripts/ops/harness/statusline.sh` covering display contract, wrap thresholds (60/70/90%), absent cost omission, dual-harness token accumulator, and atomic side-channel JSON writing.
+- **Task 7 (Odyssey):** Implemented `scripts/ops/harness/install.sh` (`--check`, `--uninstall`, drift verification) and tracked project settings `<repo>/.claude/settings.json` using `${CLAUDE_PROJECT_DIR}`.
+- **Task 8 (Odyssey):** Wired `harness_test.sh` into `.github/workflows/ci-gates.yml` under `execution`.
+- **Task 9 (Odyssey):** Updated `intent/330-statusline-instrumentation/spec.md` AT-2 description and documented AT-15..AT-21.
+- **Task 10 (Odyssey):** Upserted living system spec in `docs/SPEC.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `scripts/README.md`.
+- **Verification:** All 21 contract tests pass (21/21 GREEN). All local CI gates pass.

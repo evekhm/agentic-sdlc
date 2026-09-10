@@ -97,7 +97,7 @@ Every discovery question is answered below with evidence from source inspection 
 
 - **AT-1 (D1, D8, D10):** `statusline.sh` given a Claude payload with 105.3K used tokens, $81.40 cost, 88% cache hit with 5m ttl and 3.5M cache write tokens, effort `high`, and seat `advisor` outputs:
   `ctx 105.3K/200K 52%  $81.40  tok 105.3K in/4 out/105.3K tot  cache 88% 5m cw 3.5M  Fable 5.1 [high] · advisor`
-- **AT-2 (D1, D8, D9):** `statusline.sh` given an Antigravity payload with no `.cost` (`runs/2026-09-10_330-agy-fixtures/agy-internal-quota-no-cost.json`) omits the `$` segment and outputs tokens and wrap tag:
+- **AT-2 (D1, D8, D9):** `statusline.sh` given an Antigravity payload with no `.cost` (`runs/2026-09-10_330-agy-fixtures/agy-internal-quota-no-cost.json`) omits the `$` segment and outputs tokens:
   `ctx 107.0K/200K 53%  tok 107.0K in/45.1K out/152.2K tot  cache 94%  Gemini 3.8 Flash [high]`
 - **AT-3 (D1, D9):** `statusline.sh` given an explicit cost of zero prints `$0.00`:
   `ctx 12.0K/200K 6%  $0.00  tok 12.0K in/10 out/12.0K tot  cache 0% cold cw 11.0K  Opus 5`
@@ -112,6 +112,13 @@ Every discovery question is answered below with evidence from source inspection 
 - **AT-12 (D5, D7):** `install.sh` running twice produces exactly one `statusLine` entry and one `SessionStart` hook entry; project settings `<repo>/.claude/settings.json` use `${CLAUDE_PROJECT_DIR}`.
 - **AT-13 (D5, D16):** `install.sh --check` verifies that tracked settings reference existing files and that both harnesses resolve to the same `statusline.sh`.
 - **AT-14 (D6, D17):** `bash scripts/ops/tests/harness_test.sh` executes all test scenarios and fixture comparisons, exiting with code 0; `ci-gates.yml` executes the test suite.
+- **AT-15 (D8):** `statusline.sh` triggers yellow `wrap soon` tag at >= 60% context threshold.
+- **AT-16 (D8):** `statusline.sh` triggers red `WRAP NOW` tag at >= 70% context threshold.
+- **AT-17 (D8):** `statusline.sh` triggers `COMPACTING` tag at >= 90% context threshold.
+- **AT-18 (D10):** `statusline.sh` Claude Code accumulator advances on `requests` change and ignores redraws.
+- **AT-19 (D10):** `statusline.sh` Antigravity accumulator tracks running output tokens.
+- **AT-20 (D17):** `statusline.sh` matches exact byte contract for Claude no-cost fixture (`claude-no-cost-wrap.json`).
+- **AT-21 (D17):** `statusline.sh` matches exact byte contract for Antigravity with-cost fixture (`agy-with-cost.json`).
 
 ---
 

@@ -66,13 +66,26 @@ tracker"). This harness adds the tooling:
   timestamped run folders") before writing, and tell subagents the
   absolute path — a subagent in its own worktree has the same trap.
 
-# Context ceiling
+# Context ceiling & harness instrumentation
 
 Per AGENTS.md, 200K tokens is the working ceiling for any single
 context. On this harness that is a hard economic line, not a
 preference: on 1M-context Claude deployments, a request whose input
 crosses 200K is re-priced at the long-context premium for the ENTIRE
-request, and compaction itself is a full cache re-write. Therefore:
+request, and compaction itself is a full cache re-write.
+
+Harness instrumentation (`scripts/ops/harness/`, #330):
+- **statusLine command:** configured in `~/.claude/settings.json` via
+  `scripts/ops/harness/install.sh`, running `scripts/ops/harness/statusline.sh`.
+  Tracks context usage against 200K ceiling, displaying graduated tags
+  (`wrap soon` at 60%, `WRAP NOW` at 70%, `COMPACTING` at 90%), list spend,
+  token accumulation in/out/tot, and cache health (`cw <n>`). Writes atomic
+  side-channel metrics to `~/.claude/context/<session_id>.json`.
+- **SessionStart hook:** configured in `<repo>/.claude/settings.json` via
+  `${CLAUDE_PROJECT_DIR}/scripts/ops/harness/session-start.sh` with
+  `autoCompactWindow: 180000`. Primes seated sessions (`CLAUDE_SEAT` or `AGENTIC_SEAT`)
+  with the newest handoff (gated at 60KB max) and outputs an operator pointer
+  for unseated sessions.
 
 - Treat 200K as the compaction trigger: when the session approaches
   it, say so, state the approximate context size, and compact

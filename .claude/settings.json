@@ -1,0 +1,16 @@
+{
+  "autoCompactWindow": 180000,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/ops/harness/session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
