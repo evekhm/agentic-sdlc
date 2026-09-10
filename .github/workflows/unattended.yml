@@ -119,7 +119,15 @@ jobs:
           elif [ "$EVENT_NAME" = "pull_request" ]; then
             # Draft PRs skip review dispatch entirely (#265 D2, AT-9)
             if [ "${IS_DRAFT:-false}" = "true" ] || [ "${{ github.event.pull_request.draft }}" = "true" ]; then
-              echo "PR is draft; skipping review dispatch"
+              if [ "$PR_ACTION" = "labeled" ] && [ "$LABEL_NAME" = "deep-review" ]; then
+                echo "deep-review is not accepted while draft; deleting label"
+                gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" \
+                  || { echo "::error::deep-review label removal failed for PR #$PR_NUMBER; refusing to dispatch"; exit 1; }
+                gh api -X POST "repos/$GITHUB_REPO/issues/$PR_NUMBER/comments" -f body="deep-review is not accepted while the pull request is a draft; the label was removed. Apply it again after the PR is marked ready for review (#265 D2/D3)." \
+                  || { echo "::error::refusal comment post failed for PR #$PR_NUMBER; refusing to dispatch"; exit 1; }
+              else
+                echo "PR is draft; skipping review dispatch"
+              fi
               : > subscribers.tsv
             elif [ "$PR_ACTION" = "labeled" ]; then
               if [ "$LABEL_NAME" != "deep-review" ]; then
@@ -185,6 +193,12 @@ jobs:
               fi
               if [ -n "$PR_LABELS" ]; then
                 SUBSCRIBER_ARGS+=( "--labels" $PR_LABELS )
+              fi
+
+              if [[ " $PR_LABELS " == *" deep-review "* ]]; then
+                gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" \
+                  || { echo "::error::deep-review label removal failed for PR #$PR_NUMBER; refusing to dispatch"; exit 1; }
+                echo "deep-review honoured on $PR_ACTION; label consumed"
               fi
 
               python3 scripts/ops/execution.py "${SUBSCRIBER_ARGS[@]}" > subscribers.tsv
