@@ -1,6 +1,6 @@
 # Intent: Poller Fix-Round Queue Resolves PR to Issue for Stage Verification
 
-**Issue:** #337 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #337 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
