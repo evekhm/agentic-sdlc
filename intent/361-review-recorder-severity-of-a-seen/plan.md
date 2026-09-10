@@ -15,21 +15,18 @@ Under the multi-reviewer consensus protocol (`REVIEW.md`, `docs/SPEC.md:544-577`
 On PR #319 (round 2/3), discovering reviewer Argus identified that a previous finding `R2-1@D5` initially raised at `high` severity had been clarified or mitigated, and Argus downgraded the finding to `normal` in its round-3 review verdict block. However, because `review_recorder.py` ignored the discoverer's severity update, the consensus ledger retained `high` severity. Consequently, `scripts/ci/merge_gate.sh` evaluated conjunct (4) against the stale `high` row, finding blocking items still open, preventing autonomous merge indefinitely.
 
 ### Root Cause
-1. In `scripts/ci/review_recorder.py:356-366` (Pass 2):
+1. In `scripts/ci/review_recorder.py:333-365` (Pass 2) the row update is a two-arm block keyed on the footer severity `fsev`. The non-security arm at `:358-365` reads, verbatim at `eedc2a8`:
    ```python
-   if fid not in rows:
-       rows[fid] = {
-           "severity": fsev,
-           "status": fst,
-           "peer": fpr,
-           "round": finding_round,
-       }
-   else:
-       # Update status if reviewer is discoverer
-       if reviewer == discoverer:
-           rows[fid]["status"] = fst
+                else:
+                    if fid not in rows:
+                        rows[fid] = {"severity": fsev, "status": fst, "peer": fpr if fpr == "dispute" else "none"}
+                    else:
+                        if reviewer == discoverer:
+                            rows[fid]["status"] = fst
+                        if fpr == "dispute":
+                            rows[fid]["peer"] = "dispute"
    ```
-   When `fid in rows`, only `rows[fid]["status"] = fst` is executed. `rows[fid]["severity"]` is never touched.
+   The security arm at `:333-357` has the same shape (`if fid not in rows: ... else: if reviewer == discoverer: ...`) with its own status and peer rules. In both arms, when `fid in rows`, only `status` (and `peer`) are written; `rows[fid]["severity"]` is never touched. The row dict has exactly three keys (`severity`, `status`, `peer`); there is no `round` key.
 2. The maintainer retier mechanism (`@<reviewer> retier <fid> <severity>`) in `review_recorder.py:255-275` was designed as an administrative override for human maintainers (`OWNER`, `MEMBER`, `COLLABORATOR`), not an automated channel for discovering review bots to update their own findings.
 3. Because severity was immutable in Pass 2, reviewers had no mechanism to downgrade false-positive or mitigated `high` findings to non-blocking tiers, leading to stuck PRs.
 
@@ -164,31 +161,46 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
 - **Decisions implemented:** D1, D2, D3, D4, D5, D6, D7
 - **Acceptance criteria proven:** AT-361-1 through AT-361-7
 - **Step-by-step diff:**
-  In `scripts/ci/review_recorder.py` around lines 356–366:
+  The existing update is a two-arm block (`if fsev == "security": ... else: ...`, `scripts/ci/review_recorder.py:333-365`). The severity mutation must sit **outside and after** both arms, so that it runs whichever arm the footer line selects; a mutation inside the non-security arm can never see `fsev == "security"` and P4's elevation rule would be dead code. Two hunks:
+
+  Hunk 1, immediately before `if fsev == "security":` at `:333` (after the discoverer is determined at `:327-331`):
   ```diff
+                   # Determine discovering reviewer
+                   if fid.startswith("AT-"):
+                       discoverer = "atlas"
                    else:
-                       # Update status if reviewer is discoverer
-                       if reviewer == discoverer:
-                           rows[fid]["status"] = fst
-  +                        old_sev = rows[fid]["severity"]
+                       discoverer = "argus"
   +
-  +                        # D4: Security tier protection against unilateral footer downgrades
-  +                        if old_sev == "security" and fsev != "security":
-  +                            print(f"finding {fid}: footer severity change from security to {fsev} ignored; security rows require maintainer retier")
-  +                        else:
-  +                            new_sev = fsev
-  +                            # D2: Post-cap funnel rules: in round 4+, upward transition to high demoted to normal
-  +                            if effective_round >= 4 and old_sev in ("normal", "suggestion") and new_sev == "high":
-  +                                new_sev = "normal"
-  +
-  +                            if old_sev != new_sev:
-  +                                rows[fid]["severity"] = new_sev
-  +                                audit_notes.append(f"[severity updated to {new_sev} by @{reviewer} on {fid}]")
-  +                                print(f"finding {fid}: severity updated from {old_sev} to {new_sev} by @{reviewer}")
-  +                                # D4: Non-security elevation to security requires peer confirmation
-  +                                if new_sev == "security":
-  +                                    rows[fid]["peer"] = "pending"
+  +                # D1: remember the recorded severity before this pass touches the row (None = new row)
+  +                old_sev = rows[fid]["severity"] if fid in rows else None
+
+                   if fsev == "security":
   ```
+
+  Hunk 2, immediately after the last line of the non-security arm at `:365` (`rows[fid]["peer"] = "dispute"`), at the same indentation as `if fsev == "security":`:
+  ```diff
+                           if fpr == "dispute":
+                               rows[fid]["peer"] = "dispute"
+  +
+  +                # D1/D2/D4: the discovering reviewer may move a recorded finding's severity
+  +                if old_sev is not None and reviewer == discoverer:
+  +                    # D4: Security tier protection against unilateral footer downgrades
+  +                    if old_sev == "security" and fsev != "security":
+  +                        print(f"finding {fid}: footer severity change from security to {fsev} ignored; security rows require maintainer retier")
+  +                    else:
+  +                        new_sev = fsev
+  +                        # D2: Post-cap funnel rules: in round 4+, upward transition to high demoted to normal
+  +                        if effective_round >= 4 and old_sev in ("normal", "suggestion") and new_sev == "high":
+  +                            new_sev = "normal"
+  +                        if old_sev != new_sev:
+  +                            rows[fid]["severity"] = new_sev
+  +                            audit_notes.append(f"[severity updated to {new_sev} by @{reviewer} on {fid}]")
+  +                            print(f"finding {fid}: severity updated from {old_sev} to {new_sev} by @{reviewer}")
+  +                            # D4: Non-security elevation to security requires peer confirmation
+  +                            if new_sev == "security":
+  +                                rows[fid]["peer"] = "pending"
+  ```
+  Reachability check for the implementer: an existing `normal` row whose discoverer footer now says `security` enters the security arm (`fid in rows`, discoverer branch sets status), then hunk 2 elevates it and sets `peer = "pending"`; an existing `security` row whose footer says `normal` enters the non-security arm (status updated), then hunk 2 ignores the downgrade with the D4 diagnostic; `fsev` here is the value after the `:305-325` demotion and funnel adjustments, which is D3's ordering.
 - **Done-When:**
   `bash scripts/ci/tests/review_recorder_test.sh` runs all 25 tests green (25 passed, 0 failed).
 
@@ -248,7 +260,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
   8. `bash scripts/ops/tests/post_test.sh` -> PASS
   9. `bash scripts/ci/tests/merge_gate_test.sh` -> no new failure from #361; the suite currently aborts at MG-38 (plan(#308), 42c6828), which is #308's outstanding contract, so a full PASS is out of scope here and `.github/workflows/**` stays untouched
 - **Done-When:**
-  All test suites and CI gate checks exit 0 cleanly.
+  Items 1-8 exit 0; item 9 shows no failure introduced by #361 ahead of MG-38 (scoped as written above).
 
 ---
 
