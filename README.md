@@ -418,8 +418,10 @@ state. Full contract: [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`.
 
 **A session ends with a handoff.** A session is ephemeral and its
 context is the expensive part, so nothing it settled may live only in
-its transcript. Before it ends, the session wraps: `/wrap` in Claude
-Code, the close-out script in any harness. The wrap runs the session
+its transcript. Before it ends, the session wraps with `/wrap`, the
+one door
+[#85](https://github.com/evekhm/agentic-sdlc/issues/85) D8 defines,
+in Claude Code. The wrap runs the session
 checklist, records what the session learned, and writes a dated
 handoff for its seat under `ops/handoffs/`, outside git. The next
 session for that seat opens with that handoff as its first input,
