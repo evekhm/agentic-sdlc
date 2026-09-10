@@ -16,6 +16,13 @@ CLAIM_SH="${CLAIM_SH:-$REPO_ROOT/scripts/ops/claim.sh}"
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 TMPDIR="${TMPDIR:-/tmp}"
 
+die() {
+    echo "poll.sh: $*" >&2
+    exit 1
+}
+# shellcheck source=scripts/ops/lib/github.sh
+source "$REPO_ROOT/scripts/ops/lib/github.sh"
+
 ONCE=0
 POLL_INTERVAL="${POLL_INTERVAL_SECONDS:-${POLL_INTERVAL:-30}}"
 
@@ -123,10 +130,34 @@ poll_tick() {
         return 1
     }
 
-    # 2. Fix rounds on open pull requests at status:in-review (D2, AT-20)
+    # 2. Fix rounds on open builder pull requests (D2, D6, AT-20, AT-24)
     local prs_json="[]"
-    prs_json="$(gh pr list --state open --label status:in-review --json number,title,labels,headRefName,isCrossRepository 2>/dev/null || echo '[]')"
+    prs_json="$(gh pr list --state open --draft=false --json number,title,labels,headRefName,headRefOid,isCrossRepository,isDraft --limit 300 2>/dev/null || echo '[]')"
     if [ -n "$prs_json" ] && [ "$prs_json" != "[]" ]; then
+        local state_base="${XDG_STATE_HOME:-}"
+        [ -z "$state_base" ] && state_base=~/.local/state
+        local poll_state_dir="${POLL_STATE_DIR:-${state_base}/sdlc-poller}"
+        mkdir -p "$poll_state_dir" 2>/dev/null || true
+
+        # Clean state keys for PRs no longer in the open list
+        local open_pr_nums
+        open_pr_nums="$(jq -r '.[].number // empty' <<<"$prs_json" 2>/dev/null || true)"
+        if [ -n "$open_pr_nums" ]; then
+            for f in "$poll_state_dir"/pr-* "$poll_state_dir"/refuse-pr-*; do
+                [ -f "$f" ] || continue
+                local fname fnum=""
+                fname="$(basename "$f")"
+                if [[ "$fname" =~ ^pr-([0-9]+)- ]]; then
+                    fnum="${BASH_REMATCH[1]}"
+                elif [[ "$fname" =~ ^refuse-pr-([0-9]+)- ]]; then
+                    fnum="${BASH_REMATCH[1]}"
+                fi
+                if [ -n "$fnum" ] && ! grep -qxE "$fnum" <<<"$open_pr_nums"; then
+                    rm -f "$f"
+                fi
+            done
+        fi
+
         local pr_count
         pr_count="$(jq '. | length' <<<"$prs_json" 2>/dev/null || echo 0)"
         for (( idx=0; idx<pr_count; idx++ )); do
@@ -141,12 +172,16 @@ poll_tick() {
             is_cross="$(jq -r '.isCrossRepository // false' <<<"$pr_obj")"
             [ "$is_cross" = "true" ] && continue
 
-            local has_in_review
-            has_in_review="$(jq -r '[.labels[]? | (.name // .)] | if index("status:in-review") != null then "yes" else "no" end' <<<"$pr_obj")"
-            [ "$has_in_review" = "yes" ] || continue
+            # Skip draft pull requests
+            local is_draft
+            is_draft="$(jq -r '.isDraft // false' <<<"$pr_obj")"
+            [ "$is_draft" = "true" ] && continue
 
-            local head_ref
+            local head_ref head_oid
             head_ref="$(jq -r '.headRefName // empty' <<<"$pr_obj")"
+            [ -n "$head_ref" ] || continue
+            head_oid="$(jq -r '.headRefOid // empty' <<<"$pr_obj")"
+
             local author_persona="${head_ref%%/*}"
             case "$author_persona" in
                 athena|daedalus|odyssey) ;;
@@ -154,6 +189,23 @@ poll_tick() {
             esac
 
             is_skipped "$author_persona" && continue
+
+            local state_base="${XDG_STATE_HOME:-}"
+            [ -z "$state_base" ] && state_base=~/.local/state
+            local poll_state_dir="${POLL_STATE_DIR:-${state_base}/sdlc-poller}"
+            mkdir -p "$poll_state_dir" 2>/dev/null || true
+            local repo_hash
+            repo_hash="$(printf '%s' "$REPO_ROOT" | sha256sum | head -c 8)"
+
+            # Check cached terminal refusal
+            local refuse_key=""
+            if [ -n "$head_oid" ]; then
+                refuse_key="${poll_state_dir}/refuse-pr-${pr_num}-${repo_hash}-${head_oid}"
+                if [ -f "$refuse_key" ]; then
+                    echo "poll.sh: skipping PR #$pr_num (terminal refusal cached at $head_oid)"
+                    continue
+                fi
+            fi
 
             local pr_comments="[]"
             pr_comments="$(gh api "repos/$GITHUB_REPO/issues/$pr_num/comments" 2>/dev/null || echo '[]')"
@@ -187,12 +239,6 @@ poll_tick() {
                 key="$(printf '%s' "$trigger_body" | sha256sum | awk '{print $1}')"
             fi
 
-            local state_base="${XDG_STATE_HOME:-}"
-            [ -z "$state_base" ] && state_base=~/.local/state
-            local poll_state_dir="${POLL_STATE_DIR:-${state_base}/sdlc-poller}"
-            mkdir -p "$poll_state_dir" 2>/dev/null || true
-            local repo_hash
-            repo_hash="$(printf '%s' "$REPO_ROOT" | sha256sum | head -c 8)"
             local key_file="${poll_state_dir}/pr-${pr_num}-${repo_hash}-${key}"
 
             # C4: Lock handling with staleness
@@ -224,6 +270,75 @@ poll_tick() {
             # Check consumed keys (C3)
             if [ -f "$key_file" ]; then
                 echo "#$pr_num: review at $key already dispatched"
+                continue
+            fi
+
+            # Subshell PR-to-issue resolution (D3)
+            local res_json="" rc_res=0
+            res_json="$( ( resolve_issue "$pr_num" && jq -nc --arg issue "$ISSUE" --argjson issue_json "$ISSUE_JSON" '{issue: $issue, issue_json: $issue_json}' ) 2>/dev/null )" || rc_res=$?
+            if [ "$rc_res" -ne 0 ] || [ -z "$res_json" ]; then
+                echo "poll.sh: skipping PR #$pr_num (could not resolve to tracking issue)"
+                continue
+            fi
+            local resolved_issue issue_obj
+            resolved_issue="$(jq -r '.issue // empty' <<<"$res_json")"
+            issue_obj="$(jq -c '.issue_json // empty' <<<"$res_json")"
+            if ! [[ "$resolved_issue" =~ ^[0-9]+$ ]] || [ -z "$issue_obj" ] || [ "$issue_obj" = "null" ]; then
+                echo "poll.sh: skipping PR #$pr_num (could not resolve to tracking issue)"
+                continue
+            fi
+
+            # Transient circuit breakers (D4)
+            local issue_labels pr_labels has_issue_hold has_issue_blocked has_pr_hold
+            issue_labels="$(jq -r '[.labels[]? | (.name // .)]' <<<"$issue_obj")"
+            pr_labels="$(jq -r '[.labels[]? | (.name // .)]' <<<"$pr_obj")"
+
+            has_issue_hold="$(jq -r 'if index("hold") != null then "yes" else "no" end' <<<"$issue_labels")"
+            has_issue_blocked="$(jq -r 'if index("blocked") != null then "yes" else "no" end' <<<"$issue_labels")"
+            has_pr_hold="$(jq -r 'if index("hold") != null then "yes" else "no" end' <<<"$pr_labels")"
+
+            if [ "$has_issue_hold" = "yes" ]; then
+                echo "poll.sh: skipping PR #$pr_num (issue #$resolved_issue carries hold)"
+                continue
+            fi
+            if [ "$has_issue_blocked" = "yes" ]; then
+                echo "poll.sh: skipping PR #$pr_num (issue #$resolved_issue carries blocked)"
+                continue
+            fi
+            if [ "$has_pr_hold" = "yes" ]; then
+                echo "poll.sh: skipping PR #$pr_num (PR #$pr_num carries hold)"
+                continue
+            fi
+
+            # Terminal refusals and negative caching (D5)
+            local issue_state has_review_stuck
+            issue_state="$(jq -r '.state // empty' <<<"$issue_obj")"
+            if [ "$issue_state" != "open" ]; then
+                echo "poll.sh: skipping PR #$pr_num (tracking issue #$resolved_issue is closed)"
+                [ -n "$refuse_key" ] && touch "$refuse_key"
+                continue
+            fi
+
+            has_review_stuck="$(jq -r 'if index("status:review-stuck") != null then "yes" else "no" end' <<<"$issue_labels")"
+            if [ "$has_review_stuck" = "yes" ]; then
+                echo "poll.sh: skipping PR #$pr_num (tracking issue #$resolved_issue carries status:review-stuck)"
+                [ -n "$refuse_key" ] && touch "$refuse_key"
+                continue
+            fi
+
+            # Stage-to-author alignment (D6)
+            local status_label expected_status=""
+            status_label="$(jq -r '[.labels[]? | (.name // .) | select(startswith("status:"))] | .[0] // empty' <<<"$issue_obj")"
+
+            case "$author_persona" in
+                athena) expected_status="status:spec" ;;
+                daedalus) expected_status="status:build" ;;
+                odyssey) expected_status="status:implementing" ;;
+            esac
+
+            if [ -z "$expected_status" ] || [ "$status_label" != "$expected_status" ]; then
+                echo "poll.sh: skipping PR #$pr_num (author persona $author_persona does not match issue #$resolved_issue stage ${status_label:-none})"
+                [ -n "$refuse_key" ] && touch "$refuse_key"
                 continue
             fi
 
