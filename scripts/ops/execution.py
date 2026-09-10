@@ -182,7 +182,7 @@ def check(config: dict) -> None:
         fail("config has no loop block; D20 requires one (#64)")
     if not isinstance(loop, dict):
         fail("loop block is not a mapping")
-    unknown = sorted(set(loop) - {"autonomous_merge", "max_rung_dispatches_per_issue", "max_cost_usd_per_issue"})
+    unknown = sorted(set(loop) - {"autonomous_merge", "max_rung_dispatches_per_issue", "max_cost_usd_per_issue", "max_concurrent_first_hops"})
     if unknown:
         fail(f"loop block has unknown key(s) {', '.join(unknown)}")
     if not isinstance(loop.get("autonomous_merge"), bool):
@@ -193,6 +193,11 @@ def check(config: dict) -> None:
     mcu = loop.get("max_cost_usd_per_issue")
     if isinstance(mcu, bool) or not isinstance(mcu, (int, float)) or mcu <= 0:
         fail("loop.max_cost_usd_per_issue must be a positive number")
+    mcfh = loop.get("max_concurrent_first_hops")
+    if mcfh is not None:
+        if isinstance(mcfh, bool) or not isinstance(mcfh, int) or mcfh <= 0:
+            fail("loop.max_concurrent_first_hops must be positive integer")
+
 
     subscribed = set()
     for name in sorted(bindings):

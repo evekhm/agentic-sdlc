@@ -102,6 +102,7 @@ refresh_labels
 # Human-facing: filed by people, read by people, honoured by automation.
 ensure_label "bootstrap"   "1D76DB" "Bootstrap backlog: building the system that builds itself"
 ensure_label "intent:new"  "0E8A16" "Intake: a proposed change entering the lifecycle"
+ensure_label "intake:auto" "C2E0C6" "Opt-in for automated first-hop poller intake"
 ensure_label "in-progress" "FBCA04" "Claimed by a session (the parallelism mutex)"
 ensure_label "hold"        "B60205" "Circuit breaker: halts all automation while present"
 ensure_label "blocked"     "D93F0B" "Needs a human or an unmet dependency"

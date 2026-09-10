@@ -861,22 +861,232 @@ run "MG-36: exits 0" 123
 has "not a ladder pull request; nothing evaluated, nothing written" "MG-36: unlinked PR skips cleanly"
 not_merged "MG-36"
 
-banner "MG-37 · D5 · single-reviewer Atlas consensus merges when assigned:atlas"
+banner "MG-37 · D1 D2 D3 · AT-1 · intent:new issue with intent.md merges autonomously"
+mk_green; issue_fixture 456 intent:new
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456)" 2026-01-03T00:00:00Z 700)"
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Intent\n\nProblem and outcome.\n' > "$FX/tree/intent/456-thing/intent.md"
+run "MG-37: intent:new issue with intent.md merges autonomously" 123
+has "conjunct (9): true" "MG-37 (D1, D2): intent.md present at HEAD passes conjunct 9"
+has "conjunct (10): true" "MG-37 (D1, D3): rung 1 > highest merged rung 0 passes conjunct 10"
+merged "MG-37 (D1, D2, D3): and the intent PR merges autonomously"
+
+banner "MG-38 · D1 D2 · AT-2 · intent:new issue with absent intent.md fails conjunct 9"
+mk_green; issue_fixture 456 intent:new
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456)" 2026-01-03T00:00:00Z 700)"
+mkdir -p "$FX/tree/intent/456-thing"
+run "MG-38: intent:new issue with absent intent.md fails conjunct 9" 123
+has "conjunct (9): false" "MG-38 (D1, D2): missing intent.md fails conjunct 9"
+has "intent/456-thing/intent.md is absent at $HEAD" "MG-38 (D1, D2): names the missing artifact"
+not_merged "MG-38 (D1, D2): missing intent artifact does not merge"
+
+banner "MG-39 · D1 D3 · AT-3 · intent:new with HIGHEST_MERGED_RANK >= 1 fails conjunct 10"
+mk_green; issue_fixture 456 intent:new
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Intent\n\nProblem and outcome.\n' > "$FX/tree/intent/456-thing/intent.md"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:2 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:5.00")" 2026-01-03T00:00:00Z 700)"
+run "MG-39: intent:new with HIGHEST_MERGED_RANK >= 1 fails conjunct 10" 123
+has "conjunct (9): true" "MG-39 (D1, D2): intent.md present passes conjunct 9"
+has "conjunct (10): false" "MG-39 (D1, D3): rung 1 <= highest merged rung fails conjunct 10"
+has "rung 1 is not above highest merged rung 1 (D14)" "MG-39 (D3): names the D14 monotonicity failure"
+no_writes "MG-39 (D3): failed monotonicity performs zero writes"
+
+banner "MG-40 · D1 D5 · AT-4 · issue with neither status nor intent:new fails conjuncts 9 and 10"
+mk_green; issue_fixture 456 bug
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Intent\n\nProblem and outcome.\n' > "$FX/tree/intent/456-thing/intent.md"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456)" 2026-01-03T00:00:00Z 700)"
+run "MG-40: issue with neither status nor intent:new fails conjuncts 9 and 10" 123
+has "conjunct (9): false" "MG-40 (D1, D5): unranked label fails conjunct 9"
+has "conjunct (10): false" "MG-40 (D1, D5): unranked label fails conjunct 10"
+has "#456 carries no ranked status label (none)" "MG-40 (D1, D5): names the unranked status label reason"
+no_writes "MG-40 (D5): unranked issue performs zero writes"
+
+banner "MG-41 · D4 · AT-5 · intent:new exceeding budget records refusal:budget 1"
+mk_green; issue_fixture 456 intent:new
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:1 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:60.00")" 2026-01-03T00:00:00Z 700)"
+run "MG-41: intent:new exceeding budget records refusal:budget 1" 123
+wrote "refusal:budget 1" "MG-41 (D4): records refusal:budget at rung 1"
+not_merged "MG-41 (D4): over-budget intent PR does not merge"
+
+banner "MG-42 · D5 · AT-6 · issue with both status:spec and intent:new evaluates as status:spec"
+mk_green; issue_fixture 456 status:spec intent:new
+mkdir -p "$FX/tree/intent/456-thing"
+printf '# Spec\n\n**Status:** Approved (approval = merge of this PR)\n**Open questions:** none\n' > "$FX/tree/intent/456-thing/spec.md"
+comments_fixture 456 "$(comment "$MERGER" "$(loop_ledger 456 "dispatch rung:2 head-oid:$H0 event:e1 pr:11 at:2026-01-01T00:00:00Z cost:5.00")" 2026-01-03T00:00:00Z 700)"
+run "MG-42: issue with both status:spec and intent:new evaluates as status:spec" 123
+has "conjunct (9): true" "MG-42 (D5): spec.md passes conjunct 9 under status:spec"
+has "conjunct (10): true" "MG-42 (D5): rung 2 > highest merged rung 1 passes conjunct 10"
+merged "MG-42 (D5): and merges autonomously under status:spec"
+
+echo
+banner "MG-37 · D3 D4 · foreign reviewer check run atlas via gh-actions failing fails conjunct (2)"
+mk_green
+mergestate_checks 123   "$(row check merge-gate '' 999 500)"   "$(row check 'atlas via gh-actions' FAILURE 1003 2003)"   "$(row check 'execution — bindings' SUCCESS 1002 2002)"
+run "MG-37: exits 0" 123
+has "conjunct (2): false" "MG-37: foreign atlas check failing fails conjunct (2)"
+has "atlas via gh-actions=FAILURE" "MG-37: names the failing atlas check"
+not_merged "MG-37"
+
+echo
+banner "MG-38 · D1 D2 D4 · workflow-level concurrency scoped per pull request with cancel-in-progress: false (AT-1, AT-2)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+c = wf.get("concurrency")
+if not c:
+    print("FAIL: MG-38: workflow-level concurrency block missing (D1, AT-1)", file=sys.stderr)
+    sys.exit(1)
+expected_group = "merge-gate-${{ github.event.issue.number || github.event.check_suite.pull_requests[0].number || github.event.inputs.pull_request || github.run_id }}"
+actual_group = c.get("group", "")
+if actual_group != expected_group:
+    print(f"FAIL: MG-38: expected group {expected_group!r}, got {actual_group!r} (D1, D4, AT-1)", file=sys.stderr)
+    sys.exit(1)
+cancel = c.get("cancel-in-progress")
+if cancel is not False:
+    print(f"FAIL: MG-38: expected cancel-in-progress: false, got {cancel!r} (D2, AT-2)", file=sys.stderr)
+    sys.exit(1)
+print("PASS: MG-38: workflow-level concurrency group and cancel-in-progress: false")
+' "$REPO" || fail "MG-38 failed"
+
+echo
+banner "MG-39 · D1 · job-level concurrency blocks removed from record and gate jobs (AT-3)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+jobs = wf.get("jobs", {})
+for job_name in ["record", "gate"]:
+    job = jobs.get(job_name, {})
+    if "concurrency" in job:
+        print(f"FAIL: MG-39: job {job_name} still declares concurrency (D1, AT-3)", file=sys.stderr)
+        sys.exit(1)
+print("PASS: MG-39: job-level concurrency blocks removed from record and gate")
+' "$REPO" || fail "MG-39 failed"
+
+echo
+banner "MG-40 · D3 D5 · status trigger removed, check_suite, issue_comment, workflow_dispatch retained (AT-4, AT-5)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+on_b = wf.get("on", wf.get(True, {}))
+if "status" in on_b:
+    print("FAIL: MG-40: status trigger still present under on: (D3, AT-4)", file=sys.stderr)
+    sys.exit(1)
+cs = on_b.get("check_suite", {})
+if cs.get("types") != ["completed"]:
+    print(f"FAIL: MG-40: check_suite types expected [completed], got {cs.get("types")} (AT-5)", file=sys.stderr)
+    sys.exit(1)
+ic = on_b.get("issue_comment", {})
+if ic.get("types") != ["created"]:
+    print(f"FAIL: MG-40: issue_comment types expected [created], got {ic.get("types")} (AT-5)", file=sys.stderr)
+    sys.exit(1)
+wd = on_b.get("workflow_dispatch", {})
+inputs = wd.get("inputs", {})
+if "pull_request" not in inputs:
+    print("FAIL: MG-40: workflow_dispatch missing input pull_request (AT-5)", file=sys.stderr)
+    sys.exit(1)
+print("PASS: MG-40: triggers clean, status removed, check_suite/issue_comment/workflow_dispatch verified")
+' "$REPO" || fail "MG-40 failed"
+
+echo
+banner "MG-41 · D5 D6 · pre-runner job guards skip non-PR events and admit all PR comments (AT-6, AT-7, AT-8)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+jobs = wf.get("jobs", {})
+rec_if = str(jobs.get("record", {}).get("if", ""))
+for term in ["workflow_dispatch", "github.event.issue.pull_request", "github.event.check_suite.pull_requests[0].number"]:
+    if term not in rec_if:
+        print(f"FAIL: MG-41: jobs.record.if missing guard term {term!r} (D5, AT-6)", file=sys.stderr)
+        sys.exit(1)
+gate_if = str(jobs.get("gate", {}).get("if", ""))
+for term in ["workflow_dispatch", "github.event.issue.pull_request", "github.event.check_suite.pull_requests[0].number", "!cancelled()"]:
+    if term not in gate_if:
+        print(f"FAIL: MG-41: jobs.gate.if missing guard term {term!r} (D5, AT-7)", file=sys.stderr)
+        sys.exit(1)
+for term in ["review-verdict:", "review:"]:
+    if term in rec_if or term in gate_if:
+        print(f"FAIL: MG-41: PR comment filtering must not filter on comment body (D6, AT-8)", file=sys.stderr)
+        sys.exit(1)
+print("PASS: MG-41: pre-runner job guards and permissive PR comments verified")
+' "$REPO" || fail "MG-41 failed"
+
+echo
+banner "MG-42 · D4 · orphan fallback resolves to run-isolated concurrency key (AT-9)"
+python3 -c '
+def eval_group(issue_num, cs_pr, dispatch_pr, run_id):
+    pr = issue_num or cs_pr or dispatch_pr or run_id
+    return f"merge-gate-{pr}"
+
+k_ic = eval_group(101, None, None, 12345)
+k_cs = eval_group(None, 202, None, 12345)
+k_wd = eval_group(None, None, 303, 12345)
+k_orphan = eval_group(None, None, None, 98765)
+
+assert k_ic == "merge-gate-101", f"unexpected ic key: {k_ic}"
+assert k_cs == "merge-gate-202", f"unexpected cs key: {k_cs}"
+assert k_wd == "merge-gate-303", f"unexpected wd key: {k_wd}"
+assert k_orphan == "merge-gate-98765", f"unexpected orphan key: {k_orphan}"
+assert len({k_ic, k_cs, k_wd, k_orphan}) == 4, "concurrency keys collided"
+print("PASS: MG-42: orphan fallback and PR key isolation verified (D4, AT-9)")
+' || fail "MG-42 failed"
+
+echo
+banner "MG-43 · D7 · deterministic target resolution in record and gate steps without commit api fallback (AT-10)"
+python3 -c '
+import sys, yaml
+repo = sys.argv[1]
+with open(f"{repo}/.github/workflows/merge-gate.yml") as f:
+    wf = yaml.safe_load(f)
+jobs = wf.get("jobs", {})
+for job_name in ["record", "gate"]:
+    job = jobs.get(job_name, {})
+    step = next((s for s in job.get("steps", []) if "run" in s and "TARGET=" in s.get("run", "")), None)
+    if not step:
+        print(f"FAIL: MG-43: job {job_name} missing target resolution step (D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    env = step.get("env", {})
+    if "STATUS_SHA" in env or "CS_SHA" in env:
+        print(f"FAIL: MG-43: job {job_name} step env still defines STATUS_SHA/CS_SHA (D3, D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    run_script = step.get("run", "")
+    if "status)" in run_script:
+        print(f"FAIL: MG-43: job {job_name} step run still contains status) branch (D3, D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    if "commits/$CS_SHA/pulls" in run_script or "commits/$STATUS_SHA/pulls" in run_script:
+        print(f"FAIL: MG-43: job {job_name} step run still calls commit pulls API fallback (D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+    if "TARGET=\"$CS_PR\"" not in run_script:
+        print(f"FAIL: MG-43: job {job_name} step run missing TARGET=\"$CS_PR\" assignment (D7, AT-10)", file=sys.stderr)
+        sys.exit(1)
+print("PASS: MG-43: deterministic target resolution verified across record and gate jobs")
+' "$REPO" || fail "MG-43 failed"
+
+echo
+banner "MG-44 · D5 · single-reviewer Atlas consensus merges when assigned:atlas"
 mk_green
 comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" atlas)")"
-run "MG-37: exits 0" 123
-has "conjunct (3): true" "MG-37: conjunct (3) reports true for Atlas-only assignment"
-has "conjunct (11): true" "MG-37: conjunct (11) reports true for Atlas-only assignment"
-merged "MG-37: single-reviewer Atlas consensus merges"
+run "MG-44: exits 0" 123
+has "conjunct (3): true" "MG-44: conjunct (3) reports true for Atlas-only assignment"
+has "conjunct (11): true" "MG-44: conjunct (11) reports true for Atlas-only assignment"
+merged "MG-44: single-reviewer Atlas consensus merges"
 
-banner "MG-38 · D5 · dual-assigned PR requires Argus consensus"
+banner "MG-45 · D5 · dual-assigned PR requires Argus consensus"
 mk_green
 comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" argus,atlas)")"
-run "MG-38: exits 0" 123
-has "conjunct (3): false" "MG-38: conjunct (3) reports false when Argus missing"
-not_merged "MG-38: dual-assigned PR does not merge without Argus"
+run "MG-45: exits 0" 123
+has "conjunct (3): false" "MG-45: conjunct (3) reports false when Argus missing"
+not_merged "MG-45: dual-assigned PR does not merge without Argus"
 
-banner "MG-39 · D5 · absent-marker fallback on trust-bearing path at status:spec resolves to argus,atlas"
+banner "MG-46 · D5 · absent-marker fallback on trust-bearing path at status:spec resolves to argus,atlas"
 mk_green
 issue_fixture 456 status:spec
 PR_FILES='[".github/workflows/unattended.yml"]'
@@ -884,15 +1094,14 @@ pr_fixture 123
 # Consensus ledger with no assigned marker ("-" as assigned-set omits the assigned marker)
 # Atlas has reviewed ($H), Argus has not reviewed (-)
 comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 - "$H" -)")"
-run "MG-39: exits 0" 123
-has "conjunct (3): false" "MG-39: fallback resolves to argus,atlas and blocks without Argus"
-has "argus verdict is at none, head is $H" "MG-39: names missing Argus verdict"
-not_merged "MG-39: dual-assigned fallback does not merge without Argus"
+run "MG-46: exits 0" 123
+has "conjunct (3): false" "MG-46: fallback resolves to argus,atlas and blocks without Argus"
+has "argus verdict is at none, head is $H" "MG-46: names missing Argus verdict"
+not_merged "MG-46: dual-assigned fallback does not merge without Argus"
 # When Argus also reviews ($H), both Argus and Atlas are recorded
 comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" -)")"
-run "MG-39b: exits 0" 123
-has "conjunct (3): true" "MG-39b: fallback passes conjunct (3) when both Argus and Atlas have reviewed"
-has "argus and atlas both recorded at $H" "MG-39b: names both reviewers recorded"
+run "MG-46b: exits 0" 123
+has "conjunct (3): true" "MG-46b: fallback passes conjunct (3) when both Argus and Atlas have reviewed"
+has "argus and atlas both recorded at $H" "MG-46b: names both reviewers recorded"
 
-echo
 echo "merge_gate_test.sh: all scenarios passed"

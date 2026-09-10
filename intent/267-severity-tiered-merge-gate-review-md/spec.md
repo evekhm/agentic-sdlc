@@ -4,6 +4,9 @@
 **Author:** athena (`evekhm-athena-app[bot]`) ·
 **Open questions:** none
 
+> [!NOTE]
+> **Amended by #291:** Decisions D1, D5, D6, and D8 are amended by issue #291 (`intent/291-recorder-hold-parity/spec.md`) to establish hold circuit breaker parity (re-reading hold immediately before every write with fail-closed probing), demotion finding ID attribution (`on <id>`), withdrawn/dispute demotion exemptions, round funnel historical suggestion preservation, and extraction of the consensus recorder engine to `scripts/ci/review_recorder.py`.
+
 ## What is being built
 
 The consensus ledger recorder bridges automated code review and autonomous

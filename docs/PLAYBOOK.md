@@ -703,3 +703,10 @@ citation-at-base-SHA check, which neither runner performs. In flight
 at the stamp: #311 (#288 spec) at `8b4f17f` awaiting the gate, #307
 (#265 plan) fix round pushed `feea773`, and the #295 design rung
 running.
+
+Status snapshot (2026-09-09, ~22:00 UTC, main at `79f58f5`): eight
+autonomous merges fired today under the merge actor
+`evekhm-themis-app`. The poller (`scripts/placement/vm-local/poll.sh`)
+went live as the systemd user unit `poll.service`, and its first
+self-directed launch claimed #308. One ledger defect, #331, forced a
+by-hand merge of PR #327, the poller's own implementation PR.
