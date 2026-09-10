@@ -141,7 +141,7 @@ if [ "$SNAPSHOT" -eq 0 ]; then
         inums="$(echo "$issues_list" | jq -r '.[].number' 2>/dev/null || true)"
         for n in $inums; do
             icomm="$(gh api "repos/:owner/:repo/issues/$n/comments" 2>/dev/null || echo "[]")"
-            if echo "$icomm" | jq -r --arg s "$SESSION_NAME" '[.[] | select((.body // "") | test("(?i)Claim:[^\\n]*\\(" + $s + "\\)"))] | length' 2>/dev/null | grep -qv "^0$"; then
+            if echo "$icomm" | jq -r --arg s "$SESSION_NAME" '[.[] | select((.body // "") | test("(?i)\\bClaim(ing)?:?[^\\n]*\\([[:space:]]*" + $s + "[[:space:]]*\\)"))] | length' 2>/dev/null | grep -qv "^0$"; then
                 has_session_state=1
                 break
             fi
@@ -253,28 +253,79 @@ if [ "$SNAPSHOT" -eq 0 ]; then
 fi
 
 # Check 7: Decision accounting (D6, D9) (both modes)
-echo "pass: decisions accounted for"
+candidate_decisions=()
+if git rev-parse origin/main >/dev/null 2>&1; then
+    while IFS= read -r cmsg; do
+        [ -n "$cmsg" ] && candidate_decisions+=("$cmsg")
+    done < <(git log origin/main..HEAD --format="%s" 2>/dev/null || true)
+elif git rev-parse HEAD >/dev/null 2>&1; then
+    while IFS= read -r cmsg; do
+        [ -n "$cmsg" ] && candidate_decisions+=("$cmsg")
+    done < <(git log -n 5 --format="%s" 2>/dev/null || true)
+fi
+if [ "${#candidate_decisions[@]}" -gt 0 ]; then
+    echo "candidate decisions from session commits:"
+    for cd in "${candidate_decisions[@]}"; do
+        echo "  - $cd"
+    done
+fi
+if [ -n "${WRAP_UNACCOUNTED_DECISIONS:-}" ]; then
+    echo "fail: decisions unaccounted for: $WRAP_UNACCOUNTED_DECISIONS" >&2
+    FAIL=1
+else
+    echo "pass: decisions accounted for"
+fi
 
 # Check 8: Claim release and auto-repair (D1, D4, AT-6, AT-7, AT-8) (close-out only)
+SESSION_CLAIMED_ISSUES=()
 if [ "$SNAPSHOT" -eq 0 ]; then
+    valid_identities="[]"
+    if [ -d "$PRIMARY_REPO/personas" ]; then
+        valid_identities="$(grep -h 'identity:' "$PRIMARY_REPO/personas"/*.yaml 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/' | jq -R . | jq -s . 2>/dev/null || echo "[]")"
+    fi
+
     claim_issues="$(gh issue list --json number,title,labels 2>/dev/null || echo "[]")"
     if [ -n "$claim_issues" ] && [ "$claim_issues" != "[]" ]; then
         all_nums="$(echo "$claim_issues" | jq -r '.[].number' 2>/dev/null || true)"
         for inum in $all_nums; do
             comments="$(gh api "repos/:owner/:repo/issues/$inum/comments" 2>/dev/null || echo "[]")"
-            # Authoritative session match: Claim: <actor> (<session>)
-            is_claimed_by_session="$(echo "$comments" | jq -r --arg s "$SESSION_NAME" '[.[] | select((.body // "") | test("(?i)Claim:[^\\n]*\\(" + $s + "\\)"))] | length' 2>/dev/null || echo 0)"
-            if [ "$is_claimed_by_session" -gt 0 ]; then
-                # Check for single comment containing all 4 handoff headers (Done:, Decided:, Next:, Blocked:)
-                has_valid_handoff="$(echo "$comments" | jq -r '
-                    [.[] | select(
+            claim_eval="$(echo "$comments" | jq -r \
+                --arg s "$SESSION_NAME" \
+                --argjson valid_identities "$valid_identities" '
+                def is_valid_author:
+                    (.user.login // "") as $l |
+                    ($l | test("^([a-zA-Z0-9_-]+-app(\\[bot\\])?|[a-zA-Z0-9_-]+\\[bot\\])$")) or ($valid_identities | index($l) != null);
+
+                def is_claim:
+                    is_valid_author and ((.body // "") | test("\\A[[:space:]]*\\**[[:space:]]*Claim(ing)?:?\\b"; "i"));
+
+                def is_handoff:
+                    is_valid_author and (
                         ((.body // "") | test("(?i)\\bDone:")) and
                         ((.body // "") | test("(?i)\\bDecided:")) and
                         ((.body // "") | test("(?i)\\bNext:")) and
                         ((.body // "") | test("(?i)\\bBlocked:"))
-                    )] | length' 2>/dev/null || echo 0)"
+                    );
 
-                if [ "$has_valid_handoff" -eq 0 ]; then
+                (to_entries | [.[] | select(.value | is_claim)] | last) as $last_claim |
+                if $last_claim == null then
+                    {"is_claimed": false, "has_handoff": false}
+                else
+                    ($last_claim.value.body | test("(?i)\\bClaim(ing)?:?[^\\n]*\\([[:space:]]*" + $s + "[[:space:]]*\\)")) as $mine |
+                    if $mine then
+                        (.[$last_claim.key:] | [.[] | select(is_handoff)] | length > 0) as $has_ho |
+                        {"is_claimed": true, "has_handoff": $has_ho}
+                    else
+                        {"is_claimed": false, "has_handoff": false}
+                    end
+                end
+            ' 2>/dev/null || echo '{"is_claimed": false, "has_handoff": false}')"
+
+            is_claimed_by_session="$(echo "$claim_eval" | jq -r '.is_claimed' 2>/dev/null || echo "false")"
+            if [ "$is_claimed_by_session" = "true" ]; then
+                SESSION_CLAIMED_ISSUES+=("#$inum")
+                has_valid_handoff="$(echo "$claim_eval" | jq -r '.has_handoff' 2>/dev/null || echo "false")"
+                if [ "$has_valid_handoff" != "true" ]; then
                     echo "fail: missing handoff comment on #$inum" >&2
                     FAIL=1
                 else
@@ -325,6 +376,7 @@ if [ "$SNAPSHOT" -eq 0 ]; then
 fi
 
 # Check 15: Worktree hygiene report (D1, AT-10) (close-out only)
+wt_out=""
 if [ "$SNAPSHOT" -eq 0 ]; then
     wt_cmd=""
     if [ -x "$PRIMARY_REPO/scripts/ops/worktrees.sh" ]; then
@@ -368,21 +420,62 @@ fi
 
 # Check 17: Credential exposure (D1, AT-12) (both modes)
 leak=0
-if git diff --cached 2>/dev/null | grep -qE "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"; then
+CRED_PATTERNS='\bgh[pousr]_[A-Za-z0-9]{16,}|\bgithub_pat_[A-Za-z0-9_]{16,}|\bAKIA[0-9A-Z]{16}\b|\bsk-[A-Za-z0-9]{20,}|\bxox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+
+# Scan uncommitted changes (staged and unstaged)
+if git diff --cached 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
     leak=1
-elif git diff 2>/dev/null | grep -qE "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"; then
+elif git diff 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
     leak=1
 fi
+
+# Scan committed changes on current branch relative to origin/main
+if [ "$leak" -eq 0 ]; then
+    if git rev-parse origin/main >/dev/null 2>&1; then
+        if git log -p origin/main..HEAD 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
+            leak=1
+        fi
+    elif git rev-parse HEAD~1 >/dev/null 2>&1; then
+        if git log -p -n 10 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
+            leak=1
+        fi
+    fi
+fi
+
+# Scan tracked files in HEAD (excluding tests and scanners)
+if [ "$leak" -eq 0 ]; then
+    if git rev-parse HEAD >/dev/null 2>&1; then
+        if git grep -I -E "$CRED_PATTERNS" HEAD -- ':!scripts/ci/*' ':!scripts/ops/wrap.sh' ':!scripts/ops/tests/wrap_test.sh' >/dev/null 2>&1; then
+            leak=1
+        fi
+    fi
+fi
+
+# Scan comment bodies fetched from claimed issues
+if [ "$leak" -eq 0 ] && [ -n "${comments:-}" ]; then
+    if echo "$comments" | jq -r '.[].body // ""' 2>/dev/null | grep -qE "$CRED_PATTERNS"; then
+        leak=1
+    fi
+fi
+
 if [ "$leak" -eq 1 ]; then
     echo "fail: credential exposure detected" >&2
     FAIL=1
+else
+    echo "pass: credential scan clean"
 fi
 
 # Check 18: Temporary body file cleanup (D6) (close-out only)
 if [ "$SNAPSHOT" -eq 0 ]; then
-    for tf in /tmp/*"${SESSION_NAME}"*body* /tmp/body*"${SESSION_NAME}"* /tmp/*"${SESSION_NAME}"*.tmp; do
-        [ -e "$tf" ] && rm -f "$tf" 2>/dev/null || true
+    shopt -s nullglob
+    for tf in /tmp/*; do
+        [ -f "$tf" ] || continue
+        fname="$(basename "$tf")"
+        if [[ "$fname" =~ (^|[-_])"${SESSION_NAME}"(([-_](body|tmp|comment).*)|\.(tmp|md|txt)|$) ]]; then
+            rm -f "$tf" 2>/dev/null || true
+        fi
     done
+    shopt -u nullglob
     echo "pass: temporary body files cleaned up"
 fi
 
@@ -445,6 +538,32 @@ else
     header_line="closed"
 fi
 
+handoff_prs=""
+if [ -n "${prs_data:-}" ] && [ "$prs_data" != "[]" ]; then
+    handoff_prs="$(echo "$prs_data" | jq -r '.[] | "#" + (.number|tostring) + " (" + (.headRefName // "unknown") + ")"' 2>/dev/null || true)"
+fi
+[ -n "$handoff_prs" ] || handoff_prs="none"
+
+handoff_claimed=""
+if [ "${#SESSION_CLAIMED_ISSUES[@]}" -gt 0 ]; then
+    handoff_claimed="$(printf '%s\n' "${SESSION_CLAIMED_ISSUES[@]}")"
+fi
+[ -n "$handoff_claimed" ] || handoff_claimed="none"
+
+handoff_worktrees=""
+if [ -n "${wt_out:-}" ]; then
+    handoff_worktrees="$(echo "$wt_out" | grep -v '^[[:space:]]*$' || true)"
+fi
+[ -n "$handoff_worktrees" ] || handoff_worktrees="clean"
+
+handoff_decisions=""
+if [ "${#candidate_decisions[@]}" -gt 0 ]; then
+    for cd in "${candidate_decisions[@]}"; do
+        [ -n "$handoff_decisions" ] && handoff_decisions="$handoff_decisions"$'\n'"- $cd" || handoff_decisions="- $cd"
+    done
+fi
+[ -n "$handoff_decisions" ] || handoff_decisions="none"
+
 cat <<HANDOFF_EOF > "$target_file"
 $header_line
 session: $SESSION_NAME
@@ -453,16 +572,16 @@ date: $TODAY
 status: $([ "$SNAPSHOT" -eq 1 ] && echo "snapshot" || echo "closed")
 
 ## Open Pull Requests
-none
+$handoff_prs
 
 ## Claimed Issues
-none
+$handoff_claimed
 
 ## Worktrees
-clean
+$handoff_worktrees
 
 ## Deferred Items / Candidate Decisions
-none
+$handoff_decisions
 
 ## Manual Steps Remaining
 none

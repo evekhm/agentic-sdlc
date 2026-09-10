@@ -338,3 +338,16 @@ Contract test directory navigation guard correction in `scripts/ops/tests/wrap_t
 - Argus Round 3 review on PR #365 identified nineteen `cd "$PRIMARY_REPO"` sites lacking `|| exit` guards, which under `set -uo pipefail` allows a failed directory change to proceed silently in the wrong directory.
 - Added `|| exit 1` guards to all nineteen `cd "$PRIMARY_REPO"` invocation sites in `scripts/ops/tests/wrap_test.sh`. ShellCheck cleanly passes with zero warnings.
 
+Review Round 2 repair sync (`scripts/ops/wrap.sh`, `scripts/ops/tests/wrap_test.sh`, 2026-09-10):
+- **Check 8 claim release and auto-repair (R1-1, D4):** Enforced authentication on comment authors against persona-App bot identities (`-app[bot]`, `[bot]`, or `personas/*.yaml` identities). Evaluated the latest claim comment by an authenticated persona on the issue; required that this latest claim belong to the current session (`SESSION_NAME`) and that an authenticated handoff comment containing all four headers (`Done:`, `Decided:`, `Next:`, `Blocked:`) exist at or after that latest claim comment. Unauthenticated comments, peer session prefix collisions, and superseded claims are ignored and do not mutate issue labels.
+- **Check 17 credential exposure scan (R2-1, D1):** Expanded scan to cover branch commits relative to `origin/main` (`git log -p origin/main..HEAD` / `git log -p -n 10`), uncommitted diffs (`git diff --cached`, `git diff`), tracked repository files via `git grep`, and issue comment bodies. Added explicit `pass: credential scan clean` reporting on clean scans.
+- **Handoff template data population (R1-5, D13):** Populated `## Open Pull Requests`, `## Claimed Issues`, `## Worktrees`, and `## Deferred Items / Candidate Decisions` in the generated handoff artifact from actual execution state gathered by checks rather than static fallback strings.
+- **Check 7 decision accounting (R2-3, D6, D9):** Implemented candidate decision emission from session commit history and verification of unrecorded decisions. Emitted candidate decisions in handoff template.
+- **Check 18 temporary body file cleanup (R2-4, D6):** Replaced substring wildcard globs with exact delimited session token matching (`(^|[-_])"${SESSION_NAME}"(([-_](body|tmp|comment).*)|\.(tmp|md|txt)|$)`) to ensure peer sessions with prefix names (e.g. `wave-2`) are never deleted when a session (e.g. `wave`) closes out.
+- **Contract test regression suite (R2-2):** Added regression assertions to `wrap_test.sh`:
+  - AT-6: Verified `FAIL=0` gate blocks auto-repair when any close-out check fails (mutation 1), and verified `## Claimed Issues` is populated in handoff artifact.
+  - AT-7: Verified `DRY_RUN=true` case-insensitive parsing without mutations (mutation 2).
+  - AT-8: Verified anchored session regex prevents match against peer session prefix (mutation 3), verified unauthenticated comments are ignored, and verified superseding peer claims prevent auto-repair.
+  - AT-12: Verified committed credential detection on branch, verified clean run reports `pass: credential scan clean`, and verified Check 18 temp file isolation preserves peer temp files.
+
+
