@@ -93,7 +93,7 @@ configurations point at different scripts.
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
-| W1 | #85 | `/wrap` runs the same close-out on both harnesses and writes the dated handoff. | `status:spec` with a live claim |
+| W1 | #85 | `scripts/ops/wrap.sh` writes the dated handoff and runs the close-out; the `/wrap` door is Claude Code only by the operator's scope cut of 2026-09-10 (spec D8 on PR #357, per #43 D16: no `.agents/workflows/` twin in v1). An Antigravity seat calls the script from its brief or Stop hook; the agy door is a follow-up intent that D8 must name. | spec amendment round 2 open as PR #357 (athena, `0be054d`); plan PR #349 superseded by it |
 | W2 | #330 D7 | Claude Code injects the newest handoff from the `SessionStart` hook; Antigravity has no such hook, so `work.sh` and the seat launcher inject it at dispatch. | decided in the ruling, lands with S1's implement rung |
 | W3 | #329 | The ceiling enforces itself: threshold nudges at 60/70/90 percent from the side-channel file, compaction backstop `autoCompactWindow: 180000`. Consumes S1's file format. | `intent:new`; its design rung starts after S1's implement merges |
 
