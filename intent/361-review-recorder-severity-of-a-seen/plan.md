@@ -246,7 +246,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
   6. `bash scripts/ops/tests/execution_test.sh` -> PASS
   7. `bash scripts/ops/tests/placement_test.sh` -> PASS
   8. `bash scripts/ops/tests/post_test.sh` -> PASS
-  9. `bash scripts/ci/tests/merge_gate_test.sh` -> PASS
+  9. `bash scripts/ci/tests/merge_gate_test.sh` -> no new failure from #361; the suite currently aborts at MG-38 (plan(#308), 42c6828), which is #308's outstanding contract, so a full PASS is out of scope here and `.github/workflows/**` stays untouched
 - **Done-When:**
   All test suites and CI gate checks exit 0 cleanly.
 
@@ -274,7 +274,7 @@ When a `high` finding is downgraded to `normal` or `suggestion`:
 - **Base commit:** SHA of the commit merging this plan
 - **PR Title:** `fix(ci): mutable finding severity by discovering reviewer in consensus recorder (#361)`
 - **PR Body Requirements:**
-  - Reference: `Refs #361` (or `Closes #361`)
+  - Reference: `Refs #361` only. No closing keyword anywhere in the PR body, commit messages or comments (docs/SPEC.md:448, #245).
   - Deep Review grant: apply `deep-review` grant label (`scripts/ops/post.sh <pr> --as odyssey --add-label deep-review`) per DEEP-3, DEEP-5, DEEP-7.
   - Plan sync / Summary of implemented tasks T2, T3, T4.
   - Proof that all 25 scenarios in `scripts/ci/tests/review_recorder_test.sh` pass green.
