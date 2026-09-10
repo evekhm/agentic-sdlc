@@ -334,3 +334,7 @@ Contract test failure accounting correction in `scripts/ops/tests/wrap_test.sh` 
 - Corrected failure accounting by recording failures to a temporary log file (`$FAIL_LOG`) created at suite startup and cleaned up on EXIT trap, with `fail()` appending `1` to `$FAIL_LOG` and the summary block computing `FAILURES=$(wc -l < "$FAIL_LOG")`. No assertion, fixture, AT body or Decision citation was changed.
 - Acceptance proven: with `WRAP_SH` pointing at a stub whose body is `exit 0`, the suite exits nonzero (exit 1) and its reported count equals its FAIL lines.
 
+Contract test directory navigation guard correction in `scripts/ops/tests/wrap_test.sh` under operator authorization ([comment 5624250817](https://github.com/evekhm/agentic-sdlc/issues/85#issuecomment-5624250817)):
+- Argus Round 3 review on PR #365 identified nineteen `cd "$PRIMARY_REPO"` sites lacking `|| exit` guards, which under `set -uo pipefail` allows a failed directory change to proceed silently in the wrong directory.
+- Added `|| exit 1` guards to all nineteen `cd "$PRIMARY_REPO"` invocation sites in `scripts/ops/tests/wrap_test.sh`. ShellCheck cleanly passes with zero warnings.
+

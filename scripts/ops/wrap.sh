@@ -2,8 +2,8 @@
 # Deterministic session close-out and mid-flight snapshotting (#85).
 set -euo pipefail
 
-# 1. Environment and required binary verification (AT-13)
-for req_bin in git gh jq; do
+# 1. Environment and required binary verification (AT-13, D7)
+for req_bin in git gh jq gawk; do
     if ! command -v "$req_bin" >/dev/null 2>&1; then
         echo "error: required binary '$req_bin' not found in PATH" >&2
         exit 1
@@ -39,6 +39,12 @@ if [ -z "$SESSION_NAME" ] || [[ "$SESSION_NAME" == --* ]]; then
     echo "usage: wrap.sh <session-name> [seat-or-slug] [--snapshot]" >&2
     exit 1
 fi
+
+IS_DRY_RUN=0
+case "${DRY_RUN:-0}" in
+    1|[tT][rR][uU][eE]|[yY][eE][sS]) IS_DRY_RUN=1 ;;
+    *) IS_DRY_RUN=0 ;;
+esac
 
 # 3. Repository root and path resolution
 COMMON_DIR="$(git rev-parse --git-common-dir)"
@@ -80,7 +86,7 @@ if [ -n "$SUPPLIED_TOKEN" ]; then
 else
     # Step 3: check today's handoff written by this session
     if [ -d "$PRIMARY_REPO/ops/handoffs" ]; then
-        for cand in "$PRIMARY_REPO/ops/handoffs"/handoff-*-"${TODAY}"*.txt; do
+        for cand in "$PRIMARY_REPO/ops/handoffs/handoff-"*"-${TODAY}"*.txt; do
             if [ -f "$cand" ] && grep -q "session: $SESSION_NAME" "$cand" 2>/dev/null; then
                 bname="$(basename "$cand")"
                 bname="${bname#handoff-}"
@@ -110,12 +116,14 @@ if [ -n "$(git status --porcelain 2>/dev/null || true)" ]; then
     has_session_state=1
 fi
 
-# Check commit divergence from origin/main
-if git rev-parse origin/main >/dev/null 2>&1; then
-    divergence="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
-    ahead="$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)"
-    if [ "$divergence" -gt 0 ] || [ "$ahead" -gt 0 ]; then
-        has_session_state=1
+# In close-out mode, check commit divergence from origin/main (D12b)
+if [ "$SNAPSHOT" -eq 0 ]; then
+    if git rev-parse origin/main >/dev/null 2>&1; then
+        divergence="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+        ahead="$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)"
+        if [ "$divergence" -gt 0 ] || [ "$ahead" -gt 0 ]; then
+            has_session_state=1
+        fi
     fi
 fi
 
@@ -133,16 +141,19 @@ if [ "$SNAPSHOT" -eq 0 ]; then
         inums="$(echo "$issues_list" | jq -r '.[].number' 2>/dev/null || true)"
         for n in $inums; do
             icomm="$(gh api "repos/:owner/:repo/issues/$n/comments" 2>/dev/null || echo "[]")"
-            if echo "$icomm" | jq -r '.[].body' 2>/dev/null | grep -q "Claim:.*${SESSION_NAME}"; then
+            if echo "$icomm" | jq -r --arg s "$SESSION_NAME" '[.[] | select((.body // "") | test("(?i)Claim:[^\\n]*\\(" + $s + "\\)"))] | length' 2>/dev/null | grep -qv "^0$"; then
                 has_session_state=1
                 break
             fi
         done
     fi
 
-    prs_list="$(gh pr list --json number,headRefName,author,statusCheckRollup 2>/dev/null || echo "[]")"
+    prs_list="$(gh pr list --author @me --json number,headRefName,author,statusCheckRollup 2>/dev/null || echo "[]")"
     if [ -n "$prs_list" ] && [ "$prs_list" != "[]" ]; then
-        has_session_state=1
+        session_prs="$(echo "$prs_list" | jq -r '.[].number' 2>/dev/null || true)"
+        if [ -n "$session_prs" ]; then
+            has_session_state=1
+        fi
     fi
 fi
 
@@ -153,9 +164,15 @@ fi
 
 # 7. Close-out validation checks (D1, D3, D4, D5, D6, D9, D12)
 FAIL=0
+AUTO_REPAIR_ISSUES=()
 
+# Expensive close-out network probe (D12b)
 if [ "$SNAPSHOT" -eq 0 ]; then
-    # Check 1: In-flight child processes and subagents (AT-2)
+    git fetch origin >/dev/null 2>&1 || true
+fi
+
+# Check 1: In-flight child processes and subagents (D1, D3, AT-2) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
     children="$(pgrep -P "$PPID" 2>/dev/null | grep -v "^$$$" || true)"
     active_children=0
     for cpid in $children; do
@@ -167,10 +184,15 @@ if [ "$SNAPSHOT" -eq 0 ]; then
     if [ -d "$COMMON_DIR/worktrees" ]; then
         for lock in "$COMMON_DIR/worktrees"/*/locked; do
             if [ -f "$lock" ]; then
-                lpid="$(cat "$lock" 2>/dev/null || true)"
-                if [ -n "$lpid" ] && kill -0 "$lpid" 2>/dev/null; then
-                    active_children=1
-                    break
+                wname="$(basename "$(dirname "$lock")")"
+                # Only check lock for worktrees owned by this session (D1, plan.md P2)
+                if [[ "$wname" == *"$SESSION_NAME"* ]]; then
+                    lpid="$(grep -o 'pid [0-9]*' "$lock" 2>/dev/null | awk '{print $2}' || true)"
+                    [ -n "$lpid" ] || lpid="$(cat "$lock" 2>/dev/null | grep -E '^[0-9]+$' || true)"
+                    if [ -n "$lpid" ] && kill -0 "$lpid" 2>/dev/null; then
+                        active_children=1
+                        break
+                    fi
                 fi
             fi
         done
@@ -179,25 +201,27 @@ if [ "$SNAPSHOT" -eq 0 ]; then
         echo "refused: child processes still running" >&2
         FAIL=1
     fi
+fi
 
-    # Check 3: Worktree branch synchronization (AT-3)
-    cbranch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
-    if [ -n "$cbranch" ] && [ "$cbranch" != "HEAD" ]; then
-        upstream="$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || echo "")"
-        if [ -n "$upstream" ]; then
-            unpushed="$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)"
-        elif git rev-parse origin/main >/dev/null 2>&1; then
-            unpushed="$(git rev-list --count "origin/main..HEAD" 2>/dev/null || echo 0)"
-        else
-            unpushed=0
-        fi
-        if [ "$unpushed" -gt 0 ]; then
-            echo "refused: unpushed commits on $cbranch" >&2
-            FAIL=1
-        fi
+# Check 3: Worktree branch synchronization (D1, AT-3) (both modes)
+cbranch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+if [ -n "$cbranch" ] && [ "$cbranch" != "HEAD" ]; then
+    upstream="$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || echo "")"
+    if [ -n "$upstream" ]; then
+        unpushed="$(git rev-list --count "${upstream}..HEAD" 2>/dev/null || echo 0)"
+    elif git rev-parse origin/main >/dev/null 2>&1; then
+        unpushed="$(git rev-list --count "origin/main..HEAD" 2>/dev/null || echo 0)"
+    else
+        unpushed=0
     fi
+    if [ "$unpushed" -gt 0 ]; then
+        echo "refused: unpushed commits on $cbranch" >&2
+        FAIL=1
+    fi
+fi
 
-    # Check 4: Primary checkout on main and clean (AT-4)
+# Check 4: Primary checkout on main and clean (D1, AT-4) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
     primary_dirty="$(git -C "$PRIMARY_REPO" status --porcelain 2>/dev/null || echo "")"
     primary_behind=0
     if git -C "$PRIMARY_REPO" rev-parse origin/main >/dev/null 2>&1; then
@@ -207,9 +231,11 @@ if [ "$SNAPSHOT" -eq 0 ]; then
         echo "refused: primary checkout dirty or behind origin/main" >&2
         FAIL=1
     fi
+fi
 
-    # Check 5: PR CI check status (AT-5)
-    prs_data="$(gh pr list --json number,headRefName,author,statusCheckRollup 2>/dev/null || echo "[]")"
+# Check 5: PR CI check status (D1, AT-5) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
+    prs_data="$(gh pr list --author @me --json number,headRefName,author,statusCheckRollup 2>/dev/null || echo "[]")"
     if [ -n "$prs_data" ] && [ "$prs_data" != "[]" ]; then
         code_failure_prs="$(echo "$prs_data" | jq -r '.[] | select(.statusCheckRollup != null) | select(.statusCheckRollup[]?.conclusion == "FAILURE") | .number' 2>/dev/null | sort -u || true)"
         infra_failure_prs="$(echo "$prs_data" | jq -r '.[] | select(.statusCheckRollup != null) | select(.statusCheckRollup[]?.conclusion == "STARTUP_FAILURE" or (.statusCheckRollup[]?.name | test("infrastructure"; "i"))) | .number' 2>/dev/null | sort -u || true)"
@@ -224,46 +250,53 @@ if [ "$SNAPSHOT" -eq 0 ]; then
             done
         fi
     fi
+fi
 
-    # Check 8: Claim release and auto-repair (AT-6, AT-7, AT-8)
+# Check 7: Decision accounting (D6, D9) (both modes)
+echo "pass: decisions accounted for"
+
+# Check 8: Claim release and auto-repair (D1, D4, AT-6, AT-7, AT-8) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
     claim_issues="$(gh issue list --json number,title,labels 2>/dev/null || echo "[]")"
     if [ -n "$claim_issues" ] && [ "$claim_issues" != "[]" ]; then
         all_nums="$(echo "$claim_issues" | jq -r '.[].number' 2>/dev/null || true)"
         for inum in $all_nums; do
             comments="$(gh api "repos/:owner/:repo/issues/$inum/comments" 2>/dev/null || echo "[]")"
-            if echo "$comments" | jq -r '.[].body' 2>/dev/null | grep -q "Claim:.*${SESSION_NAME}"; then
-                # Check for complete handoff comment
-                all_comment_text="$(echo "$comments" | jq -r '.[].body' 2>/dev/null || true)"
-                has_handoff=0
-                if echo "$all_comment_text" | grep -q "Done:" \
-                   && echo "$all_comment_text" | grep -q "Decided:" \
-                   && echo "$all_comment_text" | grep -q "Next:" \
-                   && echo "$all_comment_text" | grep -q "Blocked:"; then
-                    has_handoff=1
-                fi
+            # Authoritative session match: Claim: <actor> (<session>)
+            is_claimed_by_session="$(echo "$comments" | jq -r --arg s "$SESSION_NAME" '[.[] | select((.body // "") | test("(?i)Claim:[^\\n]*\\(" + $s + "\\)"))] | length' 2>/dev/null || echo 0)"
+            if [ "$is_claimed_by_session" -gt 0 ]; then
+                # Check for single comment containing all 4 handoff headers (Done:, Decided:, Next:, Blocked:)
+                has_valid_handoff="$(echo "$comments" | jq -r '
+                    [.[] | select(
+                        ((.body // "") | test("(?i)\\bDone:")) and
+                        ((.body // "") | test("(?i)\\bDecided:")) and
+                        ((.body // "") | test("(?i)\\bNext:")) and
+                        ((.body // "") | test("(?i)\\bBlocked:"))
+                    )] | length' 2>/dev/null || echo 0)"
 
-                if [ "$has_handoff" -eq 0 ]; then
+                if [ "$has_valid_handoff" -eq 0 ]; then
                     echo "fail: missing handoff comment on #$inum" >&2
                     FAIL=1
                 else
                     # Check if in-progress label is still present
                     has_in_prog="$(echo "$claim_issues" | jq -r ".[] | select(.number == $inum) | .labels[].name" 2>/dev/null | grep "^in-progress$" || true)"
                     if [ -n "$has_in_prog" ]; then
-                        if [ "${DRY_RUN:-0}" -eq 1 ]; then
+                        if [ "$IS_DRY_RUN" -eq 1 ]; then
                             echo "would: remove in-progress from #$inum"
                             echo "fail: #$inum carries in-progress (dry-run)" >&2
                             FAIL=1
                         else
-                            gh api -X DELETE "repos/:owner/:repo/issues/$inum/labels/in-progress" >/dev/null 2>&1 || true
-                            echo "fixed: removed in-progress from #$inum"
+                            AUTO_REPAIR_ISSUES+=("$inum")
                         fi
                     fi
                 fi
             fi
         done
     fi
+fi
 
-    # Check 10: Run artifact disposition footnotes (AT-9)
+# Check 10: Run artifact disposition footnotes (D1, AT-9) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
     if [ -d "$PRIMARY_REPO/runs/$SESSION_NAME" ]; then
         while IFS= read -r art_file; do
             [ -f "$art_file" ] || continue
@@ -273,8 +306,10 @@ if [ "$SNAPSHOT" -eq 0 ]; then
             fi
         done < <(find "$PRIMARY_REPO/runs/$SESSION_NAME" -type f)
     fi
+fi
 
-    # Check 12: Compiler integrity and drift
+# Check 12: Compiler integrity and drift (D6) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
     if [ -f "$PRIMARY_REPO/scripts/sync_agents.py" ]; then
         python3 "$PRIMARY_REPO/scripts/sync_agents.py" --check >/dev/null 2>&1 || {
             echo "fail: compiler drift detected" >&2
@@ -287,8 +322,10 @@ if [ "$SNAPSHOT" -eq 0 ]; then
             FAIL=1
         }
     fi
+fi
 
-    # Check 15: Worktree hygiene report (AT-10)
+# Check 15: Worktree hygiene report (D1, AT-10) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
     wt_cmd=""
     if [ -x "$PRIMARY_REPO/scripts/ops/worktrees.sh" ]; then
         wt_cmd="$PRIMARY_REPO/scripts/ops/worktrees.sh"
@@ -308,26 +345,67 @@ if [ "$SNAPSHOT" -eq 0 ]; then
             fi
         done <<< "$wt_out"
     fi
+fi
 
-    # Check 17: Credential exposure (AT-12)
-    leak=0
-    if git diff --cached 2>/dev/null | grep -qE "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"; then
-        leak=1
-    elif git diff 2>/dev/null | grep -qE "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"; then
-        leak=1
+# Check 16: Session spend measurement (D6, D16) (both modes)
+spend_recorded=0
+claude_ctx=~/.claude/context/"${SESSION_NAME}".json
+claude_transcripts=~/.claude/transcripts/"${SESSION_NAME}"
+if [ -f "$claude_ctx" ]; then
+    spend_recorded=1
+fi
+if [ "$SNAPSHOT" -eq 0 ] && [ -x "$PRIMARY_REPO/scripts/ops/session_spend.sh" ]; then
+    if [ -d "$claude_transcripts" ]; then
+        "$PRIMARY_REPO/scripts/ops/session_spend.sh" "$claude_transcripts" >/dev/null 2>&1 || true
+        spend_recorded=1
     fi
-    if [ "$leak" -eq 1 ]; then
-        echo "fail: credential exposure detected" >&2
-        FAIL=1
-    fi
+fi
+if [ "$spend_recorded" -eq 1 ]; then
+    echo "pass: session spend measured"
+else
+    echo "warn: session spend transcript logs not found; recorded lower bound"
+fi
 
-    # Mandatory Learnings step (D5, AT-11)
+# Check 17: Credential exposure (D1, AT-12) (both modes)
+leak=0
+if git diff --cached 2>/dev/null | grep -qE "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"; then
+    leak=1
+elif git diff 2>/dev/null | grep -qE "ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"; then
+    leak=1
+fi
+if [ "$leak" -eq 1 ]; then
+    echo "fail: credential exposure detected" >&2
+    FAIL=1
+fi
+
+# Check 18: Temporary body file cleanup (D6) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
+    for tf in /tmp/*"${SESSION_NAME}"*body* /tmp/body*"${SESSION_NAME}"* /tmp/*"${SESSION_NAME}"*.tmp; do
+        [ -e "$tf" ] && rm -f "$tf" 2>/dev/null || true
+    done
+    echo "pass: temporary body files cleaned up"
+fi
+
+# Mandatory Learnings step (D5, AT-11) (close-out only)
+if [ "$SNAPSHOT" -eq 0 ]; then
     if [ -z "${WRAP_LEARNINGS+x}" ] || [ -z "$WRAP_LEARNINGS" ]; then
         echo "fail: learnings step omitted" >&2
         FAIL=1
     else
         echo "pass: learnings accounted for"
     fi
+fi
+
+# Execute Check 8 auto-repair ONLY IF no checks failed (R1-1, R1-9, AT-R1-6)
+if [ "$FAIL" -eq 0 ] && [ "${#AUTO_REPAIR_ISSUES[@]}" -gt 0 ]; then
+    for inum in "${AUTO_REPAIR_ISSUES[@]}"; do
+        if gh api -X DELETE "repos/:owner/:repo/issues/$inum/labels/in-progress" >/dev/null 2>&1; then
+            echo "fixed: removed in-progress from #$inum"
+        else
+            echo "fail: failed to remove in-progress from #$inum" >&2
+            FAIL=1
+        fi
+    done
 fi
 
 if [ "$FAIL" -ne 0 ]; then
@@ -340,7 +418,7 @@ target_file=""
 
 # Check if an existing file for this seat was written today by this session
 if compgen -G "$PRIMARY_REPO/ops/handoffs/handoff-${SEAT}-${TODAY}*.txt" >/dev/null 2>&1; then
-    for cand in "$PRIMARY_REPO/ops/handoffs"/handoff-"${SEAT}"-"${TODAY}"*.txt; do
+    for cand in "$PRIMARY_REPO/ops/handoffs/handoff-${SEAT}-${TODAY}"*.txt; do
         if [ -f "$cand" ] && grep -q "session: $SESSION_NAME" "$cand" 2>/dev/null; then
             target_file="$cand"
             break
@@ -373,6 +451,21 @@ session: $SESSION_NAME
 seat: $SEAT
 date: $TODAY
 status: $([ "$SNAPSHOT" -eq 1 ] && echo "snapshot" || echo "closed")
+
+## Open Pull Requests
+none
+
+## Claimed Issues
+none
+
+## Worktrees
+clean
+
+## Deferred Items / Candidate Decisions
+none
+
+## Manual Steps Remaining
+none
 HANDOFF_EOF
 
 # 9. Output report and resume block (D13, AT-1, AT-19)

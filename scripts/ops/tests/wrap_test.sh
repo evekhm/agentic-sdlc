@@ -168,7 +168,7 @@ STUB_WT
     cp "$PRIMARY_REPO/scripts/ops/worktrees.sh" "$SANDBOX_BIN/worktrees.sh"
 
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         "$REAL_GIT" add -A
         "$REAL_GIT" commit -m "initial commit" -q
         "$REAL_GIT" push -q origin main
@@ -315,7 +315,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         rc=0
@@ -341,7 +341,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # C2 (R1-6): the child is spawned by this subshell and wrap.sh is
@@ -373,7 +373,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Create a branch with an unpushed commit belonging to this session
@@ -398,7 +398,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Make working directory dirty with an uncommitted edit
@@ -421,7 +421,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Case A: Code defect failure on session PR #42
@@ -459,7 +459,7 @@ else
     seed_session_state
     seed_stale_in_progress
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         : > "$WRITES_LOG"
@@ -485,7 +485,7 @@ else
     seed_session_state
     seed_stale_in_progress
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         : > "$WRITES_LOG"
@@ -517,7 +517,7 @@ else
     seed_session_state
     seed_stale_in_progress
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Issue #88 is claimed by test-session and carries no handoff comment
@@ -548,7 +548,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Alongside the seeded artifact that does carry a footnote, an
@@ -573,7 +573,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # worktrees.sh reports a dirty peer worktree
@@ -600,7 +600,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         rc=0
         out="$(unset WRAP_LEARNINGS; "$WRAP_SH" test-session 2>&1)" || rc=$?
@@ -615,7 +615,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         rc=0
         out="$(WRAP_LEARNINGS="none" "$WRAP_SH" test-session 2>&1)" || rc=$?
@@ -635,7 +635,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Introduce a credential pattern in a staged file
@@ -659,7 +659,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         # Case A: Missing required session argument
@@ -771,7 +771,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         # C3: my-seat is an established seat in this sandbox, evidenced by a
         # prior-day handoff, so the supplied seat token resolves by exact match.
@@ -811,7 +811,7 @@ else
     # C1: the only test that keeps the pristine sandbox. No seed_session_state.
     setup_sandbox
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
         rc=0
@@ -835,7 +835,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         echo "prior snapshot" > "ops/handoffs/handoff-my-seat-${PRIOR_DATE}.txt"
         : > "$CALLS_LOG"
@@ -868,7 +868,7 @@ else
     setup_sandbox
     seed_session_state
     (
-        cd "$PRIMARY_REPO"
+        cd "$PRIMARY_REPO" || exit 1
         export PATH="$SANDBOX_BIN:$PATH"
         export WRAP_LEARNINGS="none"
 
