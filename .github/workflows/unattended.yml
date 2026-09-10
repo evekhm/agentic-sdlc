@@ -76,6 +76,10 @@ jobs:
     name: resolve — which personas subscribe to this event
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     # A fork pull request gets human review only (D7). Checked here so
     # the whole matrix is empty rather than each adapter refusing.
     if: >-
@@ -145,13 +149,16 @@ jobs:
                 CHECK_ERR="$(python3 scripts/ops/execution.py --check-grant --pr "$PR_NUMBER" --rung "$RUNG" --existing-grants $EXISTING 2>&1)" || CHECK_STATUS=$?
                 if [ "${CHECK_STATUS:-0}" -ne 0 ]; then
                   echo "Grant check failed; deleting label, posting refusal comment, suppressing dispatch"
-                  gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" 2>/dev/null || true
+                  gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" \
+                    || { echo "::error::deep-review label removal failed for PR #$PR_NUMBER; refusing to dispatch"; exit 1; }
                   REFUSAL_MSG="${CHECK_ERR:-Refused: PR #$PR_NUMBER already received a deep-review grant on the '$RUNG' rung. Policy allows at most one deep-review grant per PR per rung (REVIEW.md, #265). Escalating to human.}"
-                  gh api -X POST "repos/$GITHUB_REPO/issues/$PR_NUMBER/comments" -f body="$REFUSAL_MSG" 2>/dev/null || true
+                  gh api -X POST "repos/$GITHUB_REPO/issues/$PR_NUMBER/comments" -f body="$REFUSAL_MSG" \
+                    || { echo "::error::refusal comment post failed for PR #$PR_NUMBER; refusing to dispatch"; exit 1; }
                   : > subscribers.tsv
                 else
                   # Grant valid: delete label and dispatch Argus under deep-review
-                  gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" 2>/dev/null || true
+                  gh api -X DELETE "repos/$GITHUB_REPO/issues/$PR_NUMBER/labels/deep-review" \
+                    || { echo "::error::deep-review label removal failed for PR #$PR_NUMBER; refusing to dispatch"; exit 1; }
                   python3 scripts/ops/execution.py --subscribers pull_request --action "$PR_ACTION" --labels deep-review > subscribers.tsv
                 fi
               fi
