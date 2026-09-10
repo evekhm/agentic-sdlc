@@ -802,7 +802,14 @@ asks whether the number was worked, not which layer declined. Exit 2 is
 produced, never forwarded — a child's own status of 2 maps to 1 like
 any other non-zero. Exit 1 is unusable input, an environment that
 cannot start the row, or an unobservable outcome; exit 0 is
-launched-and-ok or printed. The `/work` door is a hand-authored
+launched-and-ok or printed. Superseding #43 D14 (#312 D1, D2, D6),
+process exit code `rc == 0` is required for error demotion; `rc != 0`
+always fails closed with exit 1. When `rc == 0`, a non-SUCCESS harness
+envelope status (such as a transport stream interruption) is demoted
+to a warning logged to stderr (`==> warning: $launch_persona's harness reported status $status with error: $err; terminal WORK-RESULT observed, proceeding.`)
+if a valid terminal `WORK-RESULT:` line is observed; if no valid
+`WORK-RESULT:` line is present, or if status is SUCCESS with no
+`WORK-RESULT:` line, `work.sh` fails closed with exit 1. The `/work` door is a hand-authored
 `.claude/commands/work.md` whose body is exactly
 `` !`HEADLESS=1 scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
 $?]"` ``, in the `` !`…` `` form that runs it rather than describing
@@ -1137,7 +1144,11 @@ least one such check existing. Check roll-up evaluation queries `databaseId`
 on `CheckRun`. Foreign check runs with the same name are deduplicated by
 selecting the entry with the highest `databaseId`, ensuring superseded runs
 (such as cancelled checks replaced by successful retries) do not block
-conjunct (2) (#298). The merge gate excludes its own run by workflow run
+conjunct (2) (#298). Foreign check runs on the head commit are evaluated
+without name or context exclusions (#64 D24, #312 D3), admitting `SUCCESS`
+and `NEUTRAL` conclusions; transient check failures are remediated via
+GitHub Actions retry mechanisms (`gh run rerun <run_id> --failed`) updating
+the check run on the head (#312 D4). The merge gate excludes its own run by workflow run
 databaseId. `UNKNOWN` is retried up to three times before it is treated
 as unevaluable; `BEHIND` is the one false conjunct that escalates, with
 reason-code `behind`, gated by `autonomous_merge` (D18 governs it like any
