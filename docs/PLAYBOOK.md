@@ -777,3 +777,10 @@ and every poller commit is authored as the daedalus App (#376, on PR
 #387 and PR #388, both re-authored by hand). `merge_gate_test.sh`
 aborts at MG-38 on `main` under the #308 contract; that red is
 tracked as #386.
+
+Status snapshot (2026-09-10, ~19:10 UTC, main at `e9c987b`): #330 is
+`status:implementing` after its plan PR #398 merged at the gate with
+zero blocking rows; #397 was filed, the lifecycle advancer withholding
+the dispatch row while `in-progress` is held and never retrying it;
+and the poller restarted with the #337 fix and fired its first
+self-directed fix round, on PR #365.
