@@ -1,6 +1,6 @@
 # Intent: Normalize Finding Base IDs for Failure-Scenario Matching in Review Recorder
 
-**Issue:** #354 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #354 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
