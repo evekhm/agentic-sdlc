@@ -245,3 +245,10 @@ In `docs/SPEC.md`, under `### loop.autonomous` (lines 1103–1109), the living s
   - Living spec sync: diff includes `docs/SPEC.md` update
   - Summary of implemented tasks T2, T3, T4
   - Proof that all 42 scenarios in `scripts/ci/tests/merge_gate_test.sh` pass green
+
+## Plan deviation (implement rung, 2026-09-10)
+
+Two contract test corrections were applied to `scripts/ci/tests/merge_gate_test.sh` under advisor seat authorization (https://github.com/evekhm/agentic-sdlc/issues/321#issuecomment-5613393316):
+1. Line 876 (scenario MG-38): `$HEAD` replaced with `$H`. The test script defines `$H` at line 55 and leaves `$HEAD` unset; under `set -u` the suite aborted before MG-38 could evaluate.
+2. Line 905 (scenario MG-41): Expected string `refusal:budget 1` replaced with `refusal:budget rung:1`. In `scripts/ci/merge_gate.sh` (line 183 onward), `ledger_append` writes machine row token `refusal:budget rung:1`, which never matches the unqualified string.
+
