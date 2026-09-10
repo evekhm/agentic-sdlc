@@ -745,3 +745,35 @@ recorder replays every old dispute row (#331), so a hand-cleared
 escalation returns within a minute of the next comment; clear, re-run
 the reviewer job, and post nothing until the reviews land. #265 lost
 three clears to this in one hour before the fourth held.
+
+Status snapshot (2026-09-10, ~10:50 UTC, main at `4bdbc48`): two
+round-3 escalations were cleared by hand, on the plans of #353 (PR
+#384) and #361 (PR #385), and the chain resumed on its own both
+times: the lifecycle advanced the label, wrote the dispatch rung, and
+the VM poller claimed and launched the next rung within about a
+minute. The clear is a hand step because the unattended reviewer
+workflow refuses a PR whose issue carries `status:review-stuck`, so
+the gate's D10 self-clear never gets a reviewer to re-verify. #361
+shipped end to end the same morning, its implement PR #387 merged by
+Themis at 10:20Z as `51d0ebf` after one autonomous review round, and
+the lifecycle moved #361 to `status:in-review`. #353's implement PR
+#388 merged the same way at 10:39:54Z as `4bdbc48` after an Argus and
+Atlas round on `e4fe14f`; its lifecycle run did not rank the issue
+(the D17 slug miss, #382), so the label moved by hand. The verifier's
+smoke of that head was BLOCK and landed 33 seconds before the merge; a
+verifier comment carries no verdict marker, so it never holds a gate
+and only advises the seat and humans. The row: the diff
+deleted REVIEW.md's finding-line grammar bullet, the only statement of
+the enum the merge gate declines against, with no task, decision or
+Plan Sync entry. PR #389 restores it, and Argus's own normal row for
+that deletion sits on a merged PR where no reviewer can mark it
+fixed. Two follow-ups were filed out of the morning: #390, the
+recorder observability residue from #361 plus that finding outliving
+its PR, and #391, a duplicate refusal audit note that #267 D3 and
+#353 D4 both mandate in the same branch. One identity
+trap was hit twice: `extensions.worktreeConfig` is unset, so a linked
+worktree's `git config --local` writes the primary's shared config
+and every poller commit is authored as the daedalus App (#376, on PR
+#387 and PR #388, both re-authored by hand). `merge_gate_test.sh`
+aborts at MG-38 on `main` under the #308 contract; that red is
+tracked as #386.
