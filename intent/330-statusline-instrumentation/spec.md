@@ -116,12 +116,12 @@ elif [[ -n "${CLAUDE_CTX_DIR:-}" ]]; then
   CTX_DIR="$CLAUDE_CTX_DIR"
 elif [[ -n "${AGY_CTX_DIR:-}" ]]; then
   CTX_DIR="$AGY_CTX_DIR"
-elif [[ -d "$HOME/.gemini/antigravity-cli" ]]; then
-  CTX_DIR="$HOME/.gemini/antigravity-cli/context"
-elif [[ -d "$HOME/.gemini" ]]; then
-  CTX_DIR="$HOME/.gemini/context"
+elif [[ -d ~/.gemini/antigravity-cli ]]; then
+  CTX_DIR=~/.gemini/antigravity-cli/context
+elif [[ -d ~/.gemini ]]; then
+  CTX_DIR=~/.gemini/context
 else
-  CTX_DIR="$HOME/.claude/context"
+  CTX_DIR=~/.claude/context
 fi
 
 SEAT="${AGENTIC_SEAT:-${CLAUDE_SEAT:-${AGY_SEAT:-}}}"
