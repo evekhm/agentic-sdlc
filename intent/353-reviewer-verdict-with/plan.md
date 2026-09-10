@@ -250,21 +250,28 @@ In `scripts/ci/merge_gate.sh`:
   3. Handle dual refusals joined by `; `.
 - **Done-When:**
   The observable command is a scratch copy of the suite with `fail()` made non-fatal, because `fail()` (`scripts/ci/tests/merge_gate_test.sh:33`) exits the suite at MG-38 (plan(#308), 42c6828, #308's outstanding contract, tracked as #386) some 700 lines before MG-47:
+  The scratch copy must live at the same depth as the suite, because the suite resolves the repo root as `$(dirname "${BASH_SOURCE[0]}")/../../..` (`merge_gate_test.sh:26`); a copy under `/tmp` resolves the gate to `//scripts/ci/merge_gate.sh` and every scenario exits 127. Run from the repo root:
   ```bash
-  sed 's/^fail() { .*/fail() { echo "FAIL: $*" >\&2; FAILED=1; }/' scripts/ci/tests/merge_gate_test.sh > /tmp/mgt-nonfatal.sh \
-    && bash /tmp/mgt-nonfatal.sh 2>&1 | grep -E '^(PASS|FAIL): MG-4[789]'
+  sed 's/^fail() { .*/fail() { echo "FAIL: $*" >\&2; FAILED=1; }/' scripts/ci/tests/merge_gate_test.sh > scripts/ci/tests/.mgt-nonfatal.sh \
+    && bash scripts/ci/tests/.mgt-nonfatal.sh 2>&1 | grep -E '^(PASS|FAIL): MG-4[789]'; rm -f scripts/ci/tests/.mgt-nonfatal.sh
   ```
-  Done when that output contains no `FAIL:` line for MG-47, MG-48 or MG-49. The suite file itself is not edited and `.github/workflows/**` is not touched (D10).
-- **Build-gate evidence (RED at the plan head `5b8f37e`, same command):**
+  Done when that output contains no `FAIL:` line for MG-47, MG-48 or MG-49 (twelve lines, all `PASS:`). The suite file itself is not edited, the scratch copy is removed and never committed, and `.github/workflows/**` is not touched (D10).
+- **Build-gate evidence (RED at the plan head `82f2dec`, the exact output of the command above, run from a checkout of that head):**
   ```text
-  FAIL: MG-47 (D7): conjunct (3) reports false when Argus verdict refused at HEAD (expected to find: conjunct (3): false)
-  FAIL: MG-47 (D7, AT-353-9): explanatory refused verdict diagnostic reported (expected to find: argus verdict at aaaaaaaa... was refused by recorder (run-head-sha-mismatch); ledger recorded head is ...)
+  PASS: MG-47: exits 0 (exit 0)
+  PASS: MG-47 (D7): conjunct (3) reports false when Argus verdict refused at HEAD
+  FAIL: MG-47 (D7, AT-353-9): explanatory refused verdict diagnostic reported (expected to find: argus verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (run-head-sha-mismatch); ledger recorded head is none)
+  PASS: MG-47 (D7): PR does not merge with refused Argus verdict
+  PASS: MG-48: exits 0 (exit 0)
   FAIL: MG-48 (D7): conjunct (3) reports false when Atlas verdict refused at HEAD (expected to find: conjunct (3): false)
-  FAIL: MG-48 (D7, AT-353-10): explanatory Atlas refused verdict diagnostic reported (expected to find: atlas verdict at aaaaaaaa... was refused by recorder (run-workflow-path-mismatch); ...)
-  FAIL: MG-49 (D7): conjunct (3) reports false when both reviewers refused at HEAD (expected to find: conjunct (3): false)
-  FAIL: MG-49 (D7): dual refusal diagnostics joined by semicolon (expected to find: argus verdict at aaaaaaaa... was refused by recorder (commit-not-in-history); ledger recorded head is bbb...)
+  FAIL: MG-48 (D7, AT-353-10): explanatory Atlas refused verdict diagnostic reported (expected to find: atlas verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (run-workflow-path-mismatch); ledger recorded head is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
+  FAIL: MG-48 (D7): PR does not merge with refused Atlas verdict (unexpected write matching: ^gh pr merge)
+  PASS: MG-49: exits 0 (exit 0)
+  PASS: MG-49 (D7): conjunct (3) reports false when both reviewers refused at HEAD
+  FAIL: MG-49 (D7): dual refusal diagnostics joined by semicolon (expected to find: argus verdict at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa was refused by recorder (commit-not-in-history); ledger recorded head is bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)
+  PASS: MG-49 (D7): PR does not merge with dual refused verdicts
   ```
-  The `PR does not merge` guard of each scenario already passes at the head (the gate declines today for the wrong reason); the D7 assertions are the RED half.
+  Reading: MG-47 and MG-49 already decline conjunct (3) at the head (no Argus verdict at `$HEAD`), so their RED is the missing diagnostic. MG-48 is RED on all three D7 assertions: with `reviewed-head:atlas:$H0` present, Atlas carry-forward holds today, conjunct (3) reads true and the gate merges; T4's refusal marker check at `$HEAD` is what turns that scenario. That is the D7 behaviour the implement rung must add.
 - **Plan sync (AT-353-9, AT-353-10):** the Approved rows read "`bash scripts/ci/tests/merge_gate_test.sh` passes with exit code 0". That form is unreachable in this tree until #308 lands MG-38's contract (#386 tracks the abort class). This plan does not narrow the rows: they stay the acceptance, and the implement PR states that the exit-0 form is blocked on #308/#386 and proves D7 through the scratch command above. When #386 gives the suite an expected-red list or a scenario filter, the exit-0 form becomes observable without any change to this plan.
 
 ---
@@ -313,7 +320,7 @@ In `scripts/ci/merge_gate.sh`:
   6. `bash scripts/ops/tests/execution_test.sh` -> PASS
   7. `bash scripts/ops/tests/placement_test.sh` -> PASS
   8. `bash scripts/ops/tests/post_test.sh` -> PASS
-  9. The T4 scratch command (`fail()` non-fatal copy, `grep -E '^(PASS|FAIL): MG-4[789]'`) -> no `FAIL:` line for MG-47, MG-48, MG-49; paste the output into the implement PR body next to the note that the exit-0 form of AT-353-9/10 waits on #308/#386 (see T4 Plan sync)
+  9. The T4 scratch command (`fail()` non-fatal copy at `scripts/ci/tests/.mgt-nonfatal.sh`, removed afterwards, `grep -E '^(PASS|FAIL): MG-4[789]'`) -> twelve `PASS:` lines, no `FAIL:` line for MG-47, MG-48, MG-49; paste the output into the implement PR body next to the note that the exit-0 form of AT-353-9/10 waits on #308/#386 (see T4 Plan sync)
 - **Done-When:**
   Items 1-8 exit 0; item 9 shows no `FAIL:` line for MG-47, MG-48, MG-49 under the scratch command, with the output pasted into the implement PR body.
 
