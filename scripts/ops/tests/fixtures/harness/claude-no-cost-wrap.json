@@ -1,0 +1,14 @@
+{
+  "session_id": "claude-no-cost-wrap",
+  "model": {
+    "id": "gemini-3.8-flash"
+  },
+  "context_window": {
+    "total_input_tokens": 127700,
+    "total_output_tokens": 1500,
+    "context_window_size": 200000
+  },
+  "prompt_cache": {
+    "requests": 1
+  }
+}
