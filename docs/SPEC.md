@@ -543,7 +543,7 @@ The ladder is written end to end here; `review:1..3` and
 
 ### review.policy
 `REVIEW.md` is the review protocol the reviewer personas compile
-against (PR #14, #267, #291, #354). It defines: four authoritative severity tiers
+against (PR #14, #267, #291, #354, #353). It defines: four authoritative severity tiers
 (`security`/`high`/`normal`/`suggestion`) with a closed `high` list
 and a mandatory sibling failure-scenario requirement (`<!-- failure-scenario:<id> -->`);
 failure-scenario marker presence is evaluated against normalized base finding IDs
@@ -560,7 +560,17 @@ exits 0. Review verdicts are posted as structured blocks
 `<!-- review-verdict:<reviewer>:(clean|findings) -->` ... `<!-- review-verdict-end -->`
 carrying `<!-- reviewed-head:<sha> -->`, `<!-- run-id:<id> -->`, `<!-- round:<n> -->`,
 and finding lines `<!-- finding:<id>:<severity>:<status>:<peer> -->` (admitting Decision-ID
-tags `@<Dn>` matching `[A-Za-z0-9@-]`). The three-round funnel admits all findings in
+tags `@<Dn>` matching `[A-Za-z0-9@-]`). The `<!-- run-id:<id> -->` marker is infrastructure-managed:
+`scripts/ops/post.sh` automatically injects the authentic `GITHUB_RUN_ID` into review verdict blocks
+posted by Argus or Atlas, overwriting `<!-- run-id:0 -->` placeholders or inserting the marker immediately
+after `reviewed-head` (#353 D1). Posting in automated environments (`GITHUB_ACTIONS=true` or `POST_REQUIRE_RUN_ID=1`)
+fails closed if `GITHUB_RUN_ID` is missing or zero; outside CI, `ALLOW_UNSAFE_RUN_ID=1` permits posting with an
+explicit warning (#353 D2). All verdict block refusal conditions in `scripts/ci/review_recorder.py` emit uniform
+attributed audit notes `[refused: verdict block from @<reviewer>: <reason>]` and log an explicit diagnostic line to stderr (#353 D4);
+refusals at a valid commit SHA emit machine-readable ledger markers `<!-- refused-verdict:<reviewer>:<reviewed_head>:<reason_code> -->`,
+rendered under `#### Notes` and superseded when that reviewer subsequently posts an accepted verdict at that head (#353 D5, D6).
+Merge gate conjunct (3) reports explanatory recorder refusal diagnostics in `WHY[3]` when a reviewer verdict at `HEAD` was refused
+instead of generic head mismatch or missing verdict messages (#353 D7). The three-round funnel admits all findings in
 round 1; rounds 2–3 admit `security` and `high`, while new `suggestion` findings are recorded
 as non-blocking `normal` tracking rows; historical findings carried forward from round 1 (such as
 suggestions) retain their recorded tier (#291 D6); past round 3, only `security` findings are admitted,

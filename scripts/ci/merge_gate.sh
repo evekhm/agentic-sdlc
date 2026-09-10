@@ -290,6 +290,8 @@ else
     CL="$(awk -v m="$CL_MARK" '$0 == m {f = 1} f {print} /<!-- consensus-ledger-end -->/ {f = 0}' <<<"$CL_BODY")"
     ARGUS_HEAD="$(sed -nE 's/^<!-- reviewed-head:argus:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
     ATLAS_HEAD="$(sed -nE 's/^<!-- reviewed-head:atlas:([0-9a-f]{40}) -->$/\1/p' <<<"$CL" | tail -1)"
+    ARGUS_REFUSED_REASON="$(sed -nE "s/^<!-- refused-verdict:argus:$HEAD:([a-z0-9-]+) -->$/\1/p" <<<"$CL" | tail -1)"
+    ATLAS_REFUSED_REASON="$(sed -nE "s/^<!-- refused-verdict:atlas:$HEAD:([a-z0-9-]+) -->$/\1/p" <<<"$CL" | tail -1)"
     ASSIGNED="$(sed -nE 's/^<!-- assigned:([a-z,]+) -->$/\1/p' <<<"$CL" | tail -1)"
     if [ -z "$ASSIGNED" ]; then
         # Absent-marker fallback (R3-1): resolve assigned set dynamically through execution.py --subscribers
@@ -325,15 +327,27 @@ else
         if [ "$ASSIGNED" = "atlas" ]; then
             if [ "$ATLAS_HEAD" = "$HEAD" ]; then
                 C[3]=1; WHY[3]="atlas recorded at $HEAD (atlas-only assignment)"
+            elif [ -n "$ATLAS_REFUSED_REASON" ]; then
+                WHY[3]="atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is ${ATLAS_HEAD:-none}"
             else
                 WHY[3]="atlas verdict is at ${ATLAS_HEAD:-none}, head is $HEAD"
             fi
         elif [ "$ARGUS_HEAD" != "$HEAD" ]; then
-            WHY[3]="argus verdict is at ${ARGUS_HEAD:-none}, head is $HEAD"
+            if [ -n "$ARGUS_REFUSED_REASON" ] && [ -n "$ATLAS_REFUSED_REASON" ]; then
+                WHY[3]="argus verdict at $HEAD was refused by recorder ($ARGUS_REFUSED_REASON); ledger recorded head is ${ARGUS_HEAD:-none}; atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is ${ATLAS_HEAD:-none}"
+            elif [ -n "$ARGUS_REFUSED_REASON" ]; then
+                WHY[3]="argus verdict at $HEAD was refused by recorder ($ARGUS_REFUSED_REASON); ledger recorded head is ${ARGUS_HEAD:-none}"
+            else
+                WHY[3]="argus verdict is at ${ARGUS_HEAD:-none}, head is $HEAD"
+            fi
         elif [ "$ATLAS_HEAD" = "$HEAD" ]; then
             C[3]=1; WHY[3]="argus and atlas both recorded at $HEAD"
         elif [ -z "$ATLAS_HEAD" ]; then
-            WHY[3]="atlas has no verdict on record (D7 (i))"
+            if [ -n "$ATLAS_REFUSED_REASON" ]; then
+                WHY[3]="atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is none"
+            else
+                WHY[3]="atlas has no verdict on record (D7 (i))"
+            fi
         else
             # Atlas carry-forward (D7): (i) a verdict exists, (ii) no AT-* row
             # open, (iii) no security row open or fixed without both AGREEs,
@@ -341,12 +355,39 @@ else
             # last comment, (v) no unconsumed deep-review grant.
             ATLAS_LAST="$(jq -r --arg a "$ATLAS_LOGIN" '[.[] | select(.user.login == $a)] | sort_by(.created_at) | last | .created_at // ""' <<<"$PR_COMMENTS")"
             MENTIONS="$(jq -r --arg t "$ATLAS_LAST" '[.[] | select((.user.type // "") != "Bot") | select(.created_at > $t) | select(.body | test("atlas"; "i"))] | length' <<<"$PR_COMMENTS")"
-            if [ -n "$AT_OPEN" ]; then WHY[3]="atlas cannot carry forward: AT row open ($(tr '\n' ' ' <<<"$AT_OPEN")) (D7 (ii))"
-            elif [ -n "$BLOCKING" ] && awk -F: '$2 == "security" {found = 1} END {exit !found}' <<<"$CTUP"; then WHY[3]="atlas cannot carry forward: a security row is open or unconfirmed (D7 (iii))"
-            elif [ -n "$DISPUTED" ]; then WHY[3]="atlas cannot carry forward: dispute (D7 (iv))"
-            elif [ "$MENTIONS" != "0" ]; then WHY[3]="atlas cannot carry forward: a human mention naming atlas is outstanding since its last comment (D7 (iv))"
-            elif grep -qx 'deep-review' <<<"$PR_LABELS"; then WHY[3]="atlas cannot carry forward: deep-review grant unconsumed (D7 (v))"
-            else C[3]=1; WHY[3]="argus at $HEAD, atlas carries forward from $ATLAS_HEAD (D7)"; fi
+            if [ -n "$AT_OPEN" ]; then
+                if [ -n "$ATLAS_REFUSED_REASON" ]; then
+                    WHY[3]="atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is ${ATLAS_HEAD:-none}"
+                else
+                    WHY[3]="atlas cannot carry forward: AT row open ($(tr '\n' ' ' <<<"$AT_OPEN")) (D7 (ii))"
+                fi
+            elif [ -n "$BLOCKING" ] && awk -F: '$2 == "security" {found = 1} END {exit !found}' <<<"$CTUP"; then
+                if [ -n "$ATLAS_REFUSED_REASON" ]; then
+                    WHY[3]="atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is ${ATLAS_HEAD:-none}"
+                else
+                    WHY[3]="atlas cannot carry forward: a security row is open or unconfirmed (D7 (iii))"
+                fi
+            elif [ -n "$DISPUTED" ]; then
+                if [ -n "$ATLAS_REFUSED_REASON" ]; then
+                    WHY[3]="atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is ${ATLAS_HEAD:-none}"
+                else
+                    WHY[3]="atlas cannot carry forward: dispute (D7 (iv))"
+                fi
+            elif [ "$MENTIONS" != "0" ]; then
+                if [ -n "$ATLAS_REFUSED_REASON" ]; then
+                    WHY[3]="atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is ${ATLAS_HEAD:-none}"
+                else
+                    WHY[3]="atlas cannot carry forward: a human mention naming atlas is outstanding since its last comment (D7 (iv))"
+                fi
+            elif grep -qx 'deep-review' <<<"$PR_LABELS"; then
+                if [ -n "$ATLAS_REFUSED_REASON" ]; then
+                    WHY[3]="atlas verdict at $HEAD was refused by recorder ($ATLAS_REFUSED_REASON); ledger recorded head is ${ATLAS_HEAD:-none}"
+                else
+                    WHY[3]="atlas cannot carry forward: deep-review grant unconsumed (D7 (v))"
+                fi
+            else
+                C[3]=1; WHY[3]="argus at $HEAD, atlas carries forward from $ATLAS_HEAD (D7)"
+            fi
         fi
     fi
 fi

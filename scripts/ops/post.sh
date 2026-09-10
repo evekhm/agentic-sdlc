@@ -111,6 +111,41 @@ fi
 if [ -n "$BODY_FILE" ]; then
     [ -r "$BODY_FILE" ] || die "cannot read the body file $BODY_FILE"
     [ -s "$BODY_FILE" ] || die "the body file $BODY_FILE is empty; there is nothing to post"
+
+    if [[ "$AS" =~ ^(argus|atlas)$ ]] && grep -q '<!-- review-verdict:' "$BODY_FILE"; then
+        has_valid_env_run_id=false
+        if [[ "${GITHUB_RUN_ID:-}" =~ ^[1-9][0-9]*$ ]]; then
+            has_valid_env_run_id=true
+        fi
+
+        if [ "$has_valid_env_run_id" = "true" ]; then
+            injected_body="$(mktemp)"
+            trap 'rm -f "$injected_body"' EXIT
+            python3 -c '
+import sys, re
+src, dst, run_id = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(src, "r", encoding="utf-8") as f:
+    content = f.read()
+def repl(m):
+    block = m.group(0)
+    if re.search(r"<!-- run-id:[0-9]+ -->", block):
+        return re.sub(r"<!-- run-id:[0-9]+ -->", f"<!-- run-id:{run_id} -->", block)
+    return re.sub(r"(<!-- reviewed-head:[0-9a-fA-F]{40}\s*-->)", r"\1\n<!-- run-id:" + run_id + " -->", block)
+new_content = re.sub(r"<!-- review-verdict:[^>]+-->.*?<!-- review-verdict-end -->", repl, content, flags=re.DOTALL)
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(new_content)
+' "$BODY_FILE" "$injected_body" "$GITHUB_RUN_ID"
+            BODY_FILE="$injected_body"
+        elif [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${POST_REQUIRE_RUN_ID:-}" = "1" ]; then
+            die "GITHUB_RUN_ID is unset or zero in unattended environment; refusing to post verdict block without authentic run-id"
+        elif [ "${ALLOW_UNSAFE_RUN_ID:-}" = "1" ]; then
+            echo "post.sh: warning: posting review verdict with unvalidated run-id (ALLOW_UNSAFE_RUN_ID=1)" >&2
+        elif grep -qE '<!-- run-id:[1-9][0-9]* -->' "$BODY_FILE"; then
+            : # permitted without rewriting
+        else
+            die "GITHUB_RUN_ID is unset or 0; export GITHUB_RUN_ID or ALLOW_UNSAFE_RUN_ID=1 to post review verdicts locally"
+        fi
+    fi
 fi
 
 # --- The hold set (D14) ---------------------------------------------------------
