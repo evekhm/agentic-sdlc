@@ -438,7 +438,12 @@ session for that seat opens with that handoff as its first input,
 injected at start by the harness hook or loaded by the seat launcher,
 so a successor never starts cold and never re-derives what its
 predecessor already decided. The handoff joins sessions the way the
-issue thread joins rungs. Close-out is
+issue thread joins rungs. A session watches its own cost the same way
+in both harnesses: one statusline, wired into Claude Code and
+Antigravity by
+[`scripts/ops/harness/install.sh`](scripts/ops/harness/README.md),
+renders context against the 200K working ceiling and warns before the
+harness's own compaction runs. Close-out is
 [#85](https://github.com/evekhm/agentic-sdlc/issues/85), priming and
 the statusline are
 [#330](https://github.com/evekhm/agentic-sdlc/issues/330), the nudge
