@@ -68,13 +68,16 @@ same gates. They differ in where you sit.
 - **At the keyboard.** Open a session in the harness you prefer and
   capture an idea with `/idea <text>`. The product owner searches the
   tracker, files the intent and asks you what is missing. From there
-  `/next <n>` runs the next stage of that issue from inside your
+  `/work <n>` runs the next stage of that issue from inside your
   session: it starts the owning persona on its pinned harness and
   hands you back a short summary and the pull request. You read it,
   answer the questions the persona raised, and merge, or the merge
-  actor merges once the reviewers agree. Then `/next <n>` again, one
+  actor merges once the reviewers agree. Then `/work <n>` again, one
   stage at a time, until the change lands. This is how one change is
-  driven end to end in front of an audience.
+  driven end to end in front of an audience. `<n>` is rarely typed
+  twice: inside the issue's own worktree, `/work` alone reads it from
+  the branch; from any other session it offers your open, unclaimed
+  issues to pick from.
 - **Handing off the day.** When an issue can run without you,
   `/work <n> --yolo` picks it up and hands it to the loop: every stage
   is dispatched, reviewed and merged on consensus, and the final pull
@@ -96,7 +99,7 @@ same gates. They differ in where you sit.
  |    the intent is filed               |   |    every stage dispatched, reviewed    |
  |         |                            |   |    and merged on consensus; the last   |
  |         v                            |   |    pull request waits for you          |
- | /next <n>                            |   |                                        |
+ | /work <n>                            |   |                                        |
  |    one stage runs; the pull          |   | /work <n> --yolo --auto-close          |
  |    request comes back to you         |   |    the last pull request merges and    |
  |         |                            |   |    the issue closes on its own         |
@@ -104,7 +107,7 @@ same gates. They differ in where you sit.
  | you answer, you merge                |   | a whole day                            |
  |         |                            |   |    the advisor picks the batch,        |
  |         v                            |   |    you confirm it once                 |
- | /next <n> again, until it lands      |   |                                        |
+ | /work <n> again, until it lands      |   |                                        |
  |                                      |   | you are called on escalation only      |
  +--------------------------------------+   +----------------------------------------+
 ```
@@ -116,25 +119,27 @@ stages, and `auto-close` lets it land the last one
 repository-wide kill switch, `loop.autonomy_enabled` in
 [`config/execution.yaml`](config/execution.yaml), freezes every
 issue's autonomy at once during an incident ("The orchestrator").
-`/next` is [#441](https://github.com/evekhm/agentic-sdlc/issues/441),
-and the advisor's scheduling of a batch across the whole backlog is
+Without `--yolo`, `/work <n>` runs and blocks on one stage
+([#441](https://github.com/evekhm/agentic-sdlc/issues/441)). The
+advisor's scheduling of a batch across the whole backlog is
 [#446](https://github.com/evekhm/agentic-sdlc/issues/446).
 
-**The doors.** Six commands, typed inside a harness session, are the
+**The doors.** Five commands, typed inside a harness session, are the
 whole typed input to the loop:
 
 - `/idea <text>` and `/bug <text>` search the tracker first, then
   extend a matching thread or file a new issue that names the
   relationship, so duplicates stay visible
   ([#407](https://github.com/evekhm/agentic-sdlc/issues/407)).
-- `/next <n>` runs the next stage of one issue inside your session
-  and hands back the summary and the pull request
-  ([#441](https://github.com/evekhm/agentic-sdlc/issues/441)).
 - `/work <n>` resolves the rung and the owning persona, prints a
   digest, and dispatches that persona under its own identity;
-  `--yolo` and `--auto-close` set the issue's autonomy as it goes
-  ([#439](https://github.com/evekhm/agentic-sdlc/issues/439);
-  full contract [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`).
+  `--yolo` and `--auto-close` set the issue's autonomy as it goes.
+  Without `--yolo` it runs one stage and hands back the pull request;
+  `<n>` itself is optional, read from the current worktree's branch
+  or, failing that, offered as a pick from your open issues
+  ([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
+  [#441](https://github.com/evekhm/agentic-sdlc/issues/441); full
+  contract [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`).
 - `/fast <n>` compresses the ladder for a proof of concept already
   working locally: it starts at implementation and closes on a single
   review round
@@ -519,7 +524,7 @@ and a reviewer keeps its findings on the pull request it reviews
 
 **Stops.** The loop stops on `hold`, on a failed consensus, on a
 tripped budget and on an open security finding, and calls the owner.
-A person rejoins at the keyboard with `/next <n>`, or hands the issue
+A person rejoins at the keyboard with `/work <n>`, or hands the issue
 back to the loop with `/work <n> --yolo` ("What it solves",
 [#89](https://github.com/evekhm/agentic-sdlc/issues/89)).
 
