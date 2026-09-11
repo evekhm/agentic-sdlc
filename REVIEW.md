@@ -45,7 +45,7 @@ The per-rung verifier checklist executed across lifecycle gates:
 - **plan:** at plan, the intent lost nothing from the issue;
 - **design:** at design, no open question and every acceptance row runnable without a model;
 - **build:** at build, the contract tests fail at the plan's base;
-- **implement:** at implement, the gates re-run and the job log behind every green check says what the check claims.
+- **implement:** at implement, the gates re-run, the job log behind every green check says what the check claims, and reviewers verify that `CHANGELOG.md` entries are factually accurate, concise (1–3 sentences), and aligned with the diff, and that bypass reasons on marker lines are valid (low-quality or inaccurate entries are flagged as `normal` defects).
 - **code gate additions:** Argus adds the deep checks where it is assigned (code gate, trust-bearing paths, `deep-review`, open `security` row): mutation-test the tests, re-run the gates, read the full diff.
 
 Atlas executes the checklist on every assigned PR; Argus executes the checklist plus deep checks at implement and wherever assigned.

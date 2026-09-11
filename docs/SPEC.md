@@ -136,6 +136,23 @@ section ceiling of #35 D2/D4 was lifted by the product owner on
 Reference docs live in `docs/` (BLOG.md, CONTEXT.md, this file),
 uppercase names throughout.
 
+### process.changelog
+`CHANGELOG.md` at the repository root documents notable behavioral
+and user-facing changes shipped to `main` in reverse-chronological
+order (#410). Entries are grouped under H2 date headings formatted as
+`## YYYY-MM-DD`. Each entry occupies an H3 section citing the pull
+request and issue:
+`### [PR #<n>](https://github.com/evekhm/agentic-sdlc/pull/<n>): <Descriptive Title> ([#<issue>](https://github.com/evekhm/agentic-sdlc/issues/<issue>))`
+(or unlinked plain text `### PR #<n>: <Descriptive Title> (#<issue>)`).
+The body consists of 1 to 3 concise, declarative sentences explaining:
+(1) what capability or behavior changed, (2) why the change was made,
+and (3) the operational or user-visible impact on operators, personas,
+or workflows. Entries must not contain raw commit SHAs, file lists,
+diff snippets, or author vanity attributions. Reviewers (`argus`,
+`atlas`) verify that changelog entries are factually accurate, concise,
+and aligned with the diff, and that bypass reasons on marker lines are
+valid, flagging low-quality or inaccurate entries as normal defects.
+
 ### tracker.workflow
 Work is tracked as GitHub issues on `evekhm/agentic-sdlc`. Sessions
 follow pick → claim → read → work → hand off → gate (AGENTS.md,
@@ -351,10 +368,10 @@ proceeds (#207 D3, #242). Tests:
 `scripts/ci/compiler_roundtrip.sh`.
 
 ### ci.gates
-`.github/workflows/ci-gates.yml` runs four deterministic gates on
-every pull request — and all but spec-check also on pushes to `main` —
-as four independent jobs, so one push returns all four verdicts (#6,
-`intent/6-ci-gates/`; the fourth added by #25). **Drift:** `python3 scripts/sync_agents.py
+`.github/workflows/ci-gates.yml` runs five deterministic gates on
+every pull request — and all but spec-check and changelog-check also on pushes to `main` —
+as five independent jobs, so one push returns all five verdicts (#6,
+`intent/6-ci-gates/`; the fourth added by #25; the fifth added by #410). **Drift:** `python3 scripts/sync_agents.py
 --check` plus `scripts/ci/compiler_roundtrip.sh`; a hand-edited or
 stale compiled target under `.claude/agents/` or `.agents/` fails.
 **Sanitization:** `scripts/ci/sanitize_check.sh` scans every tracked
@@ -378,9 +395,27 @@ good. **Execution:** `python3 scripts/ops/execution.py --check` plus
 placement with no adapter directory, on an event
 `.github/workflows/unattended.yml` does not trigger on, or on a persona
 with no source fails here rather than at 03:00 in a run nobody is
-watching (`execution.placement`, #25). All four are scripts runnable
-locally by the same command CI runs; the workflow needs no secrets and
-grants only `contents: read`.
+watching (`execution.placement`, #25). **Changelog check:**
+`scripts/ci/changelog_check.sh` enforces the changelog obligation
+on behavior-bearing diffs (`ci.gates.changelog`, #410). All five are
+scripts runnable locally by the same command CI runs; the workflow
+needs no secrets and grants only `contents: read`.
+
+### ci.gates.changelog
+`scripts/ci/changelog_check.sh` enforces the changelog obligation on
+pull requests touching behavior-bearing paths (`scripts/**`,
+`personas/**`, `config/**`, `.github/workflows/**`, `AGENTS.md`,
+`REVIEW.md` — compiled targets excluded, the drift gate owns those),
+running under the `changelog-check` job in
+`.github/workflows/ci-gates.yml` (#410). It fails closed if required
+environment variables (`BASE_SHA`, `HEAD_SHA`, `PR_BODY_FILE`) are unset
+or empty, if git diff fails, or if `PR_BODY_FILE` is missing or unreadable.
+It accepts CLI positional arguments (`$1` as base ref, `$2` as PR body
+text or file path) for local invocation. The obligation is satisfied
+when either the pull request diff modifies `CHANGELOG.md` or the PR body
+contains a valid bypass marker: `Changelog: none — <reason>` or
+`Changelog-impact: none — <reason>` with a mandatory em dash and
+non-empty reason.
 
 ### lifecycle.labels
 Lifecycle state lives in GitHub issue labels (#4,
@@ -1327,14 +1362,22 @@ unparseable ledger fails closed and is never read as absent.
 
 `.github/workflows/merge-gate.yml` holds `contents: write`,
 `pull-requests: write`, `issues: write`, `checks: read`,
-`statuses: read` and nothing else (acceptance 19); the merge actor
-App's manifest in `scripts/auth/app_manifests.yaml` requests the same
-five plus the `metadata: read` every App carries. Both
-`merge-gate.yml`'s mutating job and `lifecycle.yml` mint that App's
-token under one job-level `environment: themis`, whose
-deployment-branch policy admits `main` only (D23); that policy is
-unverifiable from inside the loop and is precondition P1, not a
-runtime check (Amendment r2).
+`statuses: read` and nothing else (acceptance 19) — that job-level
+block only scopes the ambient `GITHUB_TOKEN`, which never performs the
+merge. The merge actor App's manifest in
+`scripts/auth/app_manifests.yaml` requests those same five, plus the
+`metadata: read` every App carries, plus `workflows: write` (#437):
+GitHub requires `workflows` write on whichever identity merges a pull
+request whose diff touches `.github/workflows/*.yml`, and Themis, as
+the sole merge actor (D3, #64), has no fallback identity the way a
+persona's push of such a diff falls back to the bot PAT. Without this
+grant `mergeStateStatus` reads `BLOCKED` for Themis's own minted token
+on such a PR even though every other reader of the same PR at the same
+moment sees `CLEAN` (observed on #427). Both `merge-gate.yml`'s
+mutating job and `lifecycle.yml` mint that App's token under one
+job-level `environment: themis`, whose deployment-branch policy admits
+`main` only (D23); that policy is unverifiable from inside the loop
+and is precondition P1, not a runtime check (Amendment r2).
 
 Continuous poller and VM supervisor architecture (#251, D2, D4, D5; PR #327):
 The continuous poller (`scripts/placement/vm-local/poll.sh`), running under
