@@ -10,6 +10,8 @@
 set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+cd "$REPO"
+
 ATHENA_YAML="$REPO/personas/athena.yaml"
 INTAKE_SKILL="$REPO/personas/skills/intake-protocol.md"
 COHERENCE_SKILL="$REPO/personas/skills/product-coherence.md"
@@ -148,10 +150,16 @@ fi
 
 # --- D7, D3 / AT-1, AT-3: compiled targets carry authority paths -------------------
 banner "D7, D3 / AT-1, AT-3: compiled target authority paths"
-expected_bullet='Paths this actor'"'"'s pull requests may touch: `intent/**`, `README.md`, `INTENT.md`'
-if [ -f "$CLAUDE_TARGET" ] && [ -f "$AGY_TARGET" ] && \
-   grep -Fq "$expected_bullet" "$CLAUDE_TARGET" && \
-   grep -Fq "$expected_bullet" "$AGY_TARGET"; then
+if [ -f "$CLAUDE_TARGET" ] && [ -f "$AGY_TARGET" ] && python3 -c "
+import sys
+expected = \"Paths this actor's pull requests may touch: \`intent/**\`, \`README.md\`, \`INTENT.md\`\"
+for p in sys.argv[1:]:
+    with open(p) as f:
+        text = ' '.join(f.read().split())
+    if ' '.join(expected.split()) not in text:
+        sys.exit(1)
+sys.exit(0)
+" "$CLAUDE_TARGET" "$AGY_TARGET" 2>/dev/null; then
     pass "D7, D3 / AT-1, AT-3: compiled targets carry expanded authority paths bullet"
 else
     fail "D7, D3 / AT-1, AT-3: compiled targets missing expanded authority paths bullet"
@@ -168,10 +176,8 @@ fi
 
 # --- D10 / AT-4: tracker_search.sh --decisions matching query --------------------
 banner "D10 / AT-4: tracker_search.sh --decisions with matching term"
-set +e
 matching_out="$(bash "$TRACKER_SEARCH" --decisions FRONTIER 2>&1)"
 matching_status=$?
-set -e
 if [ "$matching_status" -eq 2 ] && \
    echo "$matching_out" | grep -Eq '^intent/[^:]+/spec.md:[0-9]+:'; then
     pass "D10 / AT-4: tracker_search.sh --decisions matches rows, prints <file>:<line>: <row>, exits 2"
@@ -181,10 +187,8 @@ fi
 
 # --- D10 / AT-5: tracker_search.sh --decisions non-matching query -----------------
 banner "D10 / AT-5: tracker_search.sh --decisions with non-matching term"
-set +e
 nonmatching_out="$(bash "$TRACKER_SEARCH" --decisions nonexistenttermxyz123 2>&1)"
 nonmatching_status=$?
-set -e
 nonmatching_lines="$(echo "$nonmatching_out" | grep -v '^$' | wc -l || true)"
 if [ "$nonmatching_status" -eq 0 ] && [ "$nonmatching_lines" -eq 0 ]; then
     pass "D10 / AT-5: tracker_search.sh --decisions with non-matching term prints 0 lines and exits 0"
