@@ -40,8 +40,8 @@ one line per persona in
 [`config/model_tiers.yaml`](config/model_tiers.yaml). Copy the file,
 edit the pins, and point the `DEPLOYMENTS` environment variable at
 your copy ([#433](https://github.com/evekhm/agentic-sdlc/issues/433)).
-One rule holds for every composition: the two reviewers resolve to
-different model families
+Every composition keeps two reviewers working alongside each other;
+placing them on different model families is the suggested default
 ([#198](https://github.com/evekhm/agentic-sdlc/issues/198)). With the
 pins set, the team is ready to work.
 
