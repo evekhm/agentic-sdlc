@@ -319,6 +319,62 @@ comment of step 2 declares it on its first line, naming the persona and
 the reason. An undeclared bootstrap is indistinguishable from a session
 working out of turn.
 
+### Local deployment pins and harness overrides
+
+`work.sh` derives each persona's harness from `config/deployments.yaml` by
+default. When an operator runs locally on a single harness (e.g. repinning
+personas to Antigravity without installing Anthropic keys, or vice-versa),
+modifying tracked `config/deployments.yaml` is prohibited: edits in the primary
+checkout violate the read-only rule, branch edits in a worktree are clobbered
+as soon as a new worktree is created from `origin/main`, and committing
+identical model families for reviewers violates INTENT.md's distinct-families
+constraint (enforced by the comments in `config/deployments.yaml` and REVIEW.md).
+
+The supported mechanism is the `DEPLOYMENTS` environment variable (#251, #433):
+
+1. Create a local, unversioned deployment pin file in the primary checkout's
+   gitignored `ops/` directory, e.g. `ops/deployments.yaml`. Because `DEPLOYMENTS`
+   replaces rather than overlays `config/deployments.yaml`, the override file
+   must pin every persona:
+   ```yaml
+   personas:
+     athena:    { harness: antigravity }
+     daedalus:  { harness: antigravity }
+     odyssey:   { harness: antigravity }
+     argus:     { harness: claude-code }
+     atlas:     { harness: antigravity }
+     cassandra: { harness: claude-code }
+     # Note: Reviewer dispatches (argus and atlas) must resolve to distinct
+     # model families to produce protocol-valid reviews (INTENT.md).
+   ```
+2. Export `DEPLOYMENTS` pointing to that file in your working environment, e.g.:
+   ```bash
+   export DEPLOYMENTS="/path/to/checkout/ops/deployments.yaml"
+   ```
+   Or within an active repository session:
+   ```bash
+   export DEPLOYMENTS="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd)/ops/deployments.yaml"
+   ```
+   (Must be evaluated from inside a repository worktree, not from `~/.bashrc`
+   where evaluation at shell startup in the user's home directory resolves invalidly to `/ops/...`).
+   Alternatively, set it inline per command:
+   ```bash
+   DEPLOYMENTS=ops/deployments.yaml scripts/ops/work.sh <issue>
+   ```
+
+Because environment variables are inherited across subshells and worktrees,
+every session and worktree created from `origin/main` automatically honors the
+operator's local pins without dirtying git working trees or failing remote
+checks.
+
+Note on compiled-target preflight: overriding `DEPLOYMENTS` switches off
+`work.sh`'s compiled-target preflight check (`launch_missing`). Operators
+running under local overrides must ensure their compiled targets stay in sync
+by running `python3 scripts/sync_agents.py --check`. Local pins that collapse both
+reviewers onto one model family are suitable for authoring stages (plan, spec,
+build, implement), but review output produced under such a pin is not
+protocol-valid.
+
 ### GitHub writes from a bot identity go through REST
 
 A persona's App installation token and the operator bot's PAT carry
@@ -389,7 +445,8 @@ handoff comment.
   They live in the primary checkout's gitignored `ops/`:
   `ops/charters/`, `ops/handoffs/`, `ops/waves/` (prompts, `launch.sh`,
   `watch-then-launch.sh`), `ops/worktrees/` (worktrees a seat keeps
-  outside `.claude/worktrees`). One per machine, resolved like
+  outside `.claude/worktrees`), `ops/deployments.yaml` (local harness
+  overrides). One per machine, resolved like
   `RUNS_ROOT` with `ops` in place of `runs`: always the primary
   checkout's, always a real subdirectory of it. Because `ops/` is ignored and
   inside the working tree, `git clean -xfd` at the checkout root
