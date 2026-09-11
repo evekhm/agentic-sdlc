@@ -8,6 +8,10 @@
 
 set -euo pipefail
 
+# Unset GITHUB_ACTIONS so hermetic tests run cleanly in CI environments;
+# Test 10 explicitly sets GITHUB_ACTIONS=true to test the guard.
+unset GITHUB_ACTIONS
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 FAST_SH="$REPO/scripts/ops/fast.sh"
 WORK="$(mktemp -d)"
