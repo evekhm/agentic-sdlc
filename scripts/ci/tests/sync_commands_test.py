@@ -75,21 +75,37 @@ class SyncCommandsContractTest(unittest.TestCase):
             if proc.returncode != 0:
                 self.fail(f"D2 / AT-416-2: scripts/sync_commands.py execution failed: {proc.stderr}")
 
-            # Byte-identity against main baseline (R1-2)
+            # Byte-identity against main baseline (R1-2, R2-1)
+            # Ref-free fallback: gate origin/main read on ref availability so test is ref-free in shallow CI clones
             for cmd in ["work.md", "idea.md", "bug.md"]:
                 target_path = tmproot / ".claude" / "commands" / cmd
                 if not target_path.is_file():
                     self.fail(f"D2 / AT-416-2: Target '{target_path}' was not emitted")
 
-                baseline_proc = subprocess.run(
-                    ["git", "show", f"origin/main:.claude/commands/{cmd}"],
-                    cwd=str(REPO_ROOT),
-                    capture_output=True,
-                    text=True,
-                )
-                if baseline_proc.returncode != 0:
-                    self.fail(f"D2 / AT-416-2: Could not read baseline .claude/commands/{cmd} from origin/main")
-                baseline_text = baseline_proc.stdout
+                baseline_text = None
+                try:
+                    baseline_proc = subprocess.run(
+                        ["git", "show", f"origin/main:.claude/commands/{cmd}"],
+                        cwd=str(REPO_ROOT),
+                        capture_output=True,
+                        text=True,
+                    )
+                    if baseline_proc.returncode == 0:
+                        baseline_text = baseline_proc.stdout
+                except (subprocess.SubprocessError, FileNotFoundError):
+                    pass
+
+                if baseline_text is None:
+                    # Ref-free fallback when origin/main ref is unavailable (e.g. shallow CI checkout)
+                    committed_file = REPO_ROOT / ".claude" / "commands" / cmd
+                    if committed_file.is_file():
+                        baseline_text = committed_file.read_text(encoding="utf-8")
+                    else:
+                        self.fail(
+                            f"D2 / AT-416-2: Could not read baseline .claude/commands/{cmd} "
+                            f"(origin/main ref unavailable and committed target '{committed_file}' missing)"
+                        )
+
                 emitted_text = target_path.read_text(encoding="utf-8")
                 if emitted_text != baseline_text:
                     self.fail(f"D2 / AT-416-2: Emitted .claude/commands/{cmd} has drifted from baseline on origin/main")
@@ -99,20 +115,23 @@ class SyncCommandsContractTest(unittest.TestCase):
                 if len(parts) >= 2 and "GENERATED" in parts[1]:
                     self.fail(f"D2 / AT-416-2: .claude/commands/{cmd} frontmatter contains forbidden GENERATED marker comment")
 
-        # Also verify committed targets match baseline on origin/main
+        # Also verify committed targets match baseline on origin/main when ref is available
         for cmd in ["work.md", "idea.md", "bug.md"]:
             committed_target = REPO_ROOT / ".claude" / "commands" / cmd
             if not committed_target.is_file():
                 self.fail(f"D2 / AT-416-2: Committed target '{committed_target}' does not exist")
-            baseline_proc = subprocess.run(
-                ["git", "show", f"origin/main:.claude/commands/{cmd}"],
-                cwd=str(REPO_ROOT),
-                capture_output=True,
-                text=True,
-            )
-            if baseline_proc.returncode == 0:
-                if committed_target.read_text(encoding="utf-8") != baseline_proc.stdout:
-                    self.fail(f"D2 / AT-416-2: Committed .claude/commands/{cmd} differs from origin/main baseline")
+            try:
+                baseline_proc = subprocess.run(
+                    ["git", "show", f"origin/main:.claude/commands/{cmd}"],
+                    cwd=str(REPO_ROOT),
+                    capture_output=True,
+                    text=True,
+                )
+                if baseline_proc.returncode == 0:
+                    if committed_target.read_text(encoding="utf-8") != baseline_proc.stdout:
+                        self.fail(f"D2 / AT-416-2: Committed .claude/commands/{cmd} differs from origin/main baseline")
+            except (subprocess.SubprocessError, FileNotFoundError):
+                pass
 
     def test_d3_d5_at_416_4_antigravity_work_skill_hardening(self):
         """[D3, D5, AT-416-4] .agents/skills/work/SKILL.md defines hardened execution semantics (amending #43 D16)."""

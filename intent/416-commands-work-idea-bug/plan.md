@@ -74,10 +74,13 @@ The implementing pull request is strictly confined to:
 - `GEMINI.md`
 - `intent/43-harness-agnostic-launch/spec.md`
 - `intent/416-commands-work-idea-bug/**`
-- `CHANGELOG.md`
 
-**Standing CI Gates (R1-5):**
-`scripts/ci/compiler_roundtrip.sh` Step 9 serves as the standing CI gate for the slash commands compiler, determinism, target parity, and drift detection, wired permanently into `.github/workflows/ci-gates.yml` under the `drift` job. Step 9 also executes `scripts/ci/tests/sync_commands_test.py`, ensuring continuous regression testing of all contract assertions on every commit without modifying GitHub Actions workflows.
+**Changelog Handling (D13, R2-2):**
+`CHANGELOG.md` is excluded from the implementing PR manifest per Decision D13 (which was approved against a base prior to #410 landing). To satisfy the changelog merge gate (`scripts/ci/changelog_check.sh`), the implementing pull request body carries the bypass marker:
+`Changelog: none — commands compiler infrastructure, targets, and documentation (CHANGELOG.md excluded by D13 manifest)`
+
+**Standing CI Gates (R1-5, R2-1):**
+`scripts/ci/compiler_roundtrip.sh` Step 9 serves as the standing CI gate for the slash commands compiler, determinism, target parity, and drift detection, wired permanently into `.github/workflows/ci-gates.yml` under the `drift` job. Step 9 also executes `scripts/ci/tests/sync_commands_test.py`, ensuring continuous regression testing of all contract assertions on every commit without modifying GitHub Actions workflows. The step and suite operate ref-free (`test_d2` gates `origin/main` queries on ref availability and falls back to committed targets when the remote ref is absent, supporting shallow CI checkouts).
 
 **Forbidden Paths (Untouched per D13):**
 - Operational scripts: `scripts/ops/digest.sh`, `scripts/ops/work.sh`, `scripts/ops/intake.sh`, and `scripts/ops/tracker_search.sh` must **not** have their execution logic modified.
@@ -160,16 +163,16 @@ The implementing pull request is strictly confined to:
   - `sync_commands.py` does not prune `.claude/commands/wrap.md`.
 - Unmanaged extraneous files (e.g. `.claude/commands/orphan.md`) trigger exit 1 under `--check` and are pruned during regular compilation.
 
-### P10 · Ref-Free CI Roundtrip Gate (`compiler_roundtrip.sh`) (D10)
+### P10 · Ref-Free CI Roundtrip Gate (`compiler_roundtrip.sh`) (D10, R2-1)
 - `scripts/ci/compiler_roundtrip.sh` is extended with Step 9 ("Commands compiler roundtrip and drift gate") following Step 8 (frontmatter validation added by #425).
 - Standing CI gate: `compiler_roundtrip.sh` is wired into `.github/workflows/ci-gates.yml` under the `drift` job, providing standing regression and drift prevention.
 - Step 9 also executes `scripts/ci/tests/sync_commands_test.py` post-implementation (R1-5).
-- Entirely ref-free (no `git diff origin/main` or network calls).
+- Entirely ref-free: `scripts/ci/compiler_roundtrip.sh` Step 9 contains no git invocations or remote ref requirements; standing contract test `test_d2` gates remote `origin/main` queries on ref availability and falls back to committed targets when the ref is absent (supporting shallow CI checkouts per R2-1).
 - Checks:
   1. `COMPILER_COMMANDS="$REPO/scripts/sync_commands.py"`
   2. `python3 "$COMPILER_COMMANDS" --check` exits 0.
   3. Emitted `.agents/skills/{work,idea,bug}/SKILL.md` exist and match sources.
-  4. Standing contract suite: `python3 "$REPO/scripts/ci/tests/sync_commands_test.py"` exits 0.
+  4. Standing contract suite: `python3 "$REPO/scripts/ci/tests/sync_commands_test.py"` exits 0 (ref-free in shallow CI).
   5. Two consecutive compiles in a temp tree produce byte-identical file trees.
   6. Throwaway command in temp tree compiles to both targets.
   7. Source containing home path or secret pattern triggers sanitizer refusal.
@@ -307,7 +310,7 @@ The implementing pull request is strictly confined to:
      assert_file "$REPO/.agents/skills/idea/SKILL.md" "emitted idea skill exists"
      assert_file "$REPO/.agents/skills/bug/SKILL.md" "emitted bug skill exists"
 
-     # Standing contract suite execution in CI (R1-5)
+     # Standing contract suite execution in CI (R1-5, R2-1: ref-free in shallow CI clones)
      python3 "$REPO/scripts/ci/tests/sync_commands_test.py" \
        || fail "sync_commands_test.py contract suite failed"
 
@@ -403,22 +406,22 @@ CMD
 
 ---
 
-### Task T10: Update Cross-Harness Documentation in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `CHANGELOG.md`
+### Task T10: Update Cross-Harness Documentation in `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`
 - **Owner:** odyssey (Implement stage)
 - **Files touched:**
   - `AGENTS.md`
   - `CLAUDE.md`
   - `GEMINI.md`
-  - `CHANGELOG.md`
 - **Decisions implemented:** D11, D13
 - **Acceptance criteria proven:** AT-416-12
 - **Step-by-step diff description:**
   1. `AGENTS.md`: Add slash command compilation overview explaining that commands are authored in `commands/` and compiled to `.claude/commands/` and `.agents/skills/` via `scripts/sync_commands.py`.
   2. `CLAUDE.md`: Reference `scripts/sync_commands.py` for `/work`, `/idea`, and `/bug`.
   3. `GEMINI.md`: Reference `scripts/sync_commands.py` and document native skill availability at `.agents/skills/`.
-  4. `CHANGELOG.md`: Add curated entry under today's date heading documenting the single source of truth for slash commands and the cross-harness compiler `scripts/sync_commands.py` (#416).
+  4. Note on `CHANGELOG.md` (R2-2): `CHANGELOG.md` is excluded from the D13 file manifest. To satisfy `scripts/ci/changelog_check.sh`, the implement PR description carries the bypass header:
+     `Changelog: none — commands compiler infrastructure, targets, and documentation (CHANGELOG.md excluded by D13 manifest)`
 - **Done-When:**
-  Grep for `sync_commands.py` in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `CHANGELOG.md` all return matches.
+  Grep for `sync_commands.py` in `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` all return matches.
 
 ---
 
@@ -444,9 +447,9 @@ CMD
   6. Living spec check:
      `bash scripts/ci/spec_check.sh origin/main`
      Exits 0.
-  7. Changelog obligation gate (R1-7):
-     `bash scripts/ci/changelog_check.sh origin/main`
-     Exits 0 (`::notice::changelog check: CHANGELOG.md is updated in this PR; reviewers verify its entry against the diff`).
+  7. Changelog obligation gate (R1-7, R2-2):
+     `bash scripts/ci/changelog_check.sh origin/main <(echo "Changelog: none — commands compiler infrastructure, targets, and documentation (CHANGELOG.md excluded by D13 manifest)")`
+     Exits 0 (`::notice::changelog check: declared no changelog impact — commands compiler infrastructure, targets, and documentation (CHANGELOG.md excluded by D13 manifest)`).
   8. Verify operational scripts remain untouched (AT-416-11):
      `git diff origin/main -- scripts/ops/digest.sh scripts/ops/work.sh scripts/ops/intake.sh scripts/ops/tracker_search.sh`
      Outputs empty diff.
