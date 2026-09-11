@@ -87,14 +87,26 @@ same gates. They differ in where you sit.
   security finding.
 
 ```text
- at the keyboard                        handing off the day
- -----------------------------------    --------------------------------------
- /idea <text>  the intent is filed      /work <n> --yolo      every stage runs,
- /next <n>     one stage; you read                            you merge the last
-               the pull request         /work <n> --yolo --auto-close
- you answer, you merge                                        it lands on its own
-                                        advisor               picks the batch
-                                        you                   escalations only
+ +--------------------------------------+   +----------------------------------------+
+ | AT THE KEYBOARD                      |   | HANDING OFF THE DAY                    |
+ | one issue, one stage at a time       |   | the loop runs while you are away       |
+ +--------------------------------------+   +----------------------------------------+
+ |                                      |   |                                        |
+ | /idea <text>                         |   | /work <n> --yolo                       |
+ |    the intent is filed               |   |    every stage dispatched, reviewed    |
+ |         |                            |   |    and merged on consensus; the last   |
+ |         v                            |   |    pull request waits for you          |
+ | /next <n>                            |   |                                        |
+ |    one stage runs; the pull          |   | /work <n> --yolo --auto-close          |
+ |    request comes back to you         |   |    the last pull request merges and    |
+ |         |                            |   |    the issue closes on its own         |
+ |         v                            |   |                                        |
+ | you answer, you merge                |   | a whole day                            |
+ |         |                            |   |    the advisor picks the batch,        |
+ |         v                            |   |    you confirm it once                 |
+ | /next <n> again, until it lands      |   |                                        |
+ |                                      |   | you are called on escalation only      |
+ +--------------------------------------+   +----------------------------------------+
 ```
 
 Autonomy is chosen per issue: the `yolo` label lets the loop run the
