@@ -64,4 +64,3 @@ delegates_to: [explorer, scanner]
 limits:
   max_turns: 80
   timeout_mins: 45
-
