@@ -99,7 +99,7 @@ same gates. They differ in where you sit.
  |    the intent is filed               |   |    every stage dispatched, reviewed    |
  |         |                            |   |    and merged on consensus; the last   |
  |         v                            |   |    pull request waits for you          |
- | /work <n>                            |   |                                        |
+ | /work                                |   |                                        |
  |    one stage runs; the pull          |   | /work <n> --yolo --auto-close          |
  |    request comes back to you         |   |    the last pull request merges and    |
  |         |                            |   |    the issue closes on its own         |
@@ -107,7 +107,7 @@ same gates. They differ in where you sit.
  | you answer, you merge                |   | a whole day                            |
  |         |                            |   |    the advisor picks the batch,        |
  |         v                            |   |    you confirm it once                 |
- | /work <n> again, until it lands      |   |                                        |
+ | /work again, until it lands          |   |                                        |
  |                                      |   | you are called on escalation only      |
  +--------------------------------------+   +----------------------------------------+
 ```
