@@ -74,6 +74,10 @@ The implementing pull request is strictly confined to:
 - `GEMINI.md`
 - `intent/43-harness-agnostic-launch/spec.md`
 - `intent/416-commands-work-idea-bug/**`
+- `CHANGELOG.md`
+
+**Standing CI Gates (R1-5):**
+`scripts/ci/compiler_roundtrip.sh` Step 9 serves as the standing CI gate for the slash commands compiler, determinism, target parity, and drift detection, wired permanently into `.github/workflows/ci-gates.yml` under the `drift` job. Step 9 also executes `scripts/ci/tests/sync_commands_test.py`, ensuring continuous regression testing of all contract assertions on every commit without modifying GitHub Actions workflows.
 
 **Forbidden Paths (Untouched per D13):**
 - Operational scripts: `scripts/ops/digest.sh`, `scripts/ops/work.sh`, `scripts/ops/intake.sh`, and `scripts/ops/tracker_search.sh` must **not** have their execution logic modified.
@@ -158,13 +162,17 @@ The implementing pull request is strictly confined to:
 
 ### P10 · Ref-Free CI Roundtrip Gate (`compiler_roundtrip.sh`) (D10)
 - `scripts/ci/compiler_roundtrip.sh` is extended with Step 9 ("Commands compiler roundtrip and drift gate") following Step 8 (frontmatter validation added by #425).
+- Standing CI gate: `compiler_roundtrip.sh` is wired into `.github/workflows/ci-gates.yml` under the `drift` job, providing standing regression and drift prevention.
+- Step 9 also executes `scripts/ci/tests/sync_commands_test.py` post-implementation (R1-5).
 - Entirely ref-free (no `git diff origin/main` or network calls).
 - Checks:
-  1. `python3 scripts/sync_commands.py --check` exits 0.
-  2. Emitted `.agents/skills/{work,idea,bug}/SKILL.md` exist and match sources.
-  3. Two consecutive compiles in a temp tree produce byte-identical file trees.
-  4. Throwaway command in temp tree compiles to both targets.
-  5. Source containing home path or secret pattern triggers sanitizer refusal.
+  1. `COMPILER_COMMANDS="$REPO/scripts/sync_commands.py"`
+  2. `python3 "$COMPILER_COMMANDS" --check` exits 0.
+  3. Emitted `.agents/skills/{work,idea,bug}/SKILL.md` exist and match sources.
+  4. Standing contract suite: `python3 "$REPO/scripts/ci/tests/sync_commands_test.py"` exits 0.
+  5. Two consecutive compiles in a temp tree produce byte-identical file trees.
+  6. Throwaway command in temp tree compiles to both targets.
+  7. Source containing home path or secret pattern triggers sanitizer refusal.
 
 ### P11 · Living Spec Protection (`spec_check.sh`) (D11)
 - `commands/*` is added to the behavior-bearing path regex in `scripts/ci/spec_check.sh`:
@@ -291,30 +299,35 @@ The implementing pull request is strictly confined to:
      ```bash
      # --- 9. commands compiler roundtrip and drift gate ----------------------------
      step "9. commands: compiler roundtrip, determinism, and drift gate"
-     python3 "$REPO/scripts/sync_commands.py" --check \
+     COMPILER_COMMANDS="$REPO/scripts/sync_commands.py"
+     python3 "$COMPILER_COMMANDS" --check \
        || fail "commands compiler --check failed against committed targets"
 
      assert_file "$REPO/.agents/skills/work/SKILL.md" "emitted work skill exists"
      assert_file "$REPO/.agents/skills/idea/SKILL.md" "emitted idea skill exists"
      assert_file "$REPO/.agents/skills/bug/SKILL.md" "emitted bug skill exists"
 
+     # Standing contract suite execution in CI (R1-5)
+     python3 "$REPO/scripts/ci/tests/sync_commands_test.py" \
+       || fail "sync_commands_test.py contract suite failed"
+
      # Determinism test in temp directory
      CMD_TMP="$TMP/commands-determinism"
      mkdir -p "$CMD_TMP"
-     python3 "$REPO/scripts/sync_commands.py" --root "$REPO" --out "$CMD_TMP/out1"
-     python3 "$REPO/scripts/sync_commands.py" --root "$REPO" --out "$CMD_TMP/out2"
+     python3 "$COMPILER_COMMANDS" --root "$REPO" --out "$CMD_TMP/out1"
+     python3 "$COMPILER_COMMANDS" --root "$REPO" --out "$CMD_TMP/out2"
      diff -r "$CMD_TMP/out1" "$CMD_TMP/out2" || fail "commands compiler is non-deterministic"
 
      # Throwaway command test
      THROW_DIR="$TMP/throwaway-command"
      mkdir -p "$THROW_DIR/commands"
      cat > "$THROW_DIR/commands/ping.md" <<'CMD'
-     ---
-     description: Ping test command
-     ---
-     Ping body
-     CMD
-     python3 "$REPO/scripts/sync_commands.py" --root "$THROW_DIR" --out "$THROW_DIR/out"
+---
+description: Ping test command
+---
+Ping body
+CMD
+     python3 "$COMPILER_COMMANDS" --root "$THROW_DIR" --out "$THROW_DIR/out"
      assert_file "$THROW_DIR/out/.claude/commands/ping.md" "throwaway claude target emitted"
      assert_file "$THROW_DIR/out/.agents/skills/ping/SKILL.md" "throwaway antigravity target emitted"
 
@@ -323,16 +336,17 @@ The implementing pull request is strictly confined to:
      POISON_CMD="$TMP/poison-command"
      mkdir -p "$POISON_CMD/commands"
      cat > "$POISON_CMD/commands/leak.md" <<CMD
-     ---
-     description: Leaky command
-     ---
-     Path: /${LEAK_DIR}/user/secret
-     CMD
-     if python3 "$REPO/scripts/sync_commands.py" --root "$POISON_CMD" --out "$POISON_CMD/out" >/dev/null 2>&1; then
+---
+description: Leaky command
+---
+Path: /${LEAK_DIR}/user/secret
+CMD
+     if python3 "$COMPILER_COMMANDS" --root "$POISON_CMD" --out "$POISON_CMD/out" >/dev/null 2>&1; then
        fail "commands compiler emitted target containing home path"
      fi
      ```
-  2. Update the final summary message from `(8 checks)` to `(9 checks)`.
+  2. Update line 323 of `scripts/ci/compiler_roundtrip.sh` from `(8 checks)` to `(9 checks)`:
+     `pass "compiler roundtrip green ($targets target files, 9 checks)."`
 - **Done-When:**
   `bash scripts/ci/compiler_roundtrip.sh` runs all 9 steps green and prints `PASS: compiler roundtrip green (... target files, 9 checks).` with exit code 0.
 
@@ -389,20 +403,22 @@ The implementing pull request is strictly confined to:
 
 ---
 
-### Task T10: Update Cross-Harness Documentation in `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`
+### Task T10: Update Cross-Harness Documentation in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `CHANGELOG.md`
 - **Owner:** odyssey (Implement stage)
 - **Files touched:**
   - `AGENTS.md`
   - `CLAUDE.md`
   - `GEMINI.md`
+  - `CHANGELOG.md`
 - **Decisions implemented:** D11, D13
 - **Acceptance criteria proven:** AT-416-12
 - **Step-by-step diff description:**
-  - `AGENTS.md`: Add slash command compilation overview explaining that commands are authored in `commands/` and compiled to `.claude/commands/` and `.agents/skills/` via `scripts/sync_commands.py`.
-  - `CLAUDE.md`: Reference `scripts/sync_commands.py` for `/work`, `/idea`, and `/bug`.
-  - `GEMINI.md`: Reference `scripts/sync_commands.py` and document native skill availability at `.agents/skills/`.
+  1. `AGENTS.md`: Add slash command compilation overview explaining that commands are authored in `commands/` and compiled to `.claude/commands/` and `.agents/skills/` via `scripts/sync_commands.py`.
+  2. `CLAUDE.md`: Reference `scripts/sync_commands.py` for `/work`, `/idea`, and `/bug`.
+  3. `GEMINI.md`: Reference `scripts/sync_commands.py` and document native skill availability at `.agents/skills/`.
+  4. `CHANGELOG.md`: Add curated entry under today's date heading documenting the single source of truth for slash commands and the cross-harness compiler `scripts/sync_commands.py` (#416).
 - **Done-When:**
-  Grep for `sync_commands.py` in `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` all return matches.
+  Grep for `sync_commands.py` in `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `CHANGELOG.md` all return matches.
 
 ---
 
@@ -428,13 +444,16 @@ The implementing pull request is strictly confined to:
   6. Living spec check:
      `bash scripts/ci/spec_check.sh origin/main`
      Exits 0.
-  7. Verify operational scripts remain untouched (AT-416-11):
+  7. Changelog obligation gate (R1-7):
+     `bash scripts/ci/changelog_check.sh origin/main`
+     Exits 0 (`::notice::changelog check: CHANGELOG.md is updated in this PR; reviewers verify its entry against the diff`).
+  8. Verify operational scripts remain untouched (AT-416-11):
      `git diff origin/main -- scripts/ops/digest.sh scripts/ops/work.sh scripts/ops/intake.sh scripts/ops/tracker_search.sh`
      Outputs empty diff.
-  8. Commit explicitly authored as Odyssey App identity:
+  9. Commit explicitly authored as Odyssey App identity:
      `git -c user.name="evekhm-odyssey-app[bot]" -c user.email="323814131+evekhm-odyssey-app[bot]@users.noreply.github.com" commit ...`
-  9. Push branch `odyssey/416-commands-work-idea-bug` (exact match to intent folder slug `416-commands-work-idea-bug` so `lifecycle_advance.sh` advances automatically on merge) and open PR targeting `main` with `Closes #416`.
-  10. Apply `deep-review` grant:
+  10. Push branch `odyssey/416-commands-work-idea-bug` (exact match to intent folder slug `416-commands-work-idea-bug` so `lifecycle_advance.sh` advances automatically on merge) and open PR targeting `main` with `Closes #416`.
+  11. Apply `deep-review` grant:
       `scripts/ops/post.sh <pr> --as odyssey --add-label deep-review`.
 
 ---
@@ -455,5 +474,6 @@ The implementing pull request is strictly confined to:
 | **D10** (Ref-free CI roundtrip gate) | AT-416-9 | Section 3 (P10) | T6 | `test_d10_at_416_9_compiler_roundtrip_includes_commands_gate` |
 | **D11** (Living spec gate in `spec_check.sh`) | AT-416-10, AT-416-12 | Section 3 (P11) | T7, T9 | `test_d11_at_416_10_spec_check_includes_commands_path`, `test_d11_d13_at_416_12_living_spec_and_documentation_parity` |
 | **D12** (Decoupled scope with PR #406 / Issue #85) | AT-416-13 | Section 3 (P12) | T3, T11 | `test_d9_d14_at_416_7_at_416_13_pruning_and_wrap_allowlist` |
-| **D13** (Implementation manifest boundary) | AT-416-11, AT-416-12 | Section 2, Section 3 | T8, T9, T10, T11 | `test_d11_d13_at_416_12_living_spec_and_documentation_parity`, `test_d12_d13_amendment_note_for_issue_43_d16` |
+| **D13** (Implementation manifest boundary: scripts/ops untouched) | AT-416-11 | Section 2, Section 3 | T11 (step 8) | Reviewer-verified (`git diff origin/main -- scripts/ops/{digest,work,intake,tracker_search}.sh` in T11) |
+| **D13** (Implementation manifest boundary: documentation & living spec) | AT-416-12 | Section 2, Section 3 | T8, T9, T10 | `test_d11_d13_at_416_12_living_spec_and_documentation_parity`, `test_d12_d13_amendment_note_for_issue_43_d16` |
 | **D14** (Prerequisite defect resolution from PR #425) | AT-416-1, AT-416-2 | Section 1, Section 3 (P13) | T2, T3, T4 | `test_d1_d14_at_416_1_canonical_sources_exist`, `test_d9_d14_at_416_7_at_416_13_pruning_and_wrap_allowlist` |

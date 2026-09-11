@@ -63,35 +63,56 @@ class SyncCommandsContractTest(unittest.TestCase):
         if not compiler.is_file():
             self.fail("D2 / AT-416-2: Compiler script 'scripts/sync_commands.py' does not exist")
 
-        proc = subprocess.run(
-            [sys.executable, str(compiler)],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode != 0:
-            self.fail(f"D2 / AT-416-2: scripts/sync_commands.py execution failed: {proc.stderr}")
+        # Compile in a temporary root to test hermetically without dirtying repo (R1-9)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmproot = Path(tmpdir)
+            shutil.copytree(REPO_ROOT / "commands", tmproot / "commands")
+            proc = subprocess.run(
+                [sys.executable, str(compiler), "--root", str(tmproot)],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                self.fail(f"D2 / AT-416-2: scripts/sync_commands.py execution failed: {proc.stderr}")
 
-        # Byte-identity against main baseline
+            # Byte-identity against main baseline (R1-2)
+            for cmd in ["work.md", "idea.md", "bug.md"]:
+                target_path = tmproot / ".claude" / "commands" / cmd
+                if not target_path.is_file():
+                    self.fail(f"D2 / AT-416-2: Target '{target_path}' was not emitted")
+
+                baseline_proc = subprocess.run(
+                    ["git", "show", f"origin/main:.claude/commands/{cmd}"],
+                    cwd=str(REPO_ROOT),
+                    capture_output=True,
+                    text=True,
+                )
+                if baseline_proc.returncode != 0:
+                    self.fail(f"D2 / AT-416-2: Could not read baseline .claude/commands/{cmd} from origin/main")
+                baseline_text = baseline_proc.stdout
+                emitted_text = target_path.read_text(encoding="utf-8")
+                if emitted_text != baseline_text:
+                    self.fail(f"D2 / AT-416-2: Emitted .claude/commands/{cmd} has drifted from baseline on origin/main")
+
+                # Verify no GENERATED marker in Claude frontmatter
+                parts = emitted_text.split("---\n", 2)
+                if len(parts) >= 2 and "GENERATED" in parts[1]:
+                    self.fail(f"D2 / AT-416-2: .claude/commands/{cmd} frontmatter contains forbidden GENERATED marker comment")
+
+        # Also verify committed targets match baseline on origin/main
         for cmd in ["work.md", "idea.md", "bug.md"]:
-            target_path = REPO_ROOT / ".claude" / "commands" / cmd
-            if not target_path.is_file():
-                self.fail(f"D2 / AT-416-2: Target '{target_path}' does not exist")
-
-            diff_proc = subprocess.run(
-                ["git", "diff", "--exit-code", f".claude/commands/{cmd}"],
+            committed_target = REPO_ROOT / ".claude" / "commands" / cmd
+            if not committed_target.is_file():
+                self.fail(f"D2 / AT-416-2: Committed target '{committed_target}' does not exist")
+            baseline_proc = subprocess.run(
+                ["git", "show", f"origin/main:.claude/commands/{cmd}"],
                 cwd=str(REPO_ROOT),
                 capture_output=True,
                 text=True,
             )
-            if diff_proc.returncode != 0:
-                self.fail(f"D2 / AT-416-2: .claude/commands/{cmd} has drifted from baseline: {diff_proc.stdout}")
-
-            # Verify no GENERATED marker in Claude frontmatter
-            content = target_path.read_text(encoding="utf-8")
-            parts = content.split("---\n", 2)
-            if len(parts) >= 2 and "GENERATED" in parts[1]:
-                self.fail(f"D2 / AT-416-2: .claude/commands/{cmd} frontmatter contains forbidden GENERATED marker comment")
+            if baseline_proc.returncode == 0:
+                if committed_target.read_text(encoding="utf-8") != baseline_proc.stdout:
+                    self.fail(f"D2 / AT-416-2: Committed .claude/commands/{cmd} differs from origin/main baseline")
 
     def test_d3_d5_at_416_4_antigravity_work_skill_hardening(self):
         """[D3, D5, AT-416-4] .agents/skills/work/SKILL.md defines hardened execution semantics (amending #43 D16)."""
@@ -171,26 +192,24 @@ class SyncCommandsContractTest(unittest.TestCase):
         if not compiler.is_file():
             self.fail("D7 / AT-416-6: 'scripts/sync_commands.py' does not exist")
 
-        # --check on clean repository
-        proc_check = subprocess.run(
-            [sys.executable, str(compiler), "--check"],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-        )
-        if proc_check.returncode != 0:
-            self.fail(f"D7 / AT-416-6: 'scripts/sync_commands.py --check' failed on repository: {proc_check.stderr}")
-
-        # Simulate drift in a temporary root
         with tempfile.TemporaryDirectory() as tmpdir:
             tmproot = Path(tmpdir)
             shutil.copytree(REPO_ROOT / "commands", tmproot / "commands")
             shutil.copytree(REPO_ROOT / ".claude", tmproot / ".claude")
             shutil.copytree(REPO_ROOT / ".agents", tmproot / ".agents")
 
-            # Mutate one target
+            # --check on clean tree (R1-9: hermetic temp tree instead of live repo)
+            proc_check = subprocess.run(
+                [sys.executable, str(compiler), "--check", "--root", str(tmproot)],
+                capture_output=True,
+                text=True,
+            )
+            if proc_check.returncode != 0:
+                self.fail(f"D7 / AT-416-6: 'scripts/sync_commands.py --check' failed on clean tree: {proc_check.stderr}")
+
+            # Simulate drift in target file
             mutated_target = tmproot / ".claude" / "commands" / "work.md"
-            mutated_target.write_text(mutated_target.read_text() + "\n# DRIFT", encoding="utf-8")
+            mutated_target.write_text(mutated_target.read_text(encoding="utf-8") + "\n# DRIFT", encoding="utf-8")
 
             proc_drift = subprocess.run(
                 [sys.executable, str(compiler), "--check", "--root", str(tmproot)],
@@ -202,21 +221,39 @@ class SyncCommandsContractTest(unittest.TestCase):
             if "drift" not in proc_drift.stderr.lower() and "drift" not in proc_drift.stdout.lower():
                 self.fail("D7 / AT-416-6: 'scripts/sync_commands.py --check' did not output drift summary")
 
+            # Verify --out flag emits to custom directory
+            custom_out = tmproot / "custom_out"
+            proc_out = subprocess.run(
+                [sys.executable, str(compiler), "--root", str(tmproot), "--out", str(custom_out)],
+                capture_output=True,
+                text=True,
+            )
+            if proc_out.returncode != 0:
+                self.fail(f"D7 / AT-416-6: scripts/sync_commands.py with --out failed: {proc_out.stderr}")
+            if not (custom_out / ".claude" / "commands" / "work.md").is_file():
+                self.fail("D7 / AT-416-6: scripts/sync_commands.py did not emit targets to --out directory")
+
     def test_d8_at_416_8_sanitizer_refuses_forbidden_patterns(self):
         """[D8, AT-416-8] Sanitizer refuses sources containing forbidden patterns (parity with sync_agents.py)."""
         compiler = REPO_ROOT / "scripts" / "sync_commands.py"
         if not compiler.is_file():
             self.fail("D8 / AT-416-8: 'scripts/sync_commands.py' does not exist")
 
-        # Dynamically assemble leak tokens to prevent triggering repository sanitize_check.sh
-        home_kw = "ho" + "me"
-        leak_home = "/" + home_kw + "/someone/secret"
-        token_prefix = "gh" + "p_"
-        leak_token = token_prefix + ("A" * 20)
-
+        # Dynamically assemble leak tokens to prevent triggering repository sanitize_check.sh (R1-4)
+        _h = "ho" + "me"
+        _u = "Us" + "ers"
         test_cases = [
-            ("absolute home path", leak_home),
-            ("GitHub token", leak_token),
+            ("absolute home path", f"/{_h}/someone/secret"),
+            ("Users directory path", f"/{_u}/someone/secret"),
+            ("home-variable path", "$" + _h.upper() + "/.secret_config"),
+            ("home-relative dotfile path", "~" + "/." + "ssh/id_rsa"),
+            ("GitHub token", "gh" + "p_" + ("A" * 20)),
+            ("GitHub fine-grained token", "github_" + "pat_" + ("B" * 20)),
+            ("AWS access key ID", "AK" + "IA" + ("0123456789ABCDEF")),
+            ("API secret key", "s" + "k-" + ("1234567890abcdef12345678")),
+            ("Slack token", "xo" + "xb-" + ("1234567890-abcdef")),
+            ("private key block", "-----" + "BEGIN RSA PRIVATE KEY-----"),
+            ("inline credential value", "pass" + "word: " + "superSecretValue12345"),
         ]
 
         for label, pattern_val in test_cases:
@@ -250,17 +287,7 @@ class SyncCommandsContractTest(unittest.TestCase):
             claude_cmds = tmproot / ".claude" / "commands"
             claude_cmds.mkdir(parents=True)
 
-            # 1. wrap.md allowlist check
-            wrap_file = claude_cmds / "wrap.md"
-            wrap_file.write_text("---\ndescription: wrap allowlist test\n---\n", encoding="utf-8")
-
-            # Running check must not fail due to wrap.md
-            proc_check = subprocess.run(
-                [sys.executable, str(compiler), "--check", "--root", str(tmproot)],
-                capture_output=True,
-                text=True,
-            )
-            # Recompile and ensure wrap.md is not deleted
+            # 1. Build first to populate managed targets (R1-3, AT-R1-3)
             proc_build = subprocess.run(
                 [sys.executable, str(compiler), "--root", str(tmproot)],
                 capture_output=True,
@@ -268,10 +295,32 @@ class SyncCommandsContractTest(unittest.TestCase):
             )
             if proc_build.returncode != 0:
                 self.fail(f"D9 / AT-416-13: Compiler build failed in test tree: {proc_build.stderr}")
+
+            # 2. wrap.md allowlist check on clean tree
+            wrap_file = claude_cmds / "wrap.md"
+            wrap_file.write_text("---\ndescription: wrap allowlist test\n---\n", encoding="utf-8")
+
+            # Running check must not fail due to wrap.md on an otherwise clean tree
+            proc_check = subprocess.run(
+                [sys.executable, str(compiler), "--check", "--root", str(tmproot)],
+                capture_output=True,
+                text=True,
+            )
+            if proc_check.returncode != 0:
+                self.fail(f"D9 / AT-416-13: Compiler --check failed with allowlisted wrap.md present: {proc_check.stderr}")
+
+            # Recompile and ensure wrap.md is not pruned
+            proc_rebuild = subprocess.run(
+                [sys.executable, str(compiler), "--root", str(tmproot)],
+                capture_output=True,
+                text=True,
+            )
+            if proc_rebuild.returncode != 0:
+                self.fail(f"D9 / AT-416-13: Compiler rebuild failed: {proc_rebuild.stderr}")
             if not wrap_file.is_file():
                 self.fail("D9 / AT-416-13: Compiler pruned allowlisted '.claude/commands/wrap.md'")
 
-            # 2. Extraneous orphan file check
+            # 3. Extraneous orphan file check
             orphan_file = claude_cmds / "orphan.md"
             orphan_file.write_text("---\ndescription: orphan test\n---\n", encoding="utf-8")
 
@@ -297,7 +346,7 @@ class SyncCommandsContractTest(unittest.TestCase):
         content = roundtrip_script.read_text(encoding="utf-8")
         if "sync_commands.py" not in content:
             self.fail("D10 / AT-416-9: compiler_roundtrip.sh does not invoke 'sync_commands.py'")
-        if "sync_commands.py --check" not in content and "$COMPILER_COMMANDS" not in content:
+        if not re.search(r'\bsync_commands\.py["\']?\s+--check', content) and "$COMPILER_COMMANDS" not in content:
             self.fail("D10 / AT-416-9: compiler_roundtrip.sh missing commands drift verification step")
 
     def test_d11_at_416_10_spec_check_includes_commands_path(self):
@@ -336,7 +385,7 @@ class SyncCommandsContractTest(unittest.TestCase):
         """[D5, D12, D13] intent/43-harness-agnostic-launch/spec.md records amendment note for D16."""
         spec_43 = REPO_ROOT / "intent" / "43-harness-agnostic-launch" / "spec.md"
         if not spec_43.is_file():
-            self.fail("D12, D13: 'intent/43-harness-agnostic-launch/spec.md' does not exist")
+            self.fail("D5, D12, D13: 'intent/43-harness-agnostic-launch/spec.md' does not exist")
 
         content = spec_43.read_text(encoding="utf-8")
         if "416" not in content or "amended" not in content.lower():
