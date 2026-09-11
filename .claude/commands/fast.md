@@ -1,6 +1,6 @@
 ---
 description: "Fast-track an issue through owner-authorized ladder compression (combining intent, spec, plan, and implementation into a single round)"
-argument-hint: "<issue-number> [--as <persona>] [--dry-run]"
+argument-hint: '<issue-number> [--as <persona>] [--changelog-reason <text>] [--spec-reason <text>] [--no-pr] [--no-dispatch] [--dry-run]'
 allowed-tools: Bash(scripts/ops/fast.sh:*), Bash(scripts/ops/digest.sh:*), Bash(echo:*)
 ---
 
