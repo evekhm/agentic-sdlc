@@ -335,12 +335,17 @@ constraint (enforced by the comments in `config/deployments.yaml` and REVIEW.md)
 The supported mechanism is the `DEPLOYMENTS` environment variable (#251, #433):
 
 1. Create a local, unversioned deployment pin file in the primary checkout's
-   gitignored `ops/` directory, e.g. `ops/deployments.yaml`:
+   gitignored `ops/` directory, e.g. `ops/deployments.yaml`. Because `DEPLOYMENTS`
+   replaces rather than overlays `config/deployments.yaml`, the override file
+   must pin every persona:
    ```yaml
    personas:
      athena:    { harness: antigravity }
      daedalus:  { harness: antigravity }
      odyssey:   { harness: antigravity }
+     argus:     { harness: claude-code }
+     atlas:     { harness: antigravity }
+     cassandra: { harness: claude-code }
      # Note: Reviewer dispatches (argus and atlas) must resolve to distinct
      # model families to produce protocol-valid reviews (INTENT.md).
    ```
