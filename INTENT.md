@@ -439,3 +439,5 @@ github.com/evekhm/agentic-sdlc with the bootstrap backlog filed as
 issues (scripts/setup/bootstrap_tracker.sh) — the pinned Bootstrap
 tracker issue is now the tracker of record, per AGENTS.md "Working
 the tracker".
+
+## Amendments

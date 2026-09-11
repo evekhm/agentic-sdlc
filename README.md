@@ -402,7 +402,9 @@ when a rung goes wrong. Search the tracker first
 ([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)).
 A reviewer keeps its findings on the pull request it reviews. State
 the problem and what would be true if it were solved. *Athena* asks
-the rest on the thread.
+the rest on the thread. To start an intent conversation with Athena
+interactively, launch `claude --agent athena` in Claude Code or use the
+compiled `.agents/agents/athena` configuration in Antigravity.
 
 Two doors file that search for you: `/idea <text>` and `/bug <text>`,
 in Claude Code. Each searches the tracker first, either extends a

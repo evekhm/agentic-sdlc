@@ -115,6 +115,7 @@ jobs:
         run: |
           bash scripts/ops/tests/review_split_contract_test.sh
           bash scripts/ci/tests/review_split_gate_contract_test.sh
+          bash scripts/ops/tests/athena_front_door_contract_test.sh
 
       - name: Wrap contract tests
         run: bash scripts/ops/tests/wrap_test.sh

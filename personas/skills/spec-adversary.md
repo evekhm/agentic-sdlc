@@ -22,6 +22,15 @@ against your own draft — being its author earns no leniency.
 5. **Contradictions count.** Two individually-clear passages that
    conflict are one ambiguity; the differing case shows an input each
    passage handles differently.
+6. **Every acceptance row can fail.** For each AT row name the input
+   that makes it red. A row that passes either way is dropped or
+   rewritten.
+7. **Neighbours first.** Before round one, list the decisions of every
+   related intent the spec touches. A row that restates one cites it;
+   a row that reverses one says so.
+8. **One pass for self-contradiction.** Before the PR opens, read the
+   Decisions table against the AT list once, looking only for two
+   rows a single input would satisfy differently.
 
 ## Exit condition
 
