@@ -1,6 +1,6 @@
 # Intent: Fix invalid YAML frontmatter in .claude/commands/bug.md
 
-**Issue:** #425 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** accepted on merge of this PR
+**Issue:** #425 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
