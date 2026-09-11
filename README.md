@@ -52,8 +52,9 @@ the loop owns it. The product owner sharpens the ask into a
 specification with numbered decisions, and asks you when a section is
 thin. The architect plans the work and writes the tests that fail
 until it is done. The implementer starts at a pinned commit and makes
-them pass. Two reviewers from different model families judge every
-gate, and the merge actor merges when they agree. A workflow with no
+them pass. Two reviewers judge every gate, each from a different
+model family in the suggested setup, and the merge actor merges when
+they agree. A workflow with no
 model in it moves the issue to the next rung, and the poller
 dispatches the next persona. The maintainer watches the live system
 and files the next issue when a control band breaks. When a persona
