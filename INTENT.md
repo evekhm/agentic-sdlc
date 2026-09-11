@@ -441,3 +441,10 @@ tracker issue is now the tracker of record, per AGENTS.md "Working
 the tracker".
 
 ## Amendments
+
+- 2026-09-11, product owner (PR #451): the comparison bullet on the
+  colleague codelab reads too narrowly. Amended reading: the existing
+  colleague codelabs nail adversarial spec-grilling and contract
+  traceability but are usually single-harness, with no review step, no
+  CI, and no cost discipline. The original bullet stands as written
+  above; this entry supersedes its scope.

@@ -8,24 +8,154 @@ software, and every pass through the loop improves the system that
 built it.
 
 An intent goes in. One agent sharpens it into a specification, one
-plans the work, one builds it, two independent reviewers from
-different model families judge the result, and a maintainer watches
+plans the work, one builds it, two independent reviewers judge the
+result, and a maintainer watches
 it run and proposes what comes next. A human sets direction and
 decides escalations.
 
-This is a **harness-agnostic SDLC**. The process comes first: the
-roles, the protocols, the gates and the artifacts are defined once,
-in vendor-free sources that carry over to any harness. Each persona
-is then assigned its own coding harness and model,
-whichever fits the team's needs and requirements: frontier reasoning
-where judgment shapes the outcome, fast capacity where the process has
-matured, or the platform a team already runs on. Currently supported
-harnesses are Antigravity and Claude Code.
-Reassigning a persona is a one-line change, and the process stays the
-same (the [placement thesis](#two-harnesses-two-model-families)). The
-system follows the
+The system follows the
 [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
 and builds itself with its own loop.
+
+## What it solves
+
+**The process is a ladder.** This is a **harness-agnostic SDLC**: the
+stages, the protocols and the gates are defined once, in vendor-free
+sources, and compile to every supported harness (currently Antigravity
+and Claude Code). An ask climbs a fixed sequence of stages, one persona
+per stage. Every stage ends in one artifact that a person and the next
+agent both read: `intent.md`, `spec.md`, `plan.md` with its failing
+tests, then the code itself. Each artifact lands as a pull request, and
+a merge is its acceptance.
+
+**The team is yours to compose.** Each persona names the grade of
+judgment its work needs. You decide which harness and which model
+serve that grade: budget first, then the complexity of the system
+being built, then what the organization already runs on and how you
+like to work. A frontier model where a wrong call is expensive, a
+fast and cheap model where the stage is well specified and well gated,
+the platform the team already licenses everywhere else. The pins are
+one line per persona in
+[`config/deployments.yaml`](config/deployments.yaml), resolved against
+[`config/model_tiers.yaml`](config/model_tiers.yaml). Copy the file,
+edit the pins, and point the `DEPLOYMENTS` environment variable at
+your copy ([#433](https://github.com/evekhm/agentic-sdlc/issues/433)).
+Every composition keeps two reviewers working alongside each other;
+placing them on different model families is the suggested default
+([#198](https://github.com/evekhm/agentic-sdlc/issues/198)). With the
+pins set, the team is ready to work.
+
+**What the team does on its own.** Work enters as an idea written
+in plain language: a problem to solve and what would be true once it
+is solved. It becomes an issue on the tracker, and from that moment
+the loop owns it. The product owner sharpens the ask into a
+specification with numbered decisions, and asks you when a section is
+thin. The architect plans the work and writes the tests that fail
+until it is done. The implementer starts at a pinned commit and makes
+them pass. Two reviewers judge every gate, each from a different
+model family in the suggested setup, and the merge actor merges when
+they agree. Each merge advances the issue to the next stage and
+starts the next persona; that handover is plain automation with no AI
+judgment in it. The maintainer watches the running system and files a
+new issue when a metric drifts out of its band. A lesson a persona
+learned the hard way is written back into the repository as a rule, a
+check or a test, so the process improves with every pass. Every
+session prices itself, and every dispatch runs under a spend ceiling.
+
+**Two ways to work with it.** Both run the same ladder through the
+same gates. They differ in where you sit.
+
+- **At the keyboard.** Open a session in the harness you prefer and
+  capture an idea with `/idea <text>`. The product owner searches the
+  tracker, files the intent and asks you what is missing. From there
+  `/work <n>` runs the next stage of that issue from inside your
+  session: it starts the owning persona on its pinned harness and
+  hands you back a short summary and the pull request. You read it,
+  answer the questions the persona raised, and merge, or the merge
+  actor merges once the reviewers agree. Then `/work <n>` again, one
+  stage at a time, until the change lands. This is how one change is
+  driven end to end in front of an audience. `<n>` is rarely typed
+  twice: inside the issue's own worktree, `/work` alone reads it from
+  the branch; from any other session it offers your open, unclaimed
+  issues to pick from.
+- **Handing off the day.** When an issue can run without you,
+  `/work <n> --yolo` picks it up and hands it to the loop: every stage
+  is dispatched, reviewed and merged on consensus, and the final pull
+  request waits for your merge. Add `--auto-close` and the final pull
+  request merges and the issue closes on its own. For a whole day's
+  worth, sit with the advisor, pick the issues and the order they run
+  in, confirm the batch once, and step away. The maintainer refills
+  the backlog from what it measures. You are called on escalation
+  only: a `hold`, a failed consensus, a tripped budget, an open
+  security finding.
+
+```text
+ +--------------------------------------+   +----------------------------------------+
+ | AT THE KEYBOARD                      |   | HANDING OFF THE DAY                    |
+ | one issue, one stage at a time       |   | the loop runs while you are away       |
+ +--------------------------------------+   +----------------------------------------+
+ |                                      |   |                                        |
+ | /idea <text>                         |   | /work <n> --yolo                       |
+ |    the intent is filed               |   |    every stage dispatched, reviewed    |
+ |         |                            |   |    and merged on consensus; the last   |
+ |         v                            |   |    pull request waits for you          |
+ | /work                                |   |                                        |
+ |    one stage runs; the pull          |   | /work <n> --yolo --auto-close          |
+ |    request comes back to you         |   |    the last pull request merges and    |
+ |         |                            |   |    the issue closes on its own         |
+ |         v                            |   |                                        |
+ | you answer, you merge                |   | a whole day                            |
+ |         |                            |   |    the advisor picks the batch,        |
+ |         v                            |   |    you confirm it once                 |
+ | /work again, until it lands          |   |                                        |
+ |                                      |   | you are called on escalation only      |
+ +--------------------------------------+   +----------------------------------------+
+```
+
+Autonomy is chosen per issue: the `yolo` label lets the loop run the
+stages, and `auto-close` lets it land the last one
+([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
+[#147](https://github.com/evekhm/agentic-sdlc/issues/147)). One
+repository-wide kill switch, `loop.autonomy_enabled` in
+[`config/execution.yaml`](config/execution.yaml), freezes every
+issue's autonomy at once during an incident ("The orchestrator").
+Without `--yolo`, `/work <n>` runs and blocks on one stage
+([#441](https://github.com/evekhm/agentic-sdlc/issues/441)). The
+advisor's scheduling of a batch across the whole backlog is
+[#446](https://github.com/evekhm/agentic-sdlc/issues/446).
+
+**The doors.** Five commands, typed inside a harness session, are the
+whole typed input to the loop:
+
+- `/idea <text>` and `/bug <text>` search the tracker first, then
+  extend a matching thread or file a new issue that names the
+  relationship, so duplicates stay visible
+  ([#407](https://github.com/evekhm/agentic-sdlc/issues/407)).
+- `/work <n>` resolves the rung and the owning persona, prints a
+  digest, and dispatches that persona under its own identity;
+  `--yolo` and `--auto-close` set the issue's autonomy as it goes.
+  Without `--yolo` it runs one stage and hands back the pull request;
+  `<n>` itself is optional, read from the current worktree's branch
+  or, failing that, offered as a pick from your open issues
+  ([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
+  [#441](https://github.com/evekhm/agentic-sdlc/issues/441); full
+  contract [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`).
+- `/fast <n>` compresses the ladder for a proof of concept already
+  working locally: it starts at implementation and closes on a single
+  review round
+  ([#444](https://github.com/evekhm/agentic-sdlc/issues/444)).
+- `/wrap` closes a session: it runs the close-out checklist, records
+  what the session learned, and writes a dated handoff so the next
+  session at that seat starts warm and never re-derives a decision
+  ([#85](https://github.com/evekhm/agentic-sdlc/issues/85)).
+
+The commands are one source compiled to each harness, the same way
+the personas are
+([#416](https://github.com/evekhm/agentic-sdlc/issues/416)). A longer
+conversation with the product owner, before anything is filed, is a
+session with her directly: `claude --agent athena` in Claude Code, or
+the compiled `.agents/agents/athena` configuration in Antigravity
+([#404](https://github.com/evekhm/agentic-sdlc/issues/404)).
 
 ## What this is
 
@@ -82,32 +212,36 @@ home ([INTENT.md](INTENT.md)).
 
 Each persona is defined once in [`personas/`](personas/): the stage it
 owns, the protocol it runs, the authority it holds, the tier it thinks
-at, and the GitHub identity it acts as.
+at, and the GitHub identity it acts as. Branch protections and path
+checks enforce that authority.
 
 - **Product owner, *Athena*.** Talks with the filer, writes
-  `intent.md`, then writes `spec.md` under an adversarial protocol.
-  Writes only under `intent/`. Frontier tier.
+  `intent.md`, then writes `spec.md` under an adversarial protocol —
+  one ambiguity at a time, two defensible readings, no
+  recommendation. Authority: comments and pull requests touching
+  `intent/` only. Frontier tier.
 - **Architect, *Daedalus*.** Turns an approved spec into `plan.md` and
-  the failing contract tests. Reads code and writes none. Frontier
-  tier.
+  the failing contract tests. Reads code freely, writes none.
+  Authority: pull requests touching plan files only. Frontier tier.
 - **Implementer, *Odyssey*.** Writes the code that makes the tests
-  pass. Starts at a pinned commit in its own branch namespace. One pull
-  request per rung. Implementation tier.
+  pass. Starts at a pinned commit, one pull request per rung.
+  Authority: writes only `odyssey/*` branches; the default branch
+  stays closed to it. Implementation tier.
 - **Reviewer of every gate, *Atlas*.** Reads every pull request at
   every rung on Gemini, the high-volume seat. Posts findings with severity
-  and ids. Runs the verification checklist for the rung. Never
-  approves, merges, closes or edits a label. Review tier
-  ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
+  and ids. Runs the verification checklist for the rung. Authority:
+  comment-only — never approves, merges, closes or edits a label.
+  Review tier ([#204](https://github.com/evekhm/agentic-sdlc/issues/204)).
 - **Deep reviewer, *Argus*.** Joins at the code gate, on any change to
   a trust-bearing path, and on a `review:deep` grant. Runs the same
   protocol on Claude, the other model family, plus the deep checks:
   mutation-tests the tests, re-runs the gates, reads the diff in full.
-  Comment-only like *Atlas*. Review tier
+  Authority: comment-only, like *Atlas*. Review tier
   ([#265](https://github.com/evekhm/agentic-sdlc/issues/265)).
 - **Maintainer, *Cassandra*.** Runs watchers over the live system.
-  When a control band breaks she files the next issue. Fast tier for
-  sweeps, review tier for diagnosis
-  ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
+  When a control band breaks she files the next issue. Authority:
+  comments and issues only. Fast tier for sweeps, review tier for
+  diagnosis ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)).
 - **Advisor, *Nestor*.** The standing judgment seat. Decides process
   questions, writes the prompts the other personas run with, and
   helps at the spec gate. Owns no rung, implements nothing, reviews
@@ -120,9 +254,46 @@ at, and the GitHub identity it acts as.
 - **The owner.** The human. Files ideas, answers the product owner's
   questions, and decides escalations.
 
-Five sub-agents with no GitHub identity do delegated work for the
-personas: mechanic, coder, contract-writer, scanner and explorer. They
-keep raw material out of a persona's context.
+Non-negotiables: two independent reviewers, one covering every gate
+and one going deep at the code gate; evidence alone decides a
+review's outcome; every workflow-driven write goes through a trusted
+posting step; humans own every activation act.
+
+**Identity and authentication.** Each persona registers as its own
+GitHub App — seven Apps total, one per persona plus *Themis* — each
+with its own scoped permissions: *Argus* and *Atlas* hold
+`contents: read` and comment-only write, *Athena* writes only under
+`intent/`. A leaked key exposes one persona's narrow scope; revoking
+or rotating it leaves the other six untouched. GitHub renders every
+action under that App's own `<name>[bot]` login, so a branch
+protection rule, a required reviewer, or an audit trail can name a
+specific persona directly. `scripts/auth/mint_app_token.py <persona>`
+signs a JWT with the persona's private key and exchanges it for an
+hour-long installation token, minted fresh per dispatch; the private
+key is the only credential that persists, held as an Actions secret
+for a hosted persona or a local key file for a VM-local one. A
+dispatched session carries only the token for the persona it launches.
+Full contract: [`docs/SPEC.md`](docs/SPEC.md) `identity.bots`;
+registration: [`scripts/auth/README.md`](scripts/auth/README.md).
+
+Five sub-agents carry no GitHub identity. They keep raw material out
+of a persona's context and route work to the cheapest capable tier:
+
+- **mechanic** (mechanical) — executor for fully specified work: batch
+  edits from an explicit spec, multi-file greps, running test suites,
+  formatting sweeps, applying a reviewer's named fixes. No design
+  decisions.
+- **coder** (implementation) — spec-driven implementer: takes a
+  dispatch-ready spec and implements it exactly, running the tests;
+  surfaces open design questions to the caller and leaves the decision
+  there.
+- **contract-writer** (implementation) — converts an approved spec
+  into failing acceptance tests; every assertion cites the decision it
+  derives from, and an assertion it cannot derive comes back as a gap.
+- **scanner** (fast) — wraps a deterministic check script (credential,
+  path, naming): the script decides, the sub-agent only reports.
+- **explorer** (fast) — read-only search fan-out over code, docs and
+  threads; returns conclusions and locations only, no file dumps.
 
 **Tiers.** Work is graded fast, mechanical, implementation, review or
 frontier. A persona names the grade its work needs. Each harness binds
@@ -131,12 +302,17 @@ the grades to models in
 
 ## The flow, rung by rung
 
+- **Idea, before the first rung.** The owner files with `/idea <text>`
+  or `/bug <text>`, or the system files on what it found —
+  *Cassandra*'s watchers, a reviewer, or the advisor. *Athena* runs
+  intake on every filing. A filing may already carry a `Given design:`,
+  `Given spec:`, or `Given code:` section; intake treats it as
+  authoritative and verbatim, taken as-is without re-derivation or
+  re-questioning. The issue still climbs every rung in order, but each
+  gate only fills the gaps the Given sections leave open. Full contract:
+  [`docs/SPEC.md`](docs/SPEC.md) `ops.intake`.
 - **Plan.** *Athena* reads the issue. When a section is thin she asks
-  on the issue thread and waits for the filer, at most two rounds.
-  Intake is a skill every issue-filing persona carries, so system-filed
-  issues arrive in intent shape
-  ([#10](https://github.com/evekhm/agentic-sdlc/issues/10),
-  [#117](https://github.com/evekhm/agentic-sdlc/issues/117)). She
+  on the issue thread and waits for the filer, at most two rounds. She
   writes `intent.md`: the problem, the outcome wanted, the constraints,
   the open questions. Merged, the issue moves to design.
 - **Design.** *Athena* turns the intent into `spec.md`. She reads her
@@ -188,11 +364,69 @@ review, merge. A fix that changes the spec re-enters at plan
 ([#32](https://github.com/evekhm/agentic-sdlc/issues/32),
 [INTENT.md, "Defect repair"](INTENT.md)).
 
+## The living spec
+
+[`docs/SPEC.md`](docs/SPEC.md) is the living spec: the queryable
+statement of what the merged system does, keyed by stable capability
+ids, written in the present tense, describing merged code only. The
+per-change triple under `intent/` is the immutable record of one
+change: what was asked, what was decided, how it was built. The spec
+is the current state those changes add up to, and the pull request
+that ships a behavior upserts its entry in place; git history is the
+archive of every earlier wording
+([AGENTS.md, "The living spec"](AGENTS.md)).
+
+```text
+intent/<issue>-<slug>/   # intent.md, spec.md, plan.md — the per-change record
+docs/SPEC.md             # the living spec, upserted by every behavior-changing PR
+CHANGELOG.md             # the plain-English trail of what shipped and why
+REVIEW.md                # the review protocol the reviewers compile against
+```
+
+**Guardrails.** A living document rots when nothing forces the
+update, so deterministic checks stand behind the rule:
+
+- **The spec check** fails any pull request that touches a
+  behavior-bearing path (`scripts/`, `personas/`, `config/`, the
+  workflows, AGENTS.md, REVIEW.md) without also touching
+  `docs/SPEC.md`, unless the body carries the literal marker
+  `Spec-impact: none — <reason>`
+  ([`scripts/ci/spec_check.sh`](scripts/ci/spec_check.sh)).
+- **The changelog check** puts the same choice on `CHANGELOG.md`
+  ([`scripts/ci/changelog_check.sh`](scripts/ci/changelog_check.sh),
+  [#410](https://github.com/evekhm/agentic-sdlc/issues/410)).
+- **The drift check** rebuilds every compiled persona file from its
+  source and fails on any difference, so a hand edit to a compiled
+  target cannot become a second truth
+  ([`scripts/sync_agents.py`](scripts/sync_agents.py)).
+- **The reviewers** read every added or changed spec entry as a claim
+  and verify it against the diff that ships it
+  ([REVIEW.md](REVIEW.md)).
+
+The checks verify that the choice was made. Whether the entry is
+right stays with the reviewers. Where README and any of those
+documents differ, the other wins; README is normative for nothing.
+
 ## The orchestrator
 
-The owner files an issue. From that moment the loop owns it. Between
-the human gates, four pieces with no model in them carry an issue from
-one rung to the next.
+The orchestrator is a seat, the advisor *Nestor*, with a
+deterministic workflow beneath it. *Nestor* guides the flow: it reads
+the backlog as one dependency graph and proposes which issues run and
+in what order, writes the prompts the other personas run with, watches
+each issue as it climbs, and steps in where something slips: a rung
+that stalled, a decision nobody owns, a rule a persona had to be told.
+Everything it discovers along the way it files as an issue, so no gap
+lives only in a conversation. It owns no rung, implements nothing,
+reviews nothing, and merges only when the merge is itself the decision
+it is resolving
+([#199](https://github.com/evekhm/agentic-sdlc/issues/199),
+[#446](https://github.com/evekhm/agentic-sdlc/issues/446),
+[#452](https://github.com/evekhm/agentic-sdlc/issues/452)).
+
+The workflow beneath it is deterministic. It carries an issue from
+one rung to the next on the same trigger every time, a merge, and it
+makes no judgment call: every condition it checks is a fact it reads
+from the pull request, the labels or the ledger.
 
 ```text
  pull request opened or pushed
@@ -231,37 +465,68 @@ one rung to the next.
 - **The lifecycle workflow** moves the label and writes the next
   dispatch row. It refuses once an issue has spent its dispatch count
   or its budget ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)).
-- **The poller** runs each dispatch row from the VM: it claims the
-  issue as the next persona and runs it through the placement in
-  [`config/execution.yaml`](config/execution.yaml) under that persona's
-  spend ceiling. It also hands new `intent:new` issues to the product
-  owner ([#251](https://github.com/evekhm/agentic-sdlc/issues/251),
-  [#108](https://github.com/evekhm/agentic-sdlc/issues/108)).
+- **The poller** is a deterministic bash script
+  ([`scripts/placement/vm-local/poll.sh`](scripts/placement/vm-local/poll.sh)),
+  zero model calls, ticking every 30 seconds on the operator's own
+  machine. A supervisor keeps it running continuously: an Antigravity
+  sidecar (`poll.sidecar.json`, `restart_policy: always`), or a
+  `systemd --user` unit (`poll.service`) as the documented fallback —
+  the sidecar itself makes no model call either, it only keeps the
+  bash process alive and restarts it if it dies. Each tick it scans
+  for an unconsumed dispatch row, a new `intent:new` issue, or a
+  blocking review row on one of its own personas' pull requests; on a
+  hit it claims the issue, mints that persona's own App token, and
+  hands off to
+  [`scripts/placement/vm-local/run.sh`](scripts/placement/vm-local/run.sh),
+  which launches the persona's harness session under
+  [`config/execution.yaml`](config/execution.yaml)'s spend ceiling
+  ([#251](https://github.com/evekhm/agentic-sdlc/issues/251),
+  [#108](https://github.com/evekhm/agentic-sdlc/issues/108)). Builders
+  run here to keep their App keys off any GitHub-hosted runner.
 
-**Two modes.** One key, `loop.autonomous_merge` in
-[`config/execution.yaml`](config/execution.yaml), arms the merge and
-the next-rung dispatch. A per-issue override is tracked
-([#147](https://github.com/evekhm/agentic-sdlc/issues/147)).
+**Two modes.** The `yolo` label on an issue arms the next-rung
+dispatch and the merge of every stage; `auto-close` adds the merge of
+the final pull request and the close of the issue
+([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
+[#147](https://github.com/evekhm/agentic-sdlc/issues/147)). One
+repository-wide kill switch, `loop.autonomy_enabled` in
+[`config/execution.yaml`](config/execution.yaml), overrides every
+label when set to false. These are the two ways to work in "What it
+solves".
 
 - **Manual.** The owner is the gate. Every guard still runs and every
   ledger row is still written. The owner reads each pull request and
-  its findings and merges by hand.
+  its findings and merges by hand. The action means the same thing at
+  every gate: a merged pull request is acceptance of the artifact in
+  it; a closed pull request is a rejection, and it is final; when a
+  decision in the artifact is wrong, the owner edits it in the pull
+  request, and the edited row *is* the decision
+  ([REVIEW.md, "Merge is the escape hatch"](REVIEW.md#merge-is-the-escape-hatch)).
 - **Autonomous.** *Themis* merges when the gate's conditions hold. At
-  the code gate both model families must be clear of blocking
-  findings. The owner is called only on escalation.
+  the code gate both reviewers must be clear of blocking findings. The
+  owner is called only on escalation.
 
-The playbook keeps a human at every merge. Autonomous mode goes one
-step further: consensus between two model families reaches the default
-branch ([#64](https://github.com/evekhm/agentic-sdlc/issues/64)).
-Three seats make that safe. *Nestor* holds the judgment. *Atlas*
-verifies every gate and *Argus* adds a second family at the code gate.
-*Cassandra* refills the backlog from measurements.
+The [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
+keeps a human at every merge. Autonomous mode goes one step further:
+the reviewers' consensus reaches the default branch
+([#64](https://github.com/evekhm/agentic-sdlc/issues/64)). Four seats
+make that safe. *Nestor* holds the judgment and files what it notices.
+*Atlas* verifies every gate, and *Argus* adds a second reading at the
+code gate, on another model family in the suggested setup.
+*Cassandra* refills the backlog from what it measures: her watchers
+compare live metrics to control bands, and a broken band becomes an
+issue ([#11](https://github.com/evekhm/agentic-sdlc/issues/11)). So
+the loop feeds itself from two sources, judgment through *Nestor* and
+measurement through *Cassandra*, and anyone feeds it from outside
+through `/idea` and `/bug`. Every filer searches the tracker first,
+and a reviewer keeps its findings on the pull request it reviews
+([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)).
 
 **Stops.** The loop stops on `hold`, on a failed consensus, on a
 tripped budget and on an open security finding, and calls the owner.
-A person joins the loop through one door, `/work <n>`, described under
-"Running it yourself"
-([#89](https://github.com/evekhm/agentic-sdlc/issues/89)).
+A person rejoins at the keyboard with `/work <n>`, or hands the issue
+back to the loop with `/work <n> --yolo` ("What it solves",
+[#89](https://github.com/evekhm/agentic-sdlc/issues/89)).
 
 **Self-improvement.** When a persona had to be told something it
 should have known, the gap becomes an issue and the rule moves into the
@@ -289,22 +554,32 @@ personas, the ladder and the review protocol carry over unchanged.
 **Pins.** Harness and model are one line per persona in
 [`config/deployments.yaml`](config/deployments.yaml), resolved against
 [`config/model_tiers.yaml`](config/model_tiers.yaml). Repin any persona
-by editing its line; the source never changes. One hard constraint:
-the two reviewers must resolve to different model families
-([#198](https://github.com/evekhm/agentic-sdlc/issues/198)). For local
-single-harness authoring operations without dirtying tracked files or worktrees,
-the dispatcher supports the `DEPLOYMENTS` environment variable override
-pointing to an unversioned `ops/deployments.yaml` ([#251](https://github.com/evekhm/agentic-sdlc/issues/251), [#433](https://github.com/evekhm/agentic-sdlc/issues/433)).
-(Reviewer dispatches require distinct model families for protocol-valid consensus).
+by editing its line; the source never changes. To run your own
+composition without touching the tracked file, copy it, edit the pins,
+and point the `DEPLOYMENTS` environment variable at your copy; the
+dispatcher reads that copy first
+([#433](https://github.com/evekhm/agentic-sdlc/issues/433),
+[#251](https://github.com/evekhm/agentic-sdlc/issues/251)). The
+suggested composition places the two reviewers on different model
+families ([#198](https://github.com/evekhm/agentic-sdlc/issues/198)).
 
-```text
- Antigravity  /  Gemini 3.8 Flash            Claude Code  /  Claude
- ------------------------------------        -----------------------------
- Athena     product owner   frontier         Argus      deep reviewer  review
- Daedalus   architect       frontier         Cassandra  maintainer     fast
- Odyssey    implementer     implementation
- Atlas      reviewer        review
-```
+**The harnesses.** Each is installed once per machine[^harness]:
+
+- **Claude Code** (Anthropic), the `claude` command. A persona runs
+  as its compiled agent under `.claude/agents/`.
+- **Antigravity** (Google), the `agy` command. A persona runs from
+  its compiled configuration under `.agents/agents/`.
+
+[^harness]: Install and prepare a harness once per machine:
+    [`scripts/ci/install_harness.sh`](scripts/ci/install_harness.sh)
+    puts both harness binaries on a fresh machine; a clone you can
+    push to; `gh` and `jq` authenticated (labels and backlog come from
+    [`scripts/setup/`](scripts/setup/)); persona App private keys, one
+    per persona plus *Themis*
+    ([`scripts/auth/README.md`](scripts/auth/README.md)); and the
+    statusline plus session priming
+    ([`scripts/ops/harness/README.md`](scripts/ops/harness/README.md)).
+
 
 **The goal** is a process mature enough to run every seat on Gemini
 3.8 Flash through Antigravity
@@ -325,7 +600,7 @@ Opus, both at review tier. Keep a seat on the pricier model where a
 wrong call is expensive. Move a seat to Flash once its process earns
 it, the way every rung persona already has.
 
-List rates in $/1M tokens at or under 200k context (the system's own
+Rates below are $/1M tokens at or under 200k context (the system's own
 ceiling, [AGENTS.md](AGENTS.md)): input / cache write (5m TTL) / cache
 read / output. Claude rates match
 [`scripts/ops/session_spend.sh`](scripts/ops/session_spend.sh); a 1h
@@ -371,8 +646,9 @@ On top of the playbook this system adds five things:
 
 - **One persona source, every harness.** The compiler emits each
   harness's prompt file from one vendor-free source.
-- **Two model families in the review seat.** Consensus between them is
-  what reaches the default branch.
+- **Two independent reviewers.** Their consensus is what reaches the
+  default branch; the suggested setup puts them on different model
+  families.
 - **A real GitHub identity per persona**, so the platform enforces
   authorship and authority. The merge actor is one more identity that
   no persona holds.
@@ -385,91 +661,9 @@ On top of the playbook this system adds five things:
 
 ## Running it yourself
 
-You need three things:
-
-- a clone on a branch you can push;
-- the App private keys, one per persona plus *Themis*; registering
-  them is [`scripts/auth/README.md`](scripts/auth/README.md);
-- `gh` and `jq` authenticated against the repository. Labels and
-  backlog come from [`scripts/setup/`](scripts/setup/).
-
-The autonomous loop adds an enablement checklist, kept in
-[`docs/SPEC.md`](docs/SPEC.md): *Themis* provisioned, the poller under
-a supervisor, branch protection on `main`, execution bindings
-validated, builder credentials preflighted, then the flip of
-`loop.autonomous_merge`.
-
-Anyone files issues, and the system files its own: *Cassandra*'s
-watchers when a control band breaks, and the reviewers and the advisor
-when a rung goes wrong. Search the tracker first
-([AGENTS.md, "Before filing an issue"](AGENTS.md#before-filing-an-issue)).
-A reviewer keeps its findings on the pull request it reviews. State
-the problem and what would be true if it were solved. *Athena* asks
-the rest on the thread. To start an intent conversation with Athena
-interactively, launch `claude --agent athena` in Claude Code or use the
-compiled `.agents/agents/athena` configuration in Antigravity.
-
-Two doors file that search for you: `/idea <text>` and `/bug <text>`,
-in Claude Code. Each searches the tracker first, either extends a
-matching thread or files a new `intent:new` issue naming the
-relationship, and never re-asks a question a `Given design:`, `Given
-spec:`, or `Given code:` section in the text already answered
-([#407](https://github.com/evekhm/agentic-sdlc/issues/407)).
-
-Open a session in your harness and type, for any item at any rung:
-
-```text
-/work <n>
-```
-
-`<n>` is an issue or pull request number. The command resolves the
-rung and the owning persona from the labels, prints what it resolved,
-and dispatches that persona under its own identity. It prints a short
-digest — status, labels, any open pull request, the last comment —
-before it dispatches, so the caller can judge whether the launch is
-worth it. It refuses when the item is on hold, closed, blocked,
-claimed or in contradictory state. Full contract:
-[`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`.
-
-**A session ends with a handoff.** A session is ephemeral and its
-context is the expensive part, so nothing it settled may live only in
-its transcript. Before it ends, the session wraps with `/wrap`, the
-one door
-[#85](https://github.com/evekhm/agentic-sdlc/issues/85) D8 defines,
-in Claude Code. The wrap runs the session
-checklist, records what the session learned, and writes a dated
-handoff for its seat under `ops/handoffs/`, outside git. The next
-session for that seat opens with that handoff as its first input,
-injected at start by the harness hook or loaded by the seat launcher,
-so a successor never starts cold and never re-derives what its
-predecessor already decided. The handoff joins sessions the way the
-issue thread joins rungs. A session watches its own cost the same way
-in both harnesses: one statusline, wired into Claude Code and
-Antigravity by
-[`scripts/ops/harness/install.sh`](scripts/ops/harness/README.md),
-renders context against the 200K working ceiling and warns before the
-harness's own compaction runs. Close-out is
-[#85](https://github.com/evekhm/agentic-sdlc/issues/85), priming and
-the statusline are
-[#330](https://github.com/evekhm/agentic-sdlc/issues/330), the nudge
-that keeps the handoff current as the context fills is
-[#329](https://github.com/evekhm/agentic-sdlc/issues/329), and the
-shared store that keys handoffs per user and per seat so a seat
-resumes on any machine is
-[#399](https://github.com/evekhm/agentic-sdlc/issues/399).
-
-When the owner steps in at a gate, the action means the same thing
-everywhere:
-
-- A merged pull request is acceptance of the artifact in it.
-- A closed pull request is a rejection, and it is final.
-- When a decision in the artifact is wrong, edit it in the pull
-  request. The edited row *is* the decision. You never comment asking
-  for a change and wait for a session to make it
-  ([REVIEW.md, "Merge is the escape hatch"](REVIEW.md#merge-is-the-escape-hatch)).
-
-In autonomous mode the loop merges itself when consensus is reached,
-and the owner is the escalation path.
+TBD. A step-by-step guide to setting up a machine and running a
+working demo, from the first `/idea` to an issue landing on its own,
+is written as its own document and will be linked from here.
 
 ## Where the rules live
 
