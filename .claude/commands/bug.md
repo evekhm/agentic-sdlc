@@ -1,6 +1,6 @@
 ---
 description: Manual intake door for a defect — searches the tracker first, then files an intent:new + bug issue.
-argument-hint: <free text describing the bug: repro, expected vs actual; may include "Given design:", "Given spec:", or "Given code:" sections>
+argument-hint: '<free text describing the bug: repro, expected vs actual; may include "Given design:", "Given spec:", or "Given code:" sections>'
 allowed-tools: Bash(scripts/ops/intake.sh:*), Bash(scripts/ops/tracker_search.sh:*), Bash(gh issue create:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh search issues:*), Bash(gh search prs:*), Read, Write
 ---
 
