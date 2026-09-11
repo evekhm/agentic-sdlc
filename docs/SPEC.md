@@ -708,7 +708,9 @@ when the issue is `intent:new` — through `personas/lifecycle.json`
 reusing `intent/<n>-*/` when one exists and otherwise deriving a slug
 from the title (cut at the first `:` or `;`, lowercased, runs of other
 characters to `-`, ≤24 characters at a word boundary); the branch
-`<persona>/<n>-<slug>`; and the harness from `config/deployments.yaml`. There is deliberately
+`<persona>/<n>-<slug>`; and the harness from `config/deployments.yaml`
+(overridable via the `DEPLOYMENTS` environment variable for local operator runs
+and hermetic tests, #251, #433). There is deliberately
 no flag naming a stage, folder, artifact or branch — one would let a
 session work a stage the labels say is not current. Preflight verifies
 the environment can support a run — GitHub read access and a base
@@ -1085,7 +1087,8 @@ never consults a credential helper at all.
 ### execution.placement
 WHERE a persona runs is a second axis, orthogonal to which harness runs
 it (#25, `intent/25-execution-model/`). `config/deployments.yaml` pins
-persona→harness and `config/execution.yaml` pins persona→trigger and
+persona→harness (overridable via `$DEPLOYMENTS` for local operator runs in
+`ops/`, #251, #433) and `config/execution.yaml` pins persona→trigger and
 persona→placement; neither file carries the other's key, so a move
 between machines never edits a harness pin and never touches a persona
 source. A binding is four keys and no others: `trigger`

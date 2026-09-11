@@ -802,6 +802,9 @@ has "folder:   intent/36-dispatch/ (existing)" "D6: the existing folder is reuse
 has "branch:   odyssey/36-dispatch" "D6: the branch follows the reused folder"
 
 banner "D7 nothing but the number and --as is an input"
+run 0 "usage: --help prints help and exits 0" -- --help
+has "DEPLOYMENTS=<path>" "usage: documents DEPLOYMENTS override"
+has "config/deployments.yaml" "usage: documents default deployments path"
 run 1 "D7: a second positional exits 1" -- 108 109
 has "one number is one run" "D7: it says why"
 run 1 "D7: an unknown flag exits 1" -- 108 --stage implement
@@ -982,6 +985,8 @@ banner "#43 D3/D8 a harness binary that is not installed is exit 1, before any m
 mkdir -p "$WORK/bin-noharness"
 cp "$WORK/bin/gh" "$WORK/bin-noharness/gh"
 cp "$WORK/bin/git" "$WORK/bin-noharness/git"
+_p="$(command -v jq 2>/dev/null)" || true
+[ -z "$_p" ] || ln -sf "$_p" "$WORK/bin-noharness/jq"
 : > "$WRITES"; : > "$LAUNCHES"; : > "$MINTS"
 saved_path="$PATH"
 PATH="$WORK/bin-noharness:/usr/bin:/bin"
