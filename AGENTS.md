@@ -374,6 +374,14 @@ by running `python3 scripts/sync_agents.py --check`. Local pins that collapse bo
 reviewers onto one model family are suitable for authoring stages (plan, spec,
 build, implement), but review output produced under such a pin is not
 protocol-valid.
+### Owner-authorized ladder compression: the fast-track door
+
+`scripts/ops/fast.sh <issue>` (and `/fast <issue>` in Claude Code and interactive sessions) is the operator door for ladder compression (#415, #444). When an owner directs a single-round compression for an issue:
+- Fast-tracking records the caller or owner authorization signature, requires collaborator write permissions, and refuses unattended GitHub Actions. Autonomous bot self-authorization policies remain open for exploration in a follow-up issue.
+- It transitions the issue directly to `status:implementing`, clearing intake and earlier stage labels, and posts the fast-track authorization comment.
+- The single-round PR must carry the required header `Owner-authorized ladder compression: combines intent/spec/plan/implement into one round (Refs #<n>)` and `Closes #<n>`.
+- Preflight checks enforce living spec updates (`docs/SPEC.md`), sanitize checks, and changelog markers (`Changelog: none — <reason>` if behavior-bearing files change without a `CHANGELOG.md` entry).
+- Fast-tracking never skips review: independent consensus between Argus and Atlas remains mandatory before the merge gate can merge the PR.
 
 ### GitHub writes from a bot identity go through REST
 
