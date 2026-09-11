@@ -54,14 +54,13 @@ thin. The architect plans the work and writes the tests that fail
 until it is done. The implementer starts at a pinned commit and makes
 them pass. Two reviewers judge every gate, each from a different
 model family in the suggested setup, and the merge actor merges when
-they agree. A workflow with no
-model in it moves the issue to the next rung, and the poller
-dispatches the next persona. The maintainer watches the live system
-and files the next issue when a control band breaks. When a persona
-had to be told something it should have known, the gap becomes an
-issue and the rule moves into the repository, so each pass through the
-loop improves the system that runs it. Every session prices itself,
-and every dispatch runs under a spend ceiling.
+they agree. Each merge advances the issue to the next stage and
+starts the next persona; that handover is plain automation with no AI
+judgment in it. The maintainer watches the running system and files a
+new issue when a metric drifts out of its band. A lesson a persona
+learned the hard way is written back into the repository as a rule, a
+check or a test, so the process improves with every pass. Every
+session prices itself, and every dispatch runs under a spend ceiling.
 
 **Two ways to work with it.** Both run the same ladder through the
 same gates. They differ in where you sit.
