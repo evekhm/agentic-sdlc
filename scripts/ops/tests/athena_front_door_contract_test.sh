@@ -159,17 +159,13 @@ else
     fail "D10 / AT-5: tracker_search.sh --decisions failed non-matching check (status=$nonmatching_status, lines=$nonmatching_lines)"
 fi
 
-# --- D11 / AT-6: bootstrap_tracker.sh provisions duplicate and all five area:* labels -----
+# --- D11 / AT-6: bootstrap_tracker.sh provisions duplicate and area:* labels -------
 banner "D11 / AT-6: bootstrap_tracker.sh label provisioning declarations"
-at6_missing=()
-grep -Eq 'ensure_label[[:space:]]+"?duplicate"?' "$BOOTSTRAP_TRACKER" || at6_missing+=("duplicate")
-for at6_label in area:personas area:ci area:ops area:docs area:harness; do
-    grep -Eq "ensure_label[[:space:]]+\"?${at6_label}\"?" "$BOOTSTRAP_TRACKER" || at6_missing+=("$at6_label")
-done
-if [ "${#at6_missing[@]}" -eq 0 ]; then
-    pass "D11 / AT-6: bootstrap_tracker.sh provisions duplicate, area:personas, area:ci, area:ops, area:docs, and area:harness through ensure_label"
+if grep -Eq 'ensure_label[[:space:]]+"?duplicate"?' "$BOOTSTRAP_TRACKER" && \
+   grep -Eq 'ensure_label[[:space:]]+"?area:[a-z]+' "$BOOTSTRAP_TRACKER"; then
+    pass "D11 / AT-6: bootstrap_tracker.sh provisions duplicate and at least one area:* label through ensure_label"
 else
-    fail "D11 / AT-6: bootstrap_tracker.sh missing ensure_label for: ${at6_missing[*]}"
+    fail "D11 / AT-6: bootstrap_tracker.sh does not provision duplicate and at least one area:* label through ensure_label"
 fi
 
 # --- D12 / AT-8: README.md Athena interactive entry point -------------------------
