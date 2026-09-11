@@ -97,11 +97,13 @@ same gates. They differ in where you sit.
                                         you                   escalations only
 ```
 
-The per-issue switches are
-[#439](https://github.com/evekhm/agentic-sdlc/issues/439) and
-[#147](https://github.com/evekhm/agentic-sdlc/issues/147); the
-repository-wide key is `loop.autonomous_merge` in
-[`config/execution.yaml`](config/execution.yaml) ("The orchestrator").
+Autonomy is chosen per issue: the `yolo` label lets the loop run the
+stages, and `auto-close` lets it land the last one
+([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
+[#147](https://github.com/evekhm/agentic-sdlc/issues/147)). One
+repository-wide kill switch, `loop.autonomy_enabled` in
+[`config/execution.yaml`](config/execution.yaml), freezes every
+issue's autonomy at once during an incident ("The orchestrator").
 `/next` is [#441](https://github.com/evekhm/agentic-sdlc/issues/441),
 and the advisor's scheduling of a batch across the whole backlog is
 [#446](https://github.com/evekhm/agentic-sdlc/issues/446).
@@ -317,12 +319,15 @@ one rung to the next.
   owner ([#251](https://github.com/evekhm/agentic-sdlc/issues/251),
   [#108](https://github.com/evekhm/agentic-sdlc/issues/108)).
 
-**Two modes.** One key, `loop.autonomous_merge` in
-[`config/execution.yaml`](config/execution.yaml), arms the merge and
-the next-rung dispatch. It is the switch between the two ways to work
-in "What it solves"; a per-issue form of the same switch is
-[#147](https://github.com/evekhm/agentic-sdlc/issues/147) and
-[#439](https://github.com/evekhm/agentic-sdlc/issues/439).
+**Two modes.** The `yolo` label on an issue arms the next-rung
+dispatch and the merge of every stage; `auto-close` adds the merge of
+the final pull request and the close of the issue
+([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
+[#147](https://github.com/evekhm/agentic-sdlc/issues/147)). One
+repository-wide kill switch, `loop.autonomy_enabled` in
+[`config/execution.yaml`](config/execution.yaml), overrides every
+label when set to false. These are the two ways to work in "What it
+solves".
 
 - **Manual.** The owner is the gate. Every guard still runs and every
   ledger row is still written. The owner reads each pull request and
@@ -478,7 +483,8 @@ The autonomous loop adds an enablement checklist, kept in
 [`docs/SPEC.md`](docs/SPEC.md): *Themis* provisioned, the poller under
 a supervisor, branch protection on `main`, execution bindings
 validated, builder credentials preflighted, then the flip of
-`loop.autonomous_merge`.
+`loop.autonomy_enabled`
+([#439](https://github.com/evekhm/agentic-sdlc/issues/439)).
 
 Anyone files issues, and the system files its own: *Cassandra*'s
 watchers when a control band breaks, and the reviewers and the advisor
