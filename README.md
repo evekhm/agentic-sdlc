@@ -149,11 +149,10 @@ the grades to models in
   it proves. Merged, the issue moves to implement.
 - **Implement.** *Odyssey* starts at a pinned commit with the spec,
   the plan and the failing tests. It writes the code that makes them
-  pass and opens the pull request. The playbook's Test stage lives
-  here. Four CI gates run on every pull request: compiled files match
-  their sources, nothing leaks a credential or a path, the living spec
-  was updated, and the execution bindings validate
-  ([`docs/SPEC.md`](docs/SPEC.md)).
+  pass and opens the pull request. Five CI gates run on every pull request:
+  compiled files match their sources, nothing leaks a credential or a path,
+  the living spec was updated, the execution bindings validate, and the
+  changelog was updated ([`docs/SPEC.md`](docs/SPEC.md)).
 - **Review.** *Atlas* reads every pull request against
   [REVIEW.md](REVIEW.md), posts findings with severity and ids, and
   runs the verification checklist for the rung: at plan, the intent
