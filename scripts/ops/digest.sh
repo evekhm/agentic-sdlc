@@ -17,7 +17,29 @@ REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 NUMBER="${1:-}"
 
 if [ -z "$NUMBER" ]; then
-    echo "digest: unavailable (no issue/PR number given)"
+    wt_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$wt_top" ]; then
+        wt_name="$(basename "$wt_top")"
+        if [[ "$wt_name" =~ -([0-9]+)(-[^/]*)?$ ]]; then
+            NUMBER="${BASH_REMATCH[1]}"
+        elif [[ "$wt_name" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
+            NUMBER="${BASH_REMATCH[1]}"
+        fi
+    fi
+    if [ -z "$NUMBER" ]; then
+        branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+        if [ -n "$branch" ] && [ "$branch" != "HEAD" ] && [ "$branch" != "main" ]; then
+            if [[ "$branch" =~ /([0-9]+)(-[^/]*)?$ ]]; then
+                NUMBER="${BASH_REMATCH[1]}"
+            elif [[ "$branch" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
+                NUMBER="${BASH_REMATCH[1]}"
+            fi
+        fi
+    fi
+fi
+
+if [ -z "$NUMBER" ]; then
+    echo "digest: unavailable (no issue/PR number given and not inside an issue worktree)"
     exit 0
 fi
 
