@@ -325,11 +325,12 @@ working out of turn.
 
 `work.sh` derives each persona's harness from `config/deployments.yaml` by
 default. When an operator runs locally on a single harness (e.g. repinning
-all personas to Antigravity without installing Anthropic keys, or
-vice-versa), modifying tracked `config/deployments.yaml` is prohibited: edits
-in the primary checkout violate the read-only rule, branch edits in a worktree
-are clobbered as soon as a new worktree is created from `origin/main`, and
-committing identical model families for reviewers fails CI.
+personas to Antigravity without installing Anthropic keys, or vice-versa),
+modifying tracked `config/deployments.yaml` is prohibited: edits in the primary
+checkout violate the read-only rule, branch edits in a worktree are clobbered
+as soon as a new worktree is created from `origin/main`, and committing
+identical model families for reviewers violates INTENT.md's distinct-families
+constraint (enforced by the comments in `config/deployments.yaml` and REVIEW.md).
 
 The supported mechanism is the `DEPLOYMENTS` environment variable (#251, #433):
 
@@ -340,19 +341,36 @@ The supported mechanism is the `DEPLOYMENTS` environment variable (#251, #433):
      athena:    { harness: antigravity }
      daedalus:  { harness: antigravity }
      odyssey:   { harness: antigravity }
-     argus:     { harness: antigravity }
-     atlas:     { harness: antigravity }
-     cassandra: { harness: antigravity }
+     # Note: Reviewer dispatches (argus and atlas) must resolve to distinct
+     # model families to produce protocol-valid reviews (INTENT.md).
    ```
-2. Export `DEPLOYMENTS` in the operator shell environment (e.g. `~/.bashrc`):
+2. Export `DEPLOYMENTS` pointing to that file in your working environment, e.g.:
+   ```bash
+   export DEPLOYMENTS="/path/to/checkout/ops/deployments.yaml"
+   ```
+   Or within an active repository session:
    ```bash
    export DEPLOYMENTS="$(cd "$(git rev-parse --git-common-dir 2>/dev/null)/.." 2>/dev/null && pwd)/ops/deployments.yaml"
+   ```
+   (Must be evaluated from inside a repository worktree, not from `~/.bashrc`
+   where evaluation at shell startup in the user's home directory resolves invalidly to `/ops/...`).
+   Alternatively, set it inline per command:
+   ```bash
+   DEPLOYMENTS=ops/deployments.yaml scripts/ops/work.sh <issue>
    ```
 
 Because environment variables are inherited across subshells and worktrees,
 every session and worktree created from `origin/main` automatically honors the
 operator's local pins without dirtying git working trees or failing remote
 checks.
+
+Note on compiled-target preflight: overriding `DEPLOYMENTS` switches off
+`work.sh`'s compiled-target preflight check (`launch_missing`). Operators
+running under local overrides must ensure their compiled targets stay in sync
+by running `python3 scripts/sync_agents.py --check`. Local pins that collapse both
+reviewers onto one model family are suitable for authoring stages (plan, spec,
+build, implement), but review output produced under such a pin is not
+protocol-valid.
 
 ### GitHub writes from a bot identity go through REST
 

@@ -980,8 +980,8 @@ banner "#43 D3/D8 a harness binary that is not installed is exit 1, before any m
 #
 # PATH is narrowed rather than the stub moved aside: this machine has a
 # REAL agy on PATH, and a test that reaches it would spend a live
-# persona launch. $WORK/bin-noharness carries the gh stub and nothing
-# else, and /usr/bin:/bin supplies jq, timeout and env.
+# persona launch. $WORK/bin-noharness carries gh, git, and a symlink to jq
+# (if present on PATH); timeout and env are supplied by /usr/bin:/bin.
 mkdir -p "$WORK/bin-noharness"
 cp "$WORK/bin/gh" "$WORK/bin-noharness/gh"
 cp "$WORK/bin/git" "$WORK/bin-noharness/git"

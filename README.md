@@ -292,9 +292,10 @@ personas, the ladder and the review protocol carry over unchanged.
 by editing its line; the source never changes. One hard constraint:
 the two reviewers must resolve to different model families
 ([#198](https://github.com/evekhm/agentic-sdlc/issues/198)). For local
-single-harness operations without dirtying tracked files or worktrees,
+single-harness authoring operations without dirtying tracked files or worktrees,
 the dispatcher supports the `DEPLOYMENTS` environment variable override
 pointing to an unversioned `ops/deployments.yaml` ([#251](https://github.com/evekhm/agentic-sdlc/issues/251), [#433](https://github.com/evekhm/agentic-sdlc/issues/433)).
+(Reviewer dispatches require distinct model families for protocol-valid consensus).
 
 ```text
  Antigravity  /  Gemini 3.8 Flash            Claude Code  /  Claude
