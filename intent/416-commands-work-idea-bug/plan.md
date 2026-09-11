@@ -3,16 +3,16 @@
 **Issue:** #416 · **Spec:** `intent/416-commands-work-idea-bug/spec.md` (Approved, PR #422, D1–D14, AT-416-1–AT-416-13)  
 **Author:** daedalus (`evekhm-daedalus-app[bot]`)  
 **Base commit:** `1103cd0da0b6b331ac7fd6816a099999a75d49af` (`origin/main`, merge of spec PR #422)  
-**Target branch for implementation (Odyssey):** `odyssey/416-commands-work-idea-bug` (or `odyssey/416-commands-work-idea-bug-wrap-are-claude`)
+**Target branch for implementation (Odyssey):** `odyssey/416-commands-work-idea-bug`
 
 ---
 
-  1. Absolute home directory paths.
+## 1. Executive Summary and Problem Statement
 
 Slash commands in this repository (`/work`, `/idea`, `/bug`, and `/wrap`) were originally hand-authored as bespoke markdown files directly within `.claude/commands/`. While personas have long enjoyed canonical YAML authoring under `personas/`, multi-harness compilation to `.claude/agents/` and `.agents/agents/` via `scripts/sync_agents.py`, and CI roundtrip drift protection, slash commands remained:
-  1. Absolute home directory paths.
-  2. Users directory paths.
-  3. Home-variable references or home-relative dotfile paths.
+1. **Harness-Asymmetric:** Existing commands were Claude Code only. Google Antigravity (`agy`) users and agents had no access to `/work`, `/idea`, or `/bug`, despite `agy 1.2.0` natively discovering workspace skills at `.agents/skills/<name>/SKILL.md`. Issue #43 D16 previously deferred cross-harness command generation because Claude's pre-turn `!` execution was operator-typed rather than model-composed; with #416 introducing the compiler infrastructure, #43 D16 is explicitly amended under a hardened trust model (D5).
+2. **Without a Canonical Source:** Target files in `.claude/commands/` served as their own sources without frontmatter linting, schema validation, or secret scanning.
+3. **Without Continuous Drift Enforcement:** Modifications, deletions, or harness desynchronizations were undetected by continuous integration.
 
 ### Scope and Landed Prerequisite Resolution
 
@@ -23,7 +23,7 @@ Issue #416 establishes a single source of truth for repository slash commands un
 
 ---
 
-  2. Users directory paths.
+## 2. Scope, Persona Boundaries, and Grants
 
 ### Persona Authority Boundaries
 
@@ -42,7 +42,7 @@ Issue #416 establishes a single source of truth for repository slash commands un
   - **Action:** Daedalus applies `deep-review` label via `scripts/ops/post.sh <pr> --as daedalus --add-label deep-review`.
 - **Implementation PR (Odyssey):**
   - **DEEP-1 (trust-bearing paths):** Touches `scripts/sync_commands.py`, `scripts/ci/compiler_roundtrip.sh`, and `scripts/ci/spec_check.sh`.
-  - **DEEP-5 (escalated tier / task risk):** Tasks T3 and T7 are marked `risk: high` and `risk: medium` (touches compiler plumbing and core CI roundtrip gates).
+  - **DEEP-5 (escalated tier / task risk):** Tasks T3 and T6 are marked `risk: high` and `risk: medium` (touches compiler plumbing and core CI roundtrip gates).
   - **DEEP-7 (compiler blast radius):** Introducing `scripts/sync_commands.py` touches multi-harness compiled targets across `.claude/commands/` and `.agents/skills/`.
   - **Action:** Odyssey applies the `deep-review` grant when opening the PR per `scripts/ops/post.sh <pr> --as odyssey --add-label deep-review`.
 
@@ -83,7 +83,7 @@ The implementing pull request is strictly confined to:
 
 ---
 
-  3. Home-variable references or home-relative dotfile paths.
+## 3. Detailed Architectural Calls
 
 ### P1 · Canonical Source Directory Standard (`commands/<name>.md`) (D1)
 - Source files reside in `commands/<name>.md`.
@@ -115,9 +115,9 @@ The implementing pull request is strictly confined to:
 ### P5 · Antigravity Hardened Execution Semantics for `/work` (D5, Amending #43 D16)
 - Amends #43 D16: Antigravity executes tools inside the model loop via `run_command` rather than Claude Code's pre-turn shell hook. Bare prompt variable interpolation (`$ARGUMENTS`) into bash is unsafe.
 - For `exec` commands (`/work`), the Antigravity emitter unwraps the `!` expression and generates imperative Agent Skill instructions:
-  1. Absolute home directory paths.
-  2. Users directory paths.
-  3. Home-variable references or home-relative dotfile paths.
+  1. Validate that input matches `<number> [--as <persona>]` where `<number>` contains only digits.
+  2. Strictly reject input containing shell metacharacters: `;`, `&`, `|`, `` ` ``, `$`, `(`, `)`, `<`, `>`, `\n`.
+  3. Invoke `HEADLESS=1 scripts/ops/work.sh <number> [--as <persona>]` via `run_command` and report output.
 
 ### P6 · Antigravity Intake Semantics and `allowed-tools` Omission (D6)
 - For `prompt` commands (`/idea`, `/bug`), the Antigravity emitter retains the canonical conversational intake prompt.
@@ -160,9 +160,9 @@ The implementing pull request is strictly confined to:
 - `scripts/ci/compiler_roundtrip.sh` is extended with Step 9 ("Commands compiler roundtrip and drift gate") following Step 8 (frontmatter validation added by #425).
 - Entirely ref-free (no `git diff origin/main` or network calls).
 - Checks:
-  1. Absolute home directory paths.
-  2. Users directory paths.
-  3. Home-variable references or home-relative dotfile paths.
+  1. `python3 scripts/sync_commands.py --check` exits 0.
+  2. Emitted `.agents/skills/{work,idea,bug}/SKILL.md` exist and match sources.
+  3. Two consecutive compiles in a temp tree produce byte-identical file trees.
   4. Throwaway command in temp tree compiles to both targets.
   5. Source containing home path or secret pattern triggers sanitizer refusal.
 
@@ -203,9 +203,9 @@ The implementing pull request is strictly confined to:
 - **Decisions implemented:** D1, D2, D14
 - **Acceptance criteria proven:** AT-416-1
 - **Step-by-step diff description:**
-  1. Absolute home directory paths.
-  2. Users directory paths.
-  3. Home-variable references or home-relative dotfile paths.
+  1. Create directory `commands/`.
+  2. Copy `.claude/commands/work.md` to `commands/work.md`.
+  3. Copy `.claude/commands/idea.md` to `commands/idea.md`.
   4. Copy `.claude/commands/bug.md` to `commands/bug.md` (inheriting single-quoted `argument-hint` from PR #425).
   5. Verify all three files begin with `---`, contain valid YAML frontmatter with `description`, and contain the non-empty markdown body.
 - **Done-When:**
@@ -220,9 +220,9 @@ The implementing pull request is strictly confined to:
 - **Decisions implemented:** D1, D2, D3, D4, D5, D6, D7, D8, D9, D14
 - **Acceptance criteria proven:** AT-416-2, AT-416-3, AT-416-4, AT-416-5, AT-416-6, AT-416-7, AT-416-8, AT-416-13
 - **Step-by-step diff description:**
-  1. Absolute home directory paths.
-  2. Users directory paths.
-  3. Home-variable references or home-relative dotfile paths.
+  1. Author `scripts/sync_commands.py` (executable `chmod +x`).
+  2. Implement CLI argument parsing: `--check`, `--root DIR`, `--out DIR`.
+  3. Implement frontmatter parser reading `commands/*.md`.
   4. Implement `kind: exec` vs `kind: prompt` derivation based on leading `!` in body (D3).
   5. Implement `ClaudeEmitter`:
      - Emits `.claude/commands/<name>.md`.
@@ -252,9 +252,9 @@ The implementing pull request is strictly confined to:
 - **Decisions implemented:** D2
 - **Acceptance criteria proven:** AT-416-2
 - **Step-by-step diff description:**
-  1. Absolute home directory paths.
-  2. Users directory paths.
-  3. Home-variable references or home-relative dotfile paths.
+  1. Run `python3 scripts/sync_commands.py`.
+  2. Run `git diff .claude/commands/` and assert output is completely empty.
+  3. Assert no `# GENERATED` comment exists in `.claude/commands/*.md`.
 - **Done-When:**
   `git diff --exit-code .claude/commands/` exits 0.
 
@@ -269,12 +269,12 @@ The implementing pull request is strictly confined to:
 - **Decisions implemented:** D4, D5, D6
 - **Acceptance criteria proven:** AT-416-3, AT-416-4, AT-416-5
 - **Step-by-step diff description:**
-  1. Absolute home directory paths.
+  1. Verify `.agents/skills/work/SKILL.md` carries hardened validation:
      - literal `<number> [--as <persona>]`
      - forbidden metacharacters `;`, `&`, `|`, `` ` ``, `$`
      - literal `HEADLESS=1 scripts/ops/work.sh` and `run_command`
-  2. Users directory paths.
-  3. Home-variable references or home-relative dotfile paths.
+  2. Verify `.agents/skills/idea/SKILL.md` and `bug/SKILL.md` contain `tracker_search.sh`, `intake.sh`, and `$ARGUMENTS`.
+  3. Verify all three skills carry `# GENERATED by scripts/sync_commands.py — edit commands/, not this file` on line 2, and omit `allowed-tools`.
 - **Done-When:**
   Contract tests for D4, D5, D6 in `scripts/ci/tests/sync_commands_test.py` pass green.
 
@@ -287,7 +287,7 @@ The implementing pull request is strictly confined to:
 - **Decisions implemented:** D10
 - **Acceptance criteria proven:** AT-416-9
 - **Step-by-step diff description:**
-  1. Absolute home directory paths.
+  1. In `scripts/ci/compiler_roundtrip.sh`, define Step 9 after Step 8:
      ```bash
      # --- 9. commands compiler roundtrip and drift gate ----------------------------
      step "9. commands: compiler roundtrip, determinism, and drift gate"
@@ -332,7 +332,7 @@ The implementing pull request is strictly confined to:
        fail "commands compiler emitted target containing home path"
      fi
      ```
-  2. Users directory paths.
+  2. Update the final summary message from `(8 checks)` to `(9 checks)`.
 - **Done-When:**
   `bash scripts/ci/compiler_roundtrip.sh` runs all 9 steps green and prints `PASS: compiler roundtrip green (... target files, 9 checks).` with exit code 0.
 
@@ -410,13 +410,13 @@ The implementing pull request is strictly confined to:
 - **Owner:** odyssey (Implement stage)
 - **Acceptance criteria proven:** AT-416-1 through AT-416-13
 - **Step-by-step verification commands:**
-  1. Absolute home directory paths.
+  1. Contract tests:
      `python3 scripts/ci/tests/sync_commands_test.py`
      Exits 0 (`OK`, 12 tests passed, 0 failures, 0 errors).
-  2. Users directory paths.
+  2. Compiler drift check:
      `python3 scripts/sync_commands.py --check`
      Exits 0.
-  3. Home-variable references or home-relative dotfile paths.
+  3. Claude target byte-identity:
      `git diff --exit-code .claude/commands/`
      Exits 0.
   4. Compiler roundtrip CI gate:
@@ -433,7 +433,7 @@ The implementing pull request is strictly confined to:
      Outputs empty diff.
   8. Commit explicitly authored as Odyssey App identity:
      `git -c user.name="evekhm-odyssey-app[bot]" -c user.email="323814131+evekhm-odyssey-app[bot]@users.noreply.github.com" commit ...`
-  9. Push branch `odyssey/416-commands-work-idea-bug` and open PR targeting `main` with `Closes #416`.
+  9. Push branch `odyssey/416-commands-work-idea-bug` (exact match to intent folder slug `416-commands-work-idea-bug` so `lifecycle_advance.sh` advances automatically on merge) and open PR targeting `main` with `Closes #416`.
   10. Apply `deep-review` grant:
       `scripts/ops/post.sh <pr> --as odyssey --add-label deep-review`.
 
