@@ -181,6 +181,11 @@ Every actor is defined once, canonically and vendor-agnostically, in
 `personas/<name>.yaml` (#1, `intent/1-personas/`): six personas
 (athena, daedalus, odyssey, argus, atlas, cassandra) and five
 sub-agents (mechanic, coder, contract-writer, scanner, explorer).
+Athena acts as product owner holding the intake front door and the
+planning/design gates (`stage: [intake, plan, design]`, #404, D1), running
+`intake-protocol.md`, `product-coherence.md`, `spec-adversary.md`,
+`trusted-posting.md`, and `resume-protocol.md` with
+authority paths `intent/**`, `README.md`, and `INTENT.md` (#404, D2, D3, D4, D5, D6).
 Sources conform to `personas/schema.json` (JSON Schema 2020-12):
 `kind` splits GitHub-identity personas from compiled sub-agents;
 `tier` takes only the five semantic grades; tooling is abstract
@@ -430,8 +435,11 @@ security findings, `consensus:disputed` for disputed findings),
 `review:merge-ready` (agreed consensus at the current head with no open blocking
 findings), and `review:verifying` (pull request head newer than reviewed head with
 open blocking findings). Unmanaged labels such as `bootstrap` are strictly
-preserved during label synchronization. All 22 labels are provisioned
-idempotently by `scripts/setup/bootstrap_tracker.sh`, whose
+preserved during label synchronization. Triage and area labels provisioned
+by `bootstrap_tracker.sh` include `duplicate` (closed as duplicate of an
+existing thread) and five area prefixes (`area:personas`, `area:ci`,
+`area:ops`, `area:docs`, `area:harness`). All 29 labels are provisioned
+idempotently by `scripts/setup/bootstrap_tracker.sh` (#404, D11), whose
 `--labels-only` mode runs the label section and exits before anything
 reads or files an issue. Claim author identification in `scripts/ci/lifecycle_advance.sh:1076`
 derives author identity via `(.author.login // .user.login // "")`, supporting both
@@ -772,6 +780,14 @@ thread was read — a claim is only ever posted on the unit of work
 The script never writes to GitHub: the claim belongs to the session it
 launches, not to the launcher. A stage with several owners (review)
 prints both instructions and launches neither unless `--as` names one.
+Prior art and decision search tooling (`scripts/ops/tracker_search.sh`)
+supports deterministic searches before filing or opening pull requests;
+`tracker_search.sh --decisions <terms...>` searches all `intent/*/spec.md`
+files for decision rows (`^\|[[:space:]]*D[0-9]+[[:space:]]*\|`), filtering
+case-insensitively with `grep -E -n -i` and formatting matches as
+`<file>:<line>: <row>`. Matching rows set `found=1`, print refusal, and
+exit 2; zero matching rows print zero lines and exit 0 (#404, D10).
+The `--decisions` option runs standalone without requiring `gh` or `jq`.
 
 Both harnesses launch (#43, `intent/43-harness-agnostic-launch/`).
 Claude Code is started `claude --agent <persona>`; Antigravity is
