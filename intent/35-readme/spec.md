@@ -37,8 +37,8 @@ before the actors are introduced):
    stage yields an artifact both a person and the next agent read;
    the team the owner composes and pins (`config/deployments.yaml`,
    `DEPLOYMENTS`); what the loop does on its own; the two ways to
-   work (at the keyboard with `/idea` and `/work`, or handing off the
-   day to the advisor and the loop) and the one key that arms the
+   work (at the keyboard with `/idea` and `/next`, or handing off
+   with `/work <n> --yolo` and the advisor's batch) and the one key that arms the
    second.
 2. **What this is** — the two kinds of actors (persona, owner), the
    five rungs and what a merge means, the diagram, the self-building

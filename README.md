@@ -68,36 +68,43 @@ same gates. They differ in where you sit.
 - **At the keyboard.** Open a session in the harness you prefer and
   capture an idea with `/idea <text>`. The product owner searches the
   tracker, files the intent and asks you what is missing. From there
-  you walk the issue rung by rung with `/work <n>`, read each pull
-  request as it opens, and answer the questions the personas raise in
-  the same sitting. You merge by hand, or the merge actor merges once
-  the reviewers agree. This is how one change is driven end to end in
-  front of an audience.
-- **Handing off the day.** Sit with the advisor, pick the issues for
-  the day and the order they run in, confirm the batch once, and step
-  away. The loop dispatches each rung, reviews it, merges on consensus
-  and moves on, and the maintainer refills the backlog from what it
-  measures. You are called on escalation only: a `hold`, a failed
-  consensus, a tripped budget, an open security finding.
+  `/next <n>` runs the next stage of that issue from inside your
+  session: it starts the owning persona on its pinned harness and
+  hands you back a short summary and the pull request. You read it,
+  answer the questions the persona raised, and merge, or the merge
+  actor merges once the reviewers agree. Then `/next <n>` again, one
+  stage at a time, until the change lands. This is how one change is
+  driven end to end in front of an audience.
+- **Handing off the day.** When an issue can run without you,
+  `/work <n> --yolo` picks it up and hands it to the loop: every stage
+  is dispatched, reviewed and merged on consensus, and the final pull
+  request waits for your merge. Add `--auto-close` and the final pull
+  request merges and the issue closes on its own. For a whole day's
+  worth, sit with the advisor, pick the issues and the order they run
+  in, confirm the batch once, and step away. The maintainer refills
+  the backlog from what it measures. You are called on escalation
+  only: a `hold`, a failed consensus, a tripped budget, an open
+  security finding.
 
 ```text
- at the keyboard                         handing off the day
- -------------------------------------   -------------------------------------
- /idea <text> ... the intent is filed    advisor ...... pick the batch, confirm
- /work <n> ...... one rung; you read     poller ....... every rung, every issue
-                  the pull request       merge actor .. merges on consensus
- you answer, you merge                   you .......... escalations only
+ at the keyboard                        handing off the day
+ -----------------------------------    --------------------------------------
+ /idea <text>  the intent is filed      /work <n> --yolo      every stage runs,
+ /next <n>     one stage; you read                            you merge the last
+               the pull request         /work <n> --yolo --auto-close
+ you answer, you merge                                        it lands on its own
+                                        advisor               picks the batch
+                                        you                   escalations only
 ```
 
-One key, `loop.autonomous_merge` in
-[`config/execution.yaml`](config/execution.yaml), arms the second way
-("The orchestrator"). You choose it per issue
-([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
-[#147](https://github.com/evekhm/agentic-sdlc/issues/147)), a
-coordinator walks the rungs from inside one session
-([#441](https://github.com/evekhm/agentic-sdlc/issues/441)), and the
-advisor sequences the batch across the whole backlog
-([#446](https://github.com/evekhm/agentic-sdlc/issues/446)).
+The per-issue switches are
+[#439](https://github.com/evekhm/agentic-sdlc/issues/439) and
+[#147](https://github.com/evekhm/agentic-sdlc/issues/147); the
+repository-wide key is `loop.autonomous_merge` in
+[`config/execution.yaml`](config/execution.yaml) ("The orchestrator").
+`/next` is [#441](https://github.com/evekhm/agentic-sdlc/issues/441),
+and the advisor's scheduling of a batch across the whole backlog is
+[#446](https://github.com/evekhm/agentic-sdlc/issues/446).
 
 ## What this is
 
