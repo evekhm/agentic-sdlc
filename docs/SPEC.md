@@ -1311,14 +1311,22 @@ unparseable ledger fails closed and is never read as absent.
 
 `.github/workflows/merge-gate.yml` holds `contents: write`,
 `pull-requests: write`, `issues: write`, `checks: read`,
-`statuses: read` and nothing else (acceptance 19); the merge actor
-App's manifest in `scripts/auth/app_manifests.yaml` requests the same
-five plus the `metadata: read` every App carries. Both
-`merge-gate.yml`'s mutating job and `lifecycle.yml` mint that App's
-token under one job-level `environment: themis`, whose
-deployment-branch policy admits `main` only (D23); that policy is
-unverifiable from inside the loop and is precondition P1, not a
-runtime check (Amendment r2).
+`statuses: read` and nothing else (acceptance 19) — that job-level
+block only scopes the ambient `GITHUB_TOKEN`, which never performs the
+merge. The merge actor App's manifest in
+`scripts/auth/app_manifests.yaml` requests those same five, plus the
+`metadata: read` every App carries, plus `workflows: write` (#437):
+GitHub requires `workflows` write on whichever identity merges a pull
+request whose diff touches `.github/workflows/*.yml`, and Themis, as
+the sole merge actor (D3, #64), has no fallback identity the way a
+persona's push of such a diff falls back to the bot PAT. Without this
+grant `mergeStateStatus` reads `BLOCKED` for Themis's own minted token
+on such a PR even though every other reader of the same PR at the same
+moment sees `CLEAN` (observed on #427). Both `merge-gate.yml`'s
+mutating job and `lifecycle.yml` mint that App's token under one
+job-level `environment: themis`, whose deployment-branch policy admits
+`main` only (D23); that policy is unverifiable from inside the loop
+and is precondition P1, not a runtime check (Amendment r2).
 
 Continuous poller and VM supervisor architecture (#251, D2, D4, D5; PR #327):
 The continuous poller (`scripts/placement/vm-local/poll.sh`), running under

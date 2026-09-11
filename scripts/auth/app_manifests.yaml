@@ -122,3 +122,11 @@ themis:
     checks: read
     statuses: read
     metadata: read
+    # GitHub requires `workflows` write on whichever identity performs a
+    # merge whose diff touches .github/workflows/*.yml. Themis is the
+    # sole merge actor (D3, #64) with no fallback identity the way
+    # persona pushes fall back to the bot PAT, so without this grant
+    # `mergeStateStatus` reads BLOCKED for Themis's own token on any
+    # such PR even when every other reader sees CLEAN (#437, observed
+    # on #427). No other App needs it: only Themis merges.
+    workflows: write
