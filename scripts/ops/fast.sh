@@ -30,13 +30,14 @@ NO_DISPATCH=0
 
 usage() {
     cat <<'USAGE_EOF'
-Usage: scripts/ops/fast.sh <issue-number> [options]
+Usage: scripts/ops/fast.sh [<issue-number>] [options]
 
 Operator fast-track door: initiates and executes owner-authorized ladder
 compression, combining intent, spec, plan, and implementation into one round.
 
 Arguments:
-  <issue-number>             The GitHub issue number to fast-track.
+  <issue-number>             The GitHub issue number to fast-track (optional;
+                             inferred from active worktree or branch if omitted).
 
 Options:
   --as <persona>             Persona identity to dispatch (default: odyssey).
@@ -55,6 +56,32 @@ USAGE_EOF
 
 die() { echo "fast.sh: $*" >&2; exit 1; }
 refuse() { echo "refused: $*" >&2; exit 2; }
+
+extract_issue_from_context() {
+    local wt_top wt_name branch
+    wt_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [ -n "$wt_top" ]; then
+        wt_name="$(basename "$wt_top")"
+        if [[ "$wt_name" =~ -([0-9]+)(-[^/]*)?$ ]]; then
+            echo "${BASH_REMATCH[1]}"
+            return 0
+        elif [[ "$wt_name" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
+            echo "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    fi
+    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [ -n "$branch" ] && [ "$branch" != "HEAD" ] && [ "$branch" != "main" ]; then
+        if [[ "$branch" =~ /([0-9]+)(-[^/]*)?$ ]]; then
+            echo "${BASH_REMATCH[1]}"
+            return 0
+        elif [[ "$branch" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
+            echo "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    fi
+    return 1
+}
 
 # Parse arguments
 ISSUE=""
@@ -79,7 +106,16 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-[ -n "$ISSUE" ] || { usage >&2; exit 1; }
+if [ -z "$ISSUE" ]; then
+    INFERRED_ISSUE="$(extract_issue_from_context || true)"
+    if [ -n "$INFERRED_ISSUE" ]; then
+        ISSUE="$INFERRED_ISSUE"
+        echo "==> Inferred target issue #$ISSUE from worktree/branch"
+    else
+        usage >&2
+        die "no issue number specified and could not infer issue number from worktree or branch"
+    fi
+fi
 [[ "$ISSUE" =~ ^[0-9]+$ ]] || die "issue must be a positive integer, got '$ISSUE'"
 
 # Preflight: gh CLI availability
@@ -145,7 +181,17 @@ if [ "${#STATUS_LABELS[@]}" -gt 1 ]; then
     refuse "issue #$ISSUE carries contradictory status labels (${STATUS_LABELS[*]}); state machine corrupted"
 fi
 
-echo "==> Issue #$ISSUE: $ISSUE_TITLE"
+echo "==> Target issue: #$ISSUE · $ISSUE_TITLE"
+ISSUE_BODY="$(jq -r '.body // empty' <<<"$ISSUE_JSON")"
+if [ -n "$ISSUE_BODY" ]; then
+    ISSUE_DESC="$(printf '%s\n' "$ISSUE_BODY" | grep -v '^[[:space:]]*$' | head -n 3 | paste -sd ' ' - || true)"
+    if [ -n "$ISSUE_DESC" ]; then
+        if [ "${#ISSUE_DESC}" -gt 140 ]; then
+            ISSUE_DESC="${ISSUE_DESC:0:137}..."
+        fi
+        echo "==> Description:  $ISSUE_DESC"
+    fi
+fi
 echo "==> Verified owner authorization: $OWNER_SIGNATURE"
 
 # Helper: re-read hold immediately before writing (D13/D14, fail-closed on API error R2-1)
