@@ -136,6 +136,23 @@ section ceiling of #35 D2/D4 was lifted by the product owner on
 Reference docs live in `docs/` (BLOG.md, CONTEXT.md, this file),
 uppercase names throughout.
 
+### process.changelog
+`CHANGELOG.md` at the repository root documents notable behavioral
+and user-facing changes shipped to `main` in reverse-chronological
+order (#410). Entries are grouped under H2 date headings formatted as
+`## YYYY-MM-DD`. Each entry occupies an H3 section citing the pull
+request and issue:
+`### [PR #<n>](https://github.com/evekhm/agentic-sdlc/pull/<n>): <Descriptive Title> ([#<issue>](https://github.com/evekhm/agentic-sdlc/issues/<issue>))`
+(or unlinked plain text `### PR #<n>: <Descriptive Title> (#<issue>)`).
+The body consists of 1 to 3 concise, declarative sentences explaining:
+(1) what capability or behavior changed, (2) why the change was made,
+and (3) the operational or user-visible impact on operators, personas,
+or workflows. Entries must not contain raw commit SHAs, file lists,
+diff snippets, or author vanity attributions. Reviewers (`argus`,
+`atlas`) verify that changelog entries are factually accurate, concise,
+and aligned with the diff, and that bypass reasons on marker lines are
+valid, flagging low-quality or inaccurate entries as normal defects.
+
 ### tracker.workflow
 Work is tracked as GitHub issues on `evekhm/agentic-sdlc`. Sessions
 follow pick → claim → read → work → hand off → gate (AGENTS.md,
@@ -164,6 +181,11 @@ Every actor is defined once, canonically and vendor-agnostically, in
 `personas/<name>.yaml` (#1, `intent/1-personas/`): six personas
 (athena, daedalus, odyssey, argus, atlas, cassandra) and five
 sub-agents (mechanic, coder, contract-writer, scanner, explorer).
+Athena acts as product owner holding the intake front door and the
+planning/design gates (`stage: [intake, plan, design]`, #404, D1), running
+`intake-protocol.md`, `product-coherence.md`, `spec-adversary.md`,
+`trusted-posting.md`, and `resume-protocol.md` with
+authority paths `intent/**`, `README.md`, and `INTENT.md` (#404, D2, D3, D4, D5, D6).
 Sources conform to `personas/schema.json` (JSON Schema 2020-12):
 `kind` splits GitHub-identity personas from compiled sub-agents;
 `tier` takes only the five semantic grades; tooling is abstract
@@ -346,10 +368,10 @@ proceeds (#207 D3, #242). Tests:
 `scripts/ci/compiler_roundtrip.sh`.
 
 ### ci.gates
-`.github/workflows/ci-gates.yml` runs four deterministic gates on
-every pull request — and all but spec-check also on pushes to `main` —
-as four independent jobs, so one push returns all four verdicts (#6,
-`intent/6-ci-gates/`; the fourth added by #25). **Drift:** `python3 scripts/sync_agents.py
+`.github/workflows/ci-gates.yml` runs five deterministic gates on
+every pull request — and all but spec-check and changelog-check also on pushes to `main` —
+as five independent jobs, so one push returns all five verdicts (#6,
+`intent/6-ci-gates/`; the fourth added by #25; the fifth added by #410). **Drift:** `python3 scripts/sync_agents.py
 --check` plus `scripts/ci/compiler_roundtrip.sh`; a hand-edited or
 stale compiled target under `.claude/agents/` or `.agents/` fails.
 **Sanitization:** `scripts/ci/sanitize_check.sh` scans every tracked
@@ -373,9 +395,27 @@ good. **Execution:** `python3 scripts/ops/execution.py --check` plus
 placement with no adapter directory, on an event
 `.github/workflows/unattended.yml` does not trigger on, or on a persona
 with no source fails here rather than at 03:00 in a run nobody is
-watching (`execution.placement`, #25). All four are scripts runnable
-locally by the same command CI runs; the workflow needs no secrets and
-grants only `contents: read`.
+watching (`execution.placement`, #25). **Changelog check:**
+`scripts/ci/changelog_check.sh` enforces the changelog obligation
+on behavior-bearing diffs (`ci.gates.changelog`, #410). All five are
+scripts runnable locally by the same command CI runs; the workflow
+needs no secrets and grants only `contents: read`.
+
+### ci.gates.changelog
+`scripts/ci/changelog_check.sh` enforces the changelog obligation on
+pull requests touching behavior-bearing paths (`scripts/**`,
+`personas/**`, `config/**`, `.github/workflows/**`, `AGENTS.md`,
+`REVIEW.md` — compiled targets excluded, the drift gate owns those),
+running under the `changelog-check` job in
+`.github/workflows/ci-gates.yml` (#410). It fails closed if required
+environment variables (`BASE_SHA`, `HEAD_SHA`, `PR_BODY_FILE`) are unset
+or empty, if git diff fails, or if `PR_BODY_FILE` is missing or unreadable.
+It accepts CLI positional arguments (`$1` as base ref, `$2` as PR body
+text or file path) for local invocation. The obligation is satisfied
+when either the pull request diff modifies `CHANGELOG.md` or the PR body
+contains a valid bypass marker: `Changelog: none — <reason>` or
+`Changelog-impact: none — <reason>` with a mandatory em dash and
+non-empty reason.
 
 ### lifecycle.labels
 Lifecycle state lives in GitHub issue labels (#4,
@@ -395,8 +435,11 @@ security findings, `consensus:disputed` for disputed findings),
 `review:merge-ready` (agreed consensus at the current head with no open blocking
 findings), and `review:verifying` (pull request head newer than reviewed head with
 open blocking findings). Unmanaged labels such as `bootstrap` are strictly
-preserved during label synchronization. All 22 labels are provisioned
-idempotently by `scripts/setup/bootstrap_tracker.sh`, whose
+preserved during label synchronization. Triage and area labels provisioned
+by `bootstrap_tracker.sh` include `duplicate` (closed as duplicate of an
+existing thread) and five area prefixes (`area:personas`, `area:ci`,
+`area:ops`, `area:docs`, `area:harness`). All 29 labels are provisioned
+idempotently by `scripts/setup/bootstrap_tracker.sh` (#404, D11), whose
 `--labels-only` mode runs the label section and exits before anything
 reads or files an issue. Claim author identification in `scripts/ci/lifecycle_advance.sh:1076`
 derives author identity via `(.author.login // .user.login // "")`, supporting both
@@ -648,6 +691,13 @@ warnings and non-zero unpriced token counts, suppresses the TOTAL spend
 line, and exits with a non-zero status to fail loudly (PR #177).
 Tests: `scripts/ops/tests/session_spend_test.sh`.
 
+### ops.wrap
+`scripts/ops/wrap.sh <session-name> [seat-or-slug] [--snapshot]` (and Claude Code door `.claude/commands/wrap.md`) closes out a session deterministically or captures a mid-flight handoff snapshot (#85). Two execution modes share one handoff path (`<primary-checkout>/ops/handoffs/handoff-<seat>-<YYYY-MM-DD>[-n].txt`):
+- `--snapshot`: writes or refreshes the handoff file mid-flight and allows the session to continue working. It marks line 1 with `SNAPSHOT (session still running, written HH:MMZ)` and skips close-out checks (background child processes, primary main check, PR checks, claim label removal, artifact footnotes, tmp cleanup, and learnings).
+- Bare `/wrap` (close-out): runs twelve deterministic checks plus a mandatory learnings step (`WRAP_LEARNINGS`), marks line 1 with `closed`, outputs copyable resume pointers (`ops/waves/seat.sh <seat>`, `--list`, `--last`), rejects `claude --resume` to avoid token replay penalties, and terminates with exit 0 on clean or auto-repaired state, exit 1 on invalid environment or arguments, and exit 2 on refusal. Check 7 inventories material decisions from session commits; close-out fails if decisions remain unrecorded or if `WRAP_UNACCOUNTED_DECISIONS` is supplied.
+A single mutation is permitted: auto-repair removing a stale `in-progress` label when a complete Done/Decided/Next/Blocked comment exists. Under `DRY_RUN=1`, the tool performs zero mutations, reports would-fix, and exits 2. Clean sessions that produced no state short-circuit with exit 0 and write zero handoff files.
+Tests: `scripts/ops/tests/wrap_test.sh`.
+
 ### ops.dispatch
 `scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]` starts a
 session from a number (#36, `intent/36-dispatch/`). Deterministic
@@ -730,6 +780,14 @@ thread was read — a claim is only ever posted on the unit of work
 The script never writes to GitHub: the claim belongs to the session it
 launches, not to the launcher. A stage with several owners (review)
 prints both instructions and launches neither unless `--as` names one.
+Prior art and decision search tooling (`scripts/ops/tracker_search.sh`)
+supports deterministic searches before filing or opening pull requests;
+`tracker_search.sh --decisions <terms...>` searches all `intent/*/spec.md`
+files for decision rows (`^\|[[:space:]]*D[0-9]+[[:space:]]*\|`), filtering
+case-insensitively with `grep -E -n -i` and formatting matches as
+`<file>:<line>: <row>`. Matching rows set `found=1`, print refusal, and
+exit 2; zero matching rows print zero lines and exit 0 (#404, D10).
+The `--decisions` option runs standalone without requiring `gh` or `jq`.
 
 Both harnesses launch (#43, `intent/43-harness-agnostic-launch/`).
 Claude Code is started `claude --agent <persona>`; Antigravity is
@@ -1304,14 +1362,22 @@ unparseable ledger fails closed and is never read as absent.
 
 `.github/workflows/merge-gate.yml` holds `contents: write`,
 `pull-requests: write`, `issues: write`, `checks: read`,
-`statuses: read` and nothing else (acceptance 19); the merge actor
-App's manifest in `scripts/auth/app_manifests.yaml` requests the same
-five plus the `metadata: read` every App carries. Both
-`merge-gate.yml`'s mutating job and `lifecycle.yml` mint that App's
-token under one job-level `environment: themis`, whose
-deployment-branch policy admits `main` only (D23); that policy is
-unverifiable from inside the loop and is precondition P1, not a
-runtime check (Amendment r2).
+`statuses: read` and nothing else (acceptance 19) — that job-level
+block only scopes the ambient `GITHUB_TOKEN`, which never performs the
+merge. The merge actor App's manifest in
+`scripts/auth/app_manifests.yaml` requests those same five, plus the
+`metadata: read` every App carries, plus `workflows: write` (#437):
+GitHub requires `workflows` write on whichever identity merges a pull
+request whose diff touches `.github/workflows/*.yml`, and Themis, as
+the sole merge actor (D3, #64), has no fallback identity the way a
+persona's push of such a diff falls back to the bot PAT. Without this
+grant `mergeStateStatus` reads `BLOCKED` for Themis's own minted token
+on such a PR even though every other reader of the same PR at the same
+moment sees `CLEAN` (observed on #427). Both `merge-gate.yml`'s
+mutating job and `lifecycle.yml` mint that App's token under one
+job-level `environment: themis`, whose deployment-branch policy admits
+`main` only (D23); that policy is unverifiable from inside the loop
+and is precondition P1, not a runtime check (Amendment r2).
 
 Continuous poller and VM supervisor architecture (#251, D2, D4, D5; PR #327):
 The continuous poller (`scripts/placement/vm-local/poll.sh`), running under

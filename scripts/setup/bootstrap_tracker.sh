@@ -133,6 +133,14 @@ ensure_label "review:merge-ready" "0E8A16" "No open blocking findings, consensus
 ensure_label "review:verifying"  "1D76DB" "Open blocking findings exist and pull request head is newer than reviewed head"
 ensure_label "deep-review" "5319E7" "Review grant: brings Argus into review before code gate"
 
+# Area labels and triage support (#404).
+ensure_label "duplicate"     "CFD3D7" "Duplicate: closed as duplicate of an existing issue or thread"
+ensure_label "area:personas" "C5DEF5" "Issues and changes touching personas and agent definitions"
+ensure_label "area:ci"       "C5DEF5" "Issues and changes touching CI workflows and merge gates"
+ensure_label "area:ops"      "C5DEF5" "Issues and changes touching operational scripts and tooling"
+ensure_label "area:docs"     "C5DEF5" "Issues and changes touching documentation and specifications"
+ensure_label "area:harness"  "C5DEF5" "Issues and changes touching execution harnesses and runtime"
+
 if [ "$LABELS_ONLY" -eq 1 ]; then
   echo "==> Done (--labels-only). No issue was read, filed, or pinned."
   exit 0

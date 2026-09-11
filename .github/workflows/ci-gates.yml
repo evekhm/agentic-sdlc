@@ -1,24 +1,26 @@
-# The four CI gates (#6, intent/6-ci-gates/; #25 added the fourth).
+# The five CI gates (#6, #25, #410).
 # Everything AGENTS.md asks of a contributor that a machine can check,
 # checked by a machine:
 #
-#   drift      personas/ + config/ recompile to exactly the committed
-#              targets — a hand-edited compiled file cannot merge
-#   sanitize   no home paths, no credential shapes, no vendor names in
-#              personas/ — deterministic, tree-wide, every run
-#   spec-check a PR touching behavior-bearing paths updates
-#              docs/SPEC.md or declares `Spec-impact: none — <reason>`
-#   execution  config/execution.yaml parses, every binding is well
-#              formed, every persona named has a source, every
-#              placement resolves to an adapter directory, and every
-#              subscribed event is one .github/workflows/unattended.yml
-#              actually triggers on (#25, D2, D8, D17)
+#   drift           personas/ + config/ recompile to exactly the committed
+#                   targets — a hand-edited compiled file cannot merge
+#   sanitize        no home paths, no credential shapes, no vendor names in
+#                   personas/ — deterministic, tree-wide, every run
+#   spec-check      a PR touching behavior-bearing paths updates
+#                   docs/SPEC.md or declares `Spec-impact: none — <reason>`
+#   execution       config/execution.yaml parses, every binding is well
+#                   formed, every persona named has a source, every
+#                   placement resolves to an adapter directory, and every
+#                   subscribed event is one .github/workflows/unattended.yml
+#                   actually triggers on (#25, D2, D8, D17)
+#   changelog-check a PR touching behavior-bearing paths updates
+#                   CHANGELOG.md or declares `Changelog: none — <reason>` (#410)
 #
-# All four are deterministic scripts, runnable locally by the same
+# All five are deterministic scripts, runnable locally by the same
 # command CI runs. No model tokens, no vendor API calls, no secrets:
 # `permissions: contents: read` is the whole grant, so this workflow is
 # safe to run on a fork PR. The jobs are independent and run in
-# parallel — a PR sees all four verdicts on one push, not the first
+# parallel — a PR sees all five verdicts on one push, not the first
 # failure only.
 #
 # `edited` is in the trigger list so adding the Spec-impact marker to a
@@ -115,7 +117,10 @@ jobs:
         run: |
           bash scripts/ops/tests/review_split_contract_test.sh
           bash scripts/ci/tests/review_split_gate_contract_test.sh
+          bash scripts/ops/tests/athena_front_door_contract_test.sh
 
+      - name: Wrap contract tests
+        run: bash scripts/ops/tests/wrap_test.sh
       - name: Harness contract tests
         run: bash scripts/ops/tests/harness_test.sh
 
@@ -197,3 +202,56 @@ jobs:
           if [ -n "$rule" ]; then
             echo "Diff matches criteria ($rule); deep-review recommendation logged"
           fi
+
+  changelog-check:
+    name: changelog-check — CHANGELOG.md obligation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure the base and head commits are present
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          for sha in "${BASE_SHA:-}" "${HEAD_SHA:-}"; do
+            if [ -z "$sha" ]; then
+              echo "::error::changelog-check: the event payload carries no base/head SHA"
+              exit 1
+            fi
+            if git cat-file -e "${sha}^{commit}"; then
+              echo "present: $sha"
+            elif git fetch --no-tags origin "$sha"; then
+              echo "fetched: $sha"
+            else
+              echo "::error::changelog-check: commit $sha is neither local nor fetchable; the diff cannot be computed"
+              exit 1
+            fi
+          done
+
+      - name: Run changelog contract test suite
+        run: bash scripts/ci/tests/changelog_check_test.sh
+
+      - name: Enforce the changelog obligation
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          body_file="$(mktemp)"
+          printf '%s' "${PR_BODY:-}" > "$body_file"
+          if ! merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"; then
+            echo "::error::changelog-check: no merge base for $BASE_SHA and $HEAD_SHA"
+            exit 1
+          fi
+          BASE_SHA="$merge_base" PR_BODY_FILE="$body_file" \
+            bash scripts/ci/changelog_check.sh
+          rm -f "$body_file"
+

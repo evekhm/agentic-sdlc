@@ -78,6 +78,11 @@ echo "  ok: build-a and build-b are identical"
 # --- 3. drift gate ------------------------------------------------------------
 step "3. drift: committed targets match a fresh build"
 python3 "$COMPILER" --check || fail "committed targets have drifted — rebuild and commit"
+# Claude door tracking check (#85 D8)
+[ -f "$REPO/.claude/commands/wrap.md" ] || fail ".claude/commands/wrap.md does not exist"
+git -C "$REPO" ls-files --error-unmatch ".claude/commands/wrap.md" >/dev/null 2>&1 || fail ".claude/commands/wrap.md is not tracked in git"
+grep -q 'scripts/ops/wrap\.sh' "$REPO/.claude/commands/wrap.md" || fail ".claude/commands/wrap.md does not invoke scripts/ops/wrap.sh"
+echo "  ok: .claude/commands/wrap.md tracked and invokes scripts/ops/wrap.sh"
 
 # --- 4. roundtrip: re-parse the emitted targets -------------------------------
 step "4. roundtrip: emitted targets carry model, tools, and full skill text"
@@ -309,4 +314,10 @@ assert_lifecycle_refused "multiple merges" "expected exactly one rung with advan
 # 12. zero merges
 python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "zero_merges"
 assert_lifecycle_refused "zero merges" "expected exactly one rung with advances_on 'merge', found 0"
-printf '\nPASS: compiler roundtrip green (%s target files, 7 checks).\n' "$count"
+
+# --- 8. command frontmatter validation ----------------------------------------
+step "8. command frontmatter: all command files contain valid YAML frontmatter"
+bash "$REPO/scripts/ci/tests/command_frontmatter_test.sh" \
+  || fail "command frontmatter validation failed"
+
+printf '\nPASS: compiler roundtrip green (%s target files, 8 checks).\n' "$count"
