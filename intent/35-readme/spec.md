@@ -33,9 +33,7 @@ ninth section, "What it solves", was added at the front 2026-09-11 by
 the product owner to state the use case and the two ways of working
 before the actors are introduced):
 
-1. **What it solves** — the three problems (vendor lock-in of the
-   process, one price for every grade of work, unreviewable one-pass
-   output); the ladder as a harness-agnostic process whose every
+1. **What it solves** — the ladder as a harness-agnostic process whose every
    stage yields an artifact both a person and the next agent read;
    the team the owner composes and pins (`config/deployments.yaml`,
    `DEPLOYMENTS`); what the loop does on its own; the two ways to

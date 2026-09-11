@@ -19,15 +19,6 @@ and builds itself with its own loop.
 
 ## What it solves
 
-A team that hands software work to AI agents meets three problems at
-once. Each coding harness ships its own agent format and its own
-commands, so a process written for one harness belongs to that vendor.
-Model prices span a tenfold range, so a team on one model pays
-frontier rates for mechanical work. An agent that takes an ask from
-idea to code in one pass leaves a result no person can review.
-
-This system answers all three with one process and a team you compose.
-
 **The process is a ladder.** This is a **harness-agnostic SDLC**: the
 stages, the protocols and the gates are defined once, in vendor-free
 sources, and compile to every supported harness (currently Antigravity
