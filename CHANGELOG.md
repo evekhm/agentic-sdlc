@@ -4,6 +4,9 @@ All notable behavioral and user-facing changes to this repository are documented
 
 ## 2026-09-11
 
+### [PR #447](https://github.com/evekhm/agentic-sdlc/pull/447): Operator Fast-Track Door and Ladder Compression Protocol ([#444](https://github.com/evekhm/agentic-sdlc/issues/444))
+Establishes the `/fast` operator slash command, `scripts/ops/fast.sh` execution helper, and `personas/skills/fast-track.md` protocol skill for owner-authorized ladder compression. This enables urgent or fully-scoped changes to safely bypass intermediate rungs (intent, spec, plan) into a single implementation round while preserving living spec obligations, changelog requirements, CI preflight validations, and inviolable dual-reviewer consensus between Argus and Atlas.
+
 ### [PR #450](https://github.com/evekhm/agentic-sdlc/pull/450): Ban Rhetorical Negated-Contrast Prose in AGENTS.md
 Adds a "Prose style" MUST rule to AGENTS.md banning the `X, never Y` / `X, not Y` / `rather than X` / `instead of X` construction when used purely for rhetorical parallelism, with the exact grep to catch it before delivery, and fixes the ~20 existing instances already in the file. The construction had spread through the repository's own canonical docs because the prior ban lived only in one operator's private notes; every persona and every harness reads AGENTS.md before writing, so the rule now lives where it will actually be seen.
 

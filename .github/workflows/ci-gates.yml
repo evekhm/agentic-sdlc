@@ -123,6 +123,8 @@ jobs:
         run: bash scripts/ops/tests/wrap_test.sh
       - name: Harness contract tests
         run: bash scripts/ops/tests/harness_test.sh
+      - name: Fast-track door tests
+        run: bash scripts/ops/tests/fast_test.sh
 
   spec-check:
     name: spec-check — docs/SPEC.md obligation
