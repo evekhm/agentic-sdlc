@@ -45,7 +45,9 @@ placing them on different model families is the suggested default
 ([#198](https://github.com/evekhm/agentic-sdlc/issues/198)). With the
 pins set, the team is ready to work.
 
-**What the team does on its own.** Once an issue carries `intent:new`,
+**What the team does on its own.** Work enters as an idea written
+in plain language: a problem to solve and what would be true once it
+is solved. It becomes an issue on the tracker, and from that moment
 the loop owns it. The product owner sharpens the ask into a
 specification with numbered decisions, and asks you when a section is
 thin. The architect plans the work and writes the tests that fail
