@@ -4,7 +4,7 @@
 
 ## Problem
 
-Athena was conceived as the product owner who owns the two gates where words become commitments (PLAN and DESIGN). In practice, Athena has functioned exclusively downstream on issues filed by a human or peer bot: drafting `intent.md` at PLAN from an existing issue, and drafting `spec.md` at DESIGN from an accepted intent. The front-door use case -- where a person interacts with Athena to shape a raw ask, search prior art, verify recorded decisions, file the issue, and maintain the product story -- has never run.
+Athena was conceived as the product owner who owns the two gates where words become commitments (PLAN and DESIGN). In practice, Athena has functioned exclusively downstream on issues filed by a human or peer bot: drafting `intent.md` at PLAN from an existing issue, and drafting `spec.md` at DESIGN from an accepted intent. The front-door use case: a person interacts with Athena to shape a raw ask, search prior art, verify recorded decisions, file the issue, and maintain the product story. That use case has never run.
 
 A systematic audit across 71 Athena pull requests, 13 sampled spec pull requests, and session run logs revealed five concrete operational gaps:
 
@@ -29,40 +29,45 @@ Athena becomes the front door of the tracker and the keeper of the product story
      - Explicit relationship declarations (`absorbs`, `refines`, `depends on`, `supersedes`).
      - Ongoing ownership of `README.md` (concept and vision) and `INTENT.md` amendments.
      - Recording thread rulings as numbered decisions and citing reversals by name (`reverses #n Dm`).
-   - Expand `authority.paths` to include `README.md` and `INTENT.md`.
+     - Never open a second issue for a problem an open thread already owns.
+   - Update `skills:` to the ordered list `intake-protocol.md, product-coherence.md, spec-adversary.md, trusted-posting.md, resume-protocol.md`.
+   - The `intent/<issue>-<slug>/intent.md` section list the role text names gains Relationships and Non-goals: Problem, Proposed outcome, Affected users and systems, Constraints, Relationships, Open questions, Non-goals.
 
 2. **Add two new policy skills under `personas/skills/`:**
    - `intake-protocol.md`:
-     - Scope first, file last: one question per turn, maximum three rounds or repeating answers, read-back confirmation before filing.
+     - Scope first, file last: one question per turn, maximum three rounds or repeating answers; the four scoping questions are who is affected, what changes for them, what stays out, and how anyone would know it worked; read-back confirmation before filing.
      - Search before writing: run tracker search across paths and keywords; inspect open threads for settled design.
-     - Read neighbours' decisions: inspect Decisions tables in `intent/*/spec.md`, cite by `#n Dm`, and declare reversals explicitly.
-     - Name every relationship: require a Relationships section with one verb per related item (`absorbs`, `refines`, `depends on`, `supersedes`), or state "tracker searched, no prior art:" followed by search terms.
+     - Read neighbours' decisions: inspect Decisions tables in `intent/*/spec.md`, cite by `#n Dm`, and declare reversals explicitly; a silent contradiction is a defect.
+     - Name every relationship: require a Relationships section with one verb per related item (`absorbs`, `refines`, `depends on`, `supersedes`), or state "tracker searched, no prior art:" followed by the labels and terms used.
      - One problem, one thread: post evidence to an existing open thread if the problem is already tracked; split oversized asks into parent and child items.
-     - House shape: structure issues with Problem, Proposed outcome, Affected users and systems, Constraints, Relationships, Open questions, and Non-goals.
+     - House shape: structure issues with Problem, Proposed outcome, Affected users and systems, Constraints, Relationships, Open questions, and Non-goals. Every section filled, or marked "none" with the reason.
      - Search again before PR: rerun tracker search immediately prior to opening the intent pull request.
-     - Document explicit refusals and exit conditions.
+     - Refusals: a second issue for a problem an open thread owns; an intent that touches a recorded decision without naming it; filing before the human confirmed the read-back (interactive), or while the body lacks a Relationships section (headless).
+     - Exit condition: an issue labeled `intent:new` whose body carries the house shape and a Relationships section, or a comment on the existing thread and no new issue.
    - `product-coherence.md`:
-     - Map surfaces before changing one: grep terms across `README.md`, `INTENT.md`, `REVIEW.md`, `docs/SPEC.md`, `config/`, and every `intent/*/spec.md` Decisions table.
-     - Keep `README.md` as concept and vision: update `README.md` in the same pull request as `intent.md` whenever product concept changes. Implementation status belongs in `docs/SPEC.md`.
+     - Map surfaces before changing one: grep terms across `README.md`, `INTENT.md`, `REVIEW.md`, `docs/SPEC.md`, `config/`, and every `intent/*/spec.md` Decisions table; list every hit under Relationships or Constraints. That list is the change set the intent owes.
+     - Keep `README.md` as concept and vision: update `README.md` in the same pull request as `intent.md` whenever product concept changes. Implementation status, run books and pins stay out of README; they belong to `docs/SPEC.md` and `config/`.
+       - Mechanism: no check exists today that README changed when an intent changes the concept. Prompt rule now (this step); later a review-protocol row for the reviewers ("intent alters the README concept: README in the diff?").
      - Founding statements move by amendment: changes to founding decisions in `INTENT.md` land as dated amendments naming the amending intent, never as in-place edits.
      - Decisions reverse by name: reversals state `reverses #n Dm` with rationale; the reversed spec gains an amendment row pointing forward.
-     - Apply rulings as rules: convert operator and advisor rulings into numbered rules for builders.
-     - Prose that ships: enforce prose standards (no em dash character, no comparative exclusion phrasing, vendor neutrality in persona files, no absolute home directory paths).
-     - Document explicit exit conditions.
+     - Apply rulings as rules: convert operator and advisor rulings into numbered rules for builders. Restating the intent in different words is a finding.
+     - Prose that ships: no em dash character, no "rather than", no contrast sentences, no model or vendor names under `personas/**`, no home paths. Grep before opening the PR; every count is zero.
+     - Exit condition: every surface named in the map-surfaces step either changed in the PR or is listed with the reason it did not.
+   - Provision the missing `area:*` and `duplicate` labels in `scripts/setup/bootstrap_tracker.sh`.
 
 3. **Amend `personas/skills/spec-adversary.md`:**
-   - Rule 6 (Every acceptance row can fail): require naming the input that makes each acceptance test row fail; drop rows that pass unconditionally.
+   - Rule 6 (Every acceptance row can fail): require naming the input that makes each acceptance test row fail; a row that passes either way is dropped or rewritten.
    - Rule 7 (Neighbours first): list decisions from related intents before round one; cite restatements and state reversals explicitly.
-   - Rule 8 (Self-contradiction pass): read the Decisions table against acceptance tests once before opening the pull request to catch conflicting conditions.
+   - Rule 8 (Self-contradiction pass): read the Decisions table against the acceptance-test list once before opening the pull request, looking only for two rows a single input would satisfy differently.
 
-4. **Enhance tracker search tooling:**
+4. **Expand `authority.paths`:**
+   - Add `README.md` and `INTENT.md` to `personas/athena.yaml`'s `authority.paths`; today the merge gate refuses an Athena pull request touching either, so the README duty cannot be met without this.
+
+5. **Enhance tracker search tooling:**
    - Add a `--decisions` pass to `scripts/ops/tracker_search.sh` that greps `| Dn |` rows across `intent/*/spec.md`, enabling unified search across issues, pull requests, and decisions in one invocation.
 
-5. **Document interactive entry points in README:**
+6. **Document interactive entry points in README:**
    - Update `README.md` under "Running it yourself" to document interactive entry points across supported harnesses (`claude --agent athena` on Claude Code; compiled `.agents/agents/athena` on Antigravity).
-
-6. **Tracker label provisioning:**
-   - Provision missing `area:*` and `duplicate` labels in tracker setup tooling to support intake categorization and duplicate resolution.
 
 ## Affected users and systems
 
@@ -79,14 +84,14 @@ Athena becomes the front door of the tracker and the keeper of the product story
 - **Skill naming conventions:** Filenames under `personas/skills/` must strictly match `^[a-z][a-z-]*\.md$`.
 - **Drift gate integrity:** Compiled targets (`.claude/agents/`, `.agents/agents/`) must regenerate via `scripts/sync_agents.py` with zero drift.
 - **Layering separation:** Prompt rules in persona skills serve as the first line; deterministic intake hooks (#117) and checkable hooks (#255) remain separate and complementary.
-- **Lifecycle phase boundary:** At the PLAN gate, only `intent/<issue>-<slug>/intent.md` is authored and committed. Persona updates, skill files, and code changes are executed during the IMPLEMENT stage following approved spec and plan artifacts.
 
 ## Relationships
 
 - **Refines #10 (headless intake on `intent:new`):** #10 automates the event trigger; this issue defines Athena's behavior once triggered, both interactively and headlessly.
-- **Depends on: none (for prompt and skill changes):** #117 (typed intake, status:implementing) provides the complementary deterministic hook layer.
+- **Depends on nothing for the prompt change:** #117 (typed intake, status:implementing) is the deterministic layer under step 2 of the protocol.
 - **Refines #35 (README walkthrough):** #35 authored the initial operator walkthrough; this issue establishes Athena as the ongoing owner and updater of `README.md`.
 - **Related to #254 (evals) and #255 (hooks):** Rules established here define the requirements for future evals and checkable pre-commit hooks.
+- **Related to #396:** the reviewer-pin loosening whose intent PR needs the README authority this issue grants Athena.
 - **Absorbs missing label provisioning:** Provisions `area:*` and `duplicate` labels if not claimed by another active issue.
 
 ## Open questions
@@ -100,8 +105,6 @@ Athena becomes the front door of the tracker and the keeper of the product story
 
 1. **Output format for `tracker_search.sh --decisions`:** Should decision search results be presented as raw grep matches, formatted markdown table rows, or structured JSON objects?
 2. **Structure of dated amendments in `INTENT.md`:** Should amendments be collected in a dedicated `## Amendments` section at the bottom of `INTENT.md`, or placed inline within the relevant founding sections?
-3. **Spec-adversary protocol structure:** Should rules 6, 7, and 8 be appended sequentially to `personas/skills/spec-adversary.md`, or organized into explicit phases (pre-adversary context assembly, adversary interrogation, post-adversary self-contradiction check)?
-4. **Provisioning mechanism for missing labels:** Should `area:*` and `duplicate` labels be provisioned directly via `scripts/setup/bootstrap_tracker.sh`, or via a standalone tracker configuration step?
 
 ## Non-goals
 
