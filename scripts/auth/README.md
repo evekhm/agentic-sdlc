@@ -127,6 +127,57 @@ In GitHub Actions, don't use this script — use
 instead (same JWT exchange, done inside the runner); see the predecessor
 repo's `ARGUS_SETUP.md` appendix.
 
+## Workstation setup: installing private keys in `~/.keys/`
+
+When running interactive sessions or local automation (such as `work.sh`,
+Odyssey, Daedalus, or Athena), the local workstation must be able to mint
+installation tokens directly.
+
+### Why local private keys are critical
+
+1. **Persona attribution and provenance:** Every commit, PR, review, and issue
+   mutation must be authoritatively attributed to its persona's GitHub App
+   identity (e.g. `evekhm-odyssey-app[bot]`), not to the human operator's
+   personal account. Commits and comments without persona App tokens fail
+   provenance checks.
+2. **Reviewer consensus integrity:** Autonomous reviewers (Argus and Atlas)
+   must authenticate with distinct App identities. Without separate private
+   keys, local sessions would fall back to ambient operator PATs, which
+   invalidates consensus because both reviews would appear from the same user.
+3. **Local/CI parity:** GitHub Actions workflows use repository secrets to mint
+   App tokens. Storing matching `.pem` files in `~/.keys/` allows local
+   harness sessions to operate with the exact same identity boundaries as CI.
+
+### Step-by-step setup
+
+1. Create the key directory under your home folder (never inside the repository):
+   ```bash
+   mkdir -p ~/.keys
+   chmod 700 ~/.keys
+   ```
+2. Save the GitHub App private key `.pem` files into `~/.keys/` using the naming
+   format `<slug>.<date>.private-key.pem` with permissions `600`:
+   ```bash
+   chmod 600 ~/.keys/*.private-key.pem
+   ```
+   The `<slug>` corresponds to the persona App name without `[bot]`:
+   - `~/.keys/evekhm-athena-app.2026-09-11.private-key.pem`
+   - `~/.keys/evekhm-daedalus-app.2026-09-11.private-key.pem`
+   - `~/.keys/evekhm-odyssey-app.2026-09-11.private-key.pem`
+   - `~/.keys/evekhm-argus-app.2026-09-11.private-key.pem`
+   - `~/.keys/evekhm-atlas-app.2026-09-11.private-key.pem`
+   - `~/.keys/evekhm-cassandra-app.2026-09-11.private-key.pem`
+   - `~/.keys/evekhm-themis-app.2026-09-11.private-key.pem`
+3. Verify all registrations, keys, and installations:
+   ```bash
+   python3 scripts/auth/create_all_apps.py --check
+   ```
+   Every row should report `yes` across `app`, `key`, and `install`.
+4. Test minting an installation token:
+   ```bash
+   python3 scripts/auth/mint_app_token.py odyssey --quiet && echo "Minting successful"
+   ```
+
 ## Files
 
 - `app_manifests.yaml` — reviewable source data per entry: name suffix,

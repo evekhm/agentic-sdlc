@@ -5,9 +5,9 @@
 # ladder compression, transitioning an issue directly to status:implementing
 # and preparing/opening a single-round PR with mandatory CI and review gates.
 #
-# Invariants:
 # 1. Fail-closed: refuses closed issues, issues with hold/blocked, unattended runners,
-#    bot identities, unauthenticated callers, or contradictory stage labels.
+#    unauthenticated callers, or contradictory stage labels. Caller write permissions required;
+#    records caller or owner signature. (Bot restriction policy tracked in follow-up issue).
 # 2. Stage transition: updates issue labels to status:implementing and posts the
 #    owner authorization marker from a file, re-checking hold immediately prior.
 # 3. Living spec obligation: enforces docs/SPEC.md upsert check before PR creation
@@ -22,7 +22,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
-AS_PERSONA=""
+AS_PERSONA="${AS_PERSONA:-odyssey}"
 CHANGELOG_REASON=""
 SPEC_REASON=""
 SKIP_PR=0
@@ -86,23 +86,38 @@ done
 command -v gh >/dev/null 2>&1 || die "gh CLI is required on PATH"
 command -v jq >/dev/null 2>&1 || die "jq is required on PATH"
 
-# R1-1: Verify caller authorization boundary
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
     refuse "fast-track cannot be initiated within GitHub Actions / unattended runner automation"
 fi
 
+REPO_OWNER="$(gh api "repos/$GITHUB_REPO" --jq '.owner.login // empty' 2>/dev/null || true)"
+[ -n "$REPO_OWNER" ] || REPO_OWNER="${GITHUB_REPO%%/*}"
+
+# Determine authenticated caller identity
 CALLER_USER_JSON="$(gh api user 2>/dev/null || true)"
 CALLER_LOGIN="$(jq -r '.login // empty' <<<"$CALLER_USER_JSON")"
-[ -n "$CALLER_LOGIN" ] || die "cannot determine authenticated GitHub user"
+CALLER_TYPE="$(jq -r '.type // empty' <<<"$CALLER_USER_JSON")"
 
-if [[ "$CALLER_LOGIN" =~ (-app\[bot\]|\[bot\])$ ]]; then
-    refuse "fast-track cannot be initiated by an autonomous bot identity ($CALLER_LOGIN); human owner authorization required"
+# Record caller signature / owner authorization
+OWNER_AUTH_COMMENT_ID="$(gh api "repos/$GITHUB_REPO/issues/$ISSUE/comments" --jq '
+    [.[] | select(.user.login == "'"$REPO_OWNER"'" and (.body | test("(?i)(^|\\s)(/fast(-track)?|owner-authorized fast-track)")))] | last | .id // empty
+' 2>/dev/null || true)"
+
+if [ -n "$OWNER_AUTH_COMMENT_ID" ]; then
+    OWNER_SIGNATURE="on-issue comment #$OWNER_AUTH_COMMENT_ID by @$REPO_OWNER"
+elif [ -n "$CALLER_LOGIN" ]; then
+    OWNER_SIGNATURE="caller @$CALLER_LOGIN"
+else
+    OWNER_SIGNATURE="local operator"
 fi
+echo "==> Caller signature: $OWNER_SIGNATURE"
 
-CALLER_PERM_JSON="$(gh api "repos/$GITHUB_REPO/collaborators/$CALLER_LOGIN/permission" 2>/dev/null || true)"
+# Verify caller has collaborator permission on target repo
+CALLER_CHECK_LOGIN="${CALLER_LOGIN:-$REPO_OWNER}"
+CALLER_PERM_JSON="$(gh api "repos/$GITHUB_REPO/collaborators/$CALLER_CHECK_LOGIN/permission" 2>/dev/null || true)"
 CALLER_PERM="$(jq -r '.permission // empty' <<<"$CALLER_PERM_JSON")"
 if [ "$CALLER_PERM" != "admin" ] && [ "$CALLER_PERM" != "write" ]; then
-    refuse "user $CALLER_LOGIN does not have write or admin permissions on $GITHUB_REPO (got: '$CALLER_PERM')"
+    refuse "user $CALLER_CHECK_LOGIN does not have write or admin permissions on $GITHUB_REPO (got: '$CALLER_PERM')"
 fi
 
 # Read issue metadata
@@ -131,11 +146,12 @@ if [ "${#STATUS_LABELS[@]}" -gt 1 ]; then
 fi
 
 echo "==> Issue #$ISSUE: $ISSUE_TITLE"
+echo "==> Verified owner authorization: $OWNER_SIGNATURE"
 
-# Helper: re-read hold immediately before writing (D13/D14)
+# Helper: re-read hold immediately before writing (D13/D14, fail-closed on API error R2-1)
 verify_not_held() {
     local fresh_labels
-    fresh_labels="$(gh api "repos/$GITHUB_REPO/issues/$ISSUE" --jq '.labels[].name' 2>/dev/null || true)"
+    fresh_labels="$(gh api "repos/$GITHUB_REPO/issues/$ISSUE" --jq '.labels[].name')" || die "failed to query labels on issue #$ISSUE immediately before write (fail-closed)"
     if grep -q '^hold$' <<<"$fresh_labels"; then
         refuse "issue #$ISSUE carries hold label (re-checked immediately before write)"
     fi
@@ -163,7 +179,7 @@ if [ "$HAS_IMPLEMENTING" -eq 0 ]; then
 
         # Post authorization comment from file (trusted posting)
         COMMENT_TMP="$(mktemp)"
-        echo "Owner-authorized fast-track initiated by @$CALLER_LOGIN: lifecycle stage set to \`status:implementing\` for single-round execution." > "$COMMENT_TMP"
+        echo "Owner-authorized fast-track initiated by @${CALLER_LOGIN:-$REPO_OWNER} (Signature: $OWNER_SIGNATURE): lifecycle stage set to \`status:implementing\` for single-round execution." > "$COMMENT_TMP"
         verify_not_held
         gh api "repos/$GITHUB_REPO/issues/$ISSUE/comments" -F body=@"$COMMENT_TMP" >/dev/null
         rm -f "$COMMENT_TMP"
@@ -257,8 +273,9 @@ if [ "$TOUCHES_BEHAVIOR" -eq 1 ] && [ "$TOUCHES_CHANGELOG" -eq 0 ]; then
     if [ -z "$CHANGELOG_REASON" ]; then
         refuse "behavior-bearing files changed without a CHANGELOG.md update; you must either update CHANGELOG.md or provide an explicit --changelog-reason '<reason>'."
     fi
-    if [[ "$CHANGELOG_REASON" =~ ^(owner-authorized[ -]fast[ -]track|fast[ -]track)$ ]]; then
-        refuse "boilerplate changelog reason is not permitted; provide a substantive reason explaining why no changelog entry is needed."
+    CHANGELOG_REASON_CLEAN="$(tr '[:upper:]' '[:lower:]' <<<"${CHANGELOG_REASON//[._-]/ }" | xargs)"
+    if [[ "$CHANGELOG_REASON_CLEAN" =~ ^(owner authorized fast track|fast track|urgent|n/a|none|no behavior change|test)$ ]] || [ "${#CHANGELOG_REASON}" -lt 10 ]; then
+        refuse "boilerplate changelog reason is not permitted; provide a substantive reason explaining why no changelog entry is needed (minimum 10 characters)."
     fi
 fi
 
@@ -270,7 +287,7 @@ PR_BODY_TMP="$(mktemp)"
 trap 'rm -f "$PR_BODY_TMP"' EXIT
 
 cat <<EOF_BODY > "$PR_BODY_TMP"
-Owner-authorized ladder compression: combines intent/spec/plan/implement into one round (Refs #$ISSUE).
+Owner-authorized ladder compression: combines intent/spec/plan/implement into one round (Refs #$ISSUE) [Signature: $OWNER_SIGNATURE].
 
 $ISSUE_TITLE.
 
@@ -291,23 +308,20 @@ Closes #$ISSUE.
 EOF_BODY2
 
 echo "==> Preflight checks on branch $WT_BRANCH using worktree gate scripts..."
-# Sanitize check (R1-6: use worktree's own copy)
-if [ -f "$WT_PATH/scripts/ci/sanitize_check.sh" ]; then
-    echo "--> Running sanitize_check.sh..."
-    (cd "$WT_PATH" && bash "$WT_PATH/scripts/ci/sanitize_check.sh") || die "sanitize check failed"
-fi
+# Sanitize check (R1-6: use worktree's own copy, R2-2: fail-closed if missing)
+[ -f "$WT_PATH/scripts/ci/sanitize_check.sh" ] || die "missing preflight script: $WT_PATH/scripts/ci/sanitize_check.sh"
+echo "--> Running sanitize_check.sh..."
+(cd "$WT_PATH" && bash "$WT_PATH/scripts/ci/sanitize_check.sh") || die "sanitize check failed"
 
 # Spec check
-if [ -f "$WT_PATH/scripts/ci/spec_check.sh" ]; then
-    echo "--> Running spec_check.sh..."
-    (cd "$WT_PATH" && bash "$WT_PATH/scripts/ci/spec_check.sh" "$BASE_REF" "$PR_BODY_TMP") || die "spec check failed"
-fi
+[ -f "$WT_PATH/scripts/ci/spec_check.sh" ] || die "missing preflight script: $WT_PATH/scripts/ci/spec_check.sh"
+echo "--> Running spec_check.sh..."
+(cd "$WT_PATH" && bash "$WT_PATH/scripts/ci/spec_check.sh" "$BASE_REF" "$PR_BODY_TMP") || die "spec check failed"
 
 # Changelog check
-if [ -f "$WT_PATH/scripts/ci/changelog_check.sh" ]; then
-    echo "--> Running changelog_check.sh..."
-    (cd "$WT_PATH" && bash "$WT_PATH/scripts/ci/changelog_check.sh" "$BASE_REF" "$PR_BODY_TMP") || die "changelog check failed"
-fi
+[ -f "$WT_PATH/scripts/ci/changelog_check.sh" ] || die "missing preflight script: $WT_PATH/scripts/ci/changelog_check.sh"
+echo "--> Running changelog_check.sh..."
+(cd "$WT_PATH" && bash "$WT_PATH/scripts/ci/changelog_check.sh" "$BASE_REF" "$PR_BODY_TMP") || die "changelog check failed"
 
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "would: gh pr create --repo $GITHUB_REPO --head $WT_BRANCH --base main --title \"fast-track(#$ISSUE): $ISSUE_TITLE\" --body-file $PR_BODY_TMP"

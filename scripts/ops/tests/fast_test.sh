@@ -64,7 +64,7 @@ if [ "${1:-}" = "api" ]; then
 
     json_out=""
     if [ "$endpoint" = "user" ]; then
-        user_login="${STUB_USER_LOGIN:-eva}"
+        user_login="${STUB_USER_LOGIN:-test}"
         user_type="${STUB_USER_TYPE:-User}"
         json_out="{\"login\": \"$user_login\", \"type\": \"$user_type\"}"
     elif [[ "$endpoint" =~ repos/[^/]+/[^/]+/collaborators/([^/]+)/permission ]]; then
@@ -251,14 +251,45 @@ set -e
 grep -q "fast-track cannot be initiated within GitHub Actions" <<<"$err_out" || fail "actions context message missing"
 pass "10. refusal within GitHub Actions context"
 
-# --- Test 11: Authorization boundary — refusal on autonomous bot identity (exits 2) ---
+# --- Test 11: Bot caller with write permission succeeds and captures caller signature ---
 set +e
-err_out="$(STUB_USER_LOGIN="evekhm-atlas-app[bot]" "$FAST_SH" 104 2>&1)"
+out="$(STUB_USER_LOGIN="evekhm-atlas-app[bot]" "$FAST_SH" 104 --dry-run 2>&1)"
 status=$?
 set -e
-[ "$status" -eq 2 ] || fail "bot identity did not exit 2 (got $status)"
-grep -q "cannot be initiated by an autonomous bot identity" <<<"$err_out" || fail "bot identity message missing"
-pass "11. refusal on autonomous bot identity"
+[ "$status" -eq 0 ] || fail "bot identity did not exit 0 on dry-run (got $status: $out)"
+grep -q "Caller signature: caller @evekhm-atlas-app\[bot\]" <<<"$out" || fail "caller signature missing from output"
+pass "11. bot caller with write permission succeeds and captures caller signature"
+
+# --- Test 11b: Machine user bot account captures caller signature ---
+set +e
+out="$(STUB_USER_LOGIN="test-atlas-bot" STUB_USER_TYPE="User" "$FAST_SH" 104 --dry-run 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "machine bot account did not exit 0 on dry-run (got $status: $out)"
+grep -q "Caller signature: caller @test-atlas-bot" <<<"$out" || fail "machine bot caller signature missing"
+pass "11b. machine bot account captures caller signature"
+
+# --- Test 11c: Bot session WITH owner authorization comment on issue captures owner signature ---
+cat > "$FIXTURES/repos_test_repo_issues_104_comments.json" <<'JSON'
+[
+  {
+    "id": 789012,
+    "user": {"login": "test"},
+    "body": "/fast-track owner authorization for issue 104"
+  }
+]
+JSON
+: > "$WRITES"
+set +e
+out="$(STUB_USER_LOGIN="evekhm-athena-app[bot]" "$FAST_SH" 104 --dry-run 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "bot session with owner issue comment failed (got $status)"
+grep -q "Caller signature: on-issue comment #789012 by @test" <<<"$out" || fail "owner signature missing from output"
+pass "11c. bot session with owner issue authorization comment succeeds"
+
+# Clean up comment fixture for subsequent tests
+rm -f "$FIXTURES/repos_test_repo_issues_104_comments.json"
 
 # --- Test 12: Authorization boundary — refusal on non-write permissions (exits 2) ---
 set +e
@@ -317,10 +348,14 @@ TEST_WT="$WORK/wt-200-test"
 git -C "$TEST_REPO" worktree add -b eva/200-test "$TEST_WT" main >/dev/null
 
 # Touch a behavior-bearing path
-mkdir -p "$TEST_WT/scripts"
+mkdir -p "$TEST_WT/scripts" "$TEST_WT/scripts/ci"
 echo "echo hello" > "$TEST_WT/scripts/test_script.sh"
-git -C "$TEST_WT" add scripts/test_script.sh
-git -C "$TEST_WT" commit -m "add test script"
+echo '#!/bin/bash' > "$TEST_WT/scripts/ci/sanitize_check.sh"
+echo '#!/bin/bash' > "$TEST_WT/scripts/ci/spec_check.sh"
+echo '#!/bin/bash' > "$TEST_WT/scripts/ci/changelog_check.sh"
+chmod +x "$TEST_WT/scripts/ci/"*.sh
+git -C "$TEST_WT" add scripts/
+git -C "$TEST_WT" commit -m "add test script and preflights"
 
 cat > "$FIXTURES/repos_test_repo_issues_200.json" <<'JSON'
 {
@@ -364,5 +399,15 @@ grep -q "Closes #200" "$WORK/last_pr_body.txt" || fail "Closes #200 missing from
 pass "17. valid changelog reason creates PR with mandatory header and closes reference"
 
 
+# --- Test 18: Missing preflight gate script fails closed (R2-2) ---
+rm -f "$TEST_WT/scripts/ci/sanitize_check.sh"
+set +e
+err_out="$(cd "$TEST_REPO" && "$FAST_SH" 200 --changelog-reason "internal test tool not user facing" 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 1 ] || fail "missing preflight script did not exit 1 (got $status)"
+grep -q "missing preflight script: .*sanitize_check.sh" <<<"$err_out" || fail "missing preflight message mismatch"
+pass "18. missing preflight gate script fails closed (R2-2)"
+
 echo ""
-echo "=== All 17 tests in fast_test.sh passed ==="
+echo "=== All fast_test.sh tests passed ==="

@@ -4,13 +4,11 @@ All notable behavioral and user-facing changes to this repository are documented
 
 ## 2026-09-11
 
-### [PR #440](https://github.com/evekhm/agentic-sdlc/pull/440): Athena as the Front Door for Product Intake ([#404](https://github.com/evekhm/agentic-sdlc/issues/404))
-Athena now owns product intake: an interactive protocol that scopes an ask down one question at a time, searches the tracker for prior art and recorded decisions before filing, states how a new issue relates to existing threads, and keeps README.md as the concept and vision document. New intents were being filed without a duplicate search or a decision lookup, and the spec gate let self-contradicting decisions through. Operators start an intent conversation with Athena from either harness, the tracker search gains a decisions pass over every merged spec, and the tracker carries the duplicate and area labels the protocol assigns.
-
-## 2026-09-11
-
 ### [PR #447](https://github.com/evekhm/agentic-sdlc/pull/447): Operator Fast-Track Door and Ladder Compression Protocol ([#444](https://github.com/evekhm/agentic-sdlc/issues/444))
 Establishes the `/fast` operator slash command, `scripts/ops/fast.sh` execution helper, and `personas/skills/fast-track.md` protocol skill for owner-authorized ladder compression. This enables urgent or fully-scoped changes to safely bypass intermediate rungs (intent, spec, plan) into a single implementation round while preserving living spec obligations, changelog requirements, CI preflight validations, and inviolable dual-reviewer consensus between Argus and Atlas.
+
+### [PR #440](https://github.com/evekhm/agentic-sdlc/pull/440): Athena as the Front Door for Product Intake ([#404](https://github.com/evekhm/agentic-sdlc/issues/404))
+Athena now owns product intake: an interactive protocol that scopes an ask down one question at a time, searches the tracker for prior art and recorded decisions before filing, states how a new issue relates to existing threads, and keeps README.md as the concept and vision document. New intents were being filed without a duplicate search or a decision lookup, and the spec gate let self-contradicting decisions through. Operators start an intent conversation with Athena from either harness, the tracker search gains a decisions pass over every merged spec, and the tracker carries the duplicate and area labels the protocol assigns.
 
 ## 2026-09-10
 

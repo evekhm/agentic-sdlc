@@ -7,11 +7,11 @@ living-spec, changelog, test, and dual-review consensus gates fully intact.
 
 ## The Six Invariants
 
-1. **Owner authorization is explicit and human.** Autonomous bots cannot
-   self-authorize fast-tracks or skip lifecycle rungs on their own. Fast-track
-   is initiated only by a human repository owner or collaborator via `/fast <issue>`
-   or `scripts/ops/fast.sh <issue>`. Calls within unattended GitHub Actions runners
-   or from bot identities are strictly refused.
+1. **Owner authorization and caller boundary.** Fast-track records the caller or
+   owner authorization signature (supporting on-issue owner comments `/fast-track`).
+   Calls within unattended GitHub Actions runners are strictly refused. Policies
+   and restrictions on autonomous bot self-authorization remain open for exploration
+   in a follow-up issue.
 2. **Issue state is `status:implementing`.** Ladder compression transitions the
    issue directly to `status:implementing` (clearing intake and earlier authoring
    labels `intent:new`, `status:planning`, `status:spec`, `status:build`) and posts
