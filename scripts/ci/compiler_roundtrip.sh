@@ -314,4 +314,10 @@ assert_lifecycle_refused "multiple merges" "expected exactly one rung with advan
 # 12. zero merges
 python3 "$REPO/scripts/ci/tests/lifecycle_mutation_fixture.py" "$LF_JSON" "$REPO/personas/lifecycle.json" "zero_merges"
 assert_lifecycle_refused "zero merges" "expected exactly one rung with advances_on 'merge', found 0"
-printf '\nPASS: compiler roundtrip green (%s target files, 7 checks).\n' "$count"
+
+# --- 8. command frontmatter validation ----------------------------------------
+step "8. command frontmatter: all command files contain valid YAML frontmatter"
+bash "$REPO/scripts/ci/tests/command_frontmatter_test.sh" \
+  || fail "command frontmatter validation failed"
+
+printf '\nPASS: compiler roundtrip green (%s target files, 8 checks).\n' "$count"

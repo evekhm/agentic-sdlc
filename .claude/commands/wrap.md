@@ -1,6 +1,6 @@
 ---
 description: Close out this session, or refresh its handoff snapshot mid-flight. Writes ops/handoffs/handoff-<seat>-<date>.txt and prints the command that resumes from it. Prototype door for #85; when scripts/ops/wrap.sh exists this file calls it instead of prompting for the same work.
-argument-hint: [<seat-or-slug>] [--snapshot]
+argument-hint: '[<seat-or-slug>] [--snapshot]'
 allowed-tools: Bash(git *), Bash(gh *), Bash(scripts/ops/*), Bash(ops/harness/*), Bash(ops/waves/*), Bash(ls *), Bash(cat *), Bash(jq *), Read, Write, Edit, Grep, Glob
 ---
 
