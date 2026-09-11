@@ -1054,6 +1054,16 @@ calls `intake.sh --kind idea|bug --title <title> --body-file <file>
 both the `intent:new` and `bug` labels in that one call.
 Tests: `scripts/ops/tests/intake_test.sh`.
 
+### ops.fast_track
+The operator fast-track door (`/fast <issue>`, backed by `scripts/ops/fast.sh`, command `.claude/commands/fast.md`, and skill `personas/skills/fast-track.md`) initiates and executes owner-authorized ladder compression (#415, #444). Ladder compression combines intent, spec, plan, and implementation into a single round for urgent or fully-scoped changes, bypassing intermediate gate halts without bypassing safety:
+1. Owner authorization: only human operators or interactive sessions can invoke `/fast`; autonomous bots cannot self-authorize fast-tracks.
+2. State transition: removes obsolete intake and stage labels, transitions the issue directly to `status:implementing`, and posts the structured fast-track initiation comment.
+3. PR construction: opens a single-round PR with mandatory header `Owner-authorized ladder compression: combines intent/spec/plan/implement into one round (Refs #<n>)` and `Closes #<n>`.
+4. Gate protection: runs preflight checks (`sanitize_check.sh`, `spec_check.sh`, `changelog_check.sh`) before PR creation. If behavior-bearing files are touched and `CHANGELOG.md` is unmodified, automatically requires or populates `Changelog: none — <reason>`.
+5. Living spec obligation: living spec upserts into `docs/SPEC.md` remain mandatory in the PR diff whenever user or system behavior changes.
+6. Dual-reviewer consensus: fast-tracking accelerates authoring rungs only; review is inviolable. Every fast-track PR requires independent dual review consensus from Argus and Atlas before the autonomous merge gate merges it.
+Tests: `scripts/ops/tests/fast_test.sh`.
+
 ### ops.identity
 A dispatched session runs as its own persona, never as the operator
 (#43). `scripts/ops/work.sh` mints the launched persona's App token in
