@@ -116,13 +116,21 @@ usage: scripts/ops/work.sh <issue-or-pr-number> [--as <persona>]
 The number is the whole instruction. Nothing else about the work is an
 argument: the stage comes from the issue's single status:* label, the
 owner from the persona sources, the folder from the repository, and the
-harness from config/deployments.yaml.
+harness from config/deployments.yaml (or $DEPLOYMENTS when set).
 
 Modes are environment variables, never flags:
   DRY_RUN=1   resolve and print, launch nothing, mint nothing.
   HEADLESS=1  run the session non-interactively and map its
               WORK-RESULT line to an exit code. Antigravity personas
               are always headless; there is no interactive row.
+
+Deployment overrides (#251, #433):
+  DEPLOYMENTS=<path>          path to deployments configuration file. Defaults
+                              to config/deployments.yaml. Exporting DEPLOYMENTS
+                              pointing to an unversioned file in ops/ (e.g.
+                              ops/deployments.yaml) allows an operator to repin
+                              all dispatches to a single harness locally without
+                              dirtying worktrees created from origin/main.
 
 Unattended-run controls, all opt-in (#108):
   WORK_MAX_USD=<amount>       spend ceiling (pre-emptive for Claude,
