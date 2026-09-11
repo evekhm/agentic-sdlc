@@ -146,7 +146,11 @@ whole typed input to the loop:
 
 The commands are one source compiled to each harness, the same way
 the personas are
-([#416](https://github.com/evekhm/agentic-sdlc/issues/416)).
+([#416](https://github.com/evekhm/agentic-sdlc/issues/416)). A longer
+conversation with the product owner, before anything is filed, is a
+session with her directly: `claude --agent athena` in Claude Code, or
+the compiled `.agents/agents/athena` configuration in Antigravity
+([#404](https://github.com/evekhm/agentic-sdlc/issues/404)).
 
 ## What this is
 
