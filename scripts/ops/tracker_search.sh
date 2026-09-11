@@ -49,9 +49,23 @@ fi
 found=0
 
 if [ "${#DECISIONS[@]}" -gt 0 ]; then
-    decision_matches="$(grep -E -n -i '^\|[[:space:]]*D[0-9]+[[:space:]]*\|' intent/*/spec.md 2>/dev/null || true)"
+    # R1-2: resolve the repo root from BASH_SOURCE (same pattern as
+    # scripts/ops/work.sh and scripts/ops/tests/athena_front_door_contract_test.sh)
+    # so this pass finds intent/*/spec.md regardless of the caller's cwd,
+    # instead of silently reporting clear when run from elsewhere.
+    repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    spec_glob="intent/*/spec.md"
+    if ! (cd "$repo_root" && compgen -G "$spec_glob" >/dev/null); then
+        echo "tracker_search: no $spec_glob found under $repo_root" >&2
+        exit 1
+    fi
+    decision_matches="$(cd "$repo_root" && grep -E -n -i '^\|[[:space:]]*D[0-9]+[[:space:]]*\|' $spec_glob 2>/dev/null || true)"
     for term in "${DECISIONS[@]}"; do
-        decision_matches="$(grep -E -i -- "$term" <<<"$decision_matches" || true)"
+        # R1-1: filter the row body (after the `grep -n` path:line: prefix)
+        # only, so a term that happens to appear in a spec's path (e.g.
+        # "intake" in intent/117-typed-intake/spec.md) doesn't pull in
+        # every row of that file.
+        decision_matches="$(grep -E -i -- "^[^:]*:[0-9]+:.*($term)" <<<"$decision_matches" || true)"
     done
     decision_matches="$(grep -v '^$' <<<"$decision_matches" || true)"
     if [ -n "$decision_matches" ]; then

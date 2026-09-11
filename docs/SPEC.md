@@ -166,7 +166,8 @@ Every actor is defined once, canonically and vendor-agnostically, in
 sub-agents (mechanic, coder, contract-writer, scanner, explorer).
 Athena acts as product owner holding the intake front door and the
 planning/design gates (`stage: [intake, plan, design]`, #404, D1), running
-`intake-protocol.md`, `product-coherence.md`, and `spec-adversary.md` with
+`intake-protocol.md`, `product-coherence.md`, `spec-adversary.md`,
+`trusted-posting.md`, and `resume-protocol.md` with
 authority paths `intent/**`, `README.md`, and `INTENT.md` (#404, D2, D3, D4, D5, D6).
 Sources conform to `personas/schema.json` (JSON Schema 2020-12):
 `kind` splits GitHub-identity personas from compiled sub-agents;
@@ -402,7 +403,7 @@ open blocking findings). Unmanaged labels such as `bootstrap` are strictly
 preserved during label synchronization. Triage and area labels provisioned
 by `bootstrap_tracker.sh` include `duplicate` (closed as duplicate of an
 existing thread) and five area prefixes (`area:personas`, `area:ci`,
-`area:ops`, `area:docs`, `area:harness`). All 28 labels are provisioned
+`area:ops`, `area:docs`, `area:harness`). All 29 labels are provisioned
 idempotently by `scripts/setup/bootstrap_tracker.sh` (#404, D11), whose
 `--labels-only` mode runs the label section and exits before anything
 reads or files an issue. Claim author identification in `scripts/ci/lifecycle_advance.sh:1076`
