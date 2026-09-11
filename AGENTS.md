@@ -11,7 +11,7 @@ mechanics, context ceilings, session behavior rules — lives in
 [CLAUDE.md](CLAUDE.md) (Claude Code) and [GEMINI.md](GEMINI.md)
 (Gemini/Antigravity); both defer to this file for everything below.
 Keep one source of truth: a rule that applies to all agents belongs
-here, never duplicated per harness file.
+here; a harness file must not duplicate it.
 
 Persona-specific standards (reviewer protocols, implementer rules,
 authority levels) are NOT in this file: they belong to the canonical
@@ -45,9 +45,9 @@ edit. The never-list at the end is absolute.
    issue thread bottom-up.
 3. **Produce the stage's artifact, commit by path, open a PR.** A
    bare push is not a delivery; the autonomous loop merges when consensus is reached. After a workflow-file
-   change merges, failed PR checks need a rebase onto main, never
-   `gh run rerun` (a `pull_request` run executes against the head+base
-   merge ref, so the stale ref reruns identically). When committing your
+   change merges, failed PR checks need a rebase onto main:
+   `gh run rerun` reruns against the same stale head+base merge ref and
+   fails identically. When committing your
    work as a persona, author the commit explicitly as your persona App identity
    (e.g. `git -c user.name="<identity>" -c user.email="<bot_user_id>+<identity>@users.noreply.github.com" commit ...`), deriving the ID via `gh api users/<identity> -q .id` — do not rely on push credentials.
 4. **Hand off and close out.** Done/Decided/Next/Blocked comment on the issue;
@@ -107,13 +107,12 @@ document.
    The advisor seat owns it and updates it whenever an issue in it
    merges, closes or changes gate.
 
-Reference material, read on demand rather than at session start:
-docs/BLOG.md (the playbook this system implements) and
-docs/CONTEXT.md (prior art and adopted conventions) inform design
-sessions; implementation sessions rarely need them. Never treat
-compiled targets (`.claude/agents/`, `.agents/agents/`) as sources —
-the canonical definitions live in `personas/`, and CI fails the build
-if the two drift.
+Reference material, consulted on demand: docs/BLOG.md (the playbook
+this system implements) and docs/CONTEXT.md (prior art and adopted
+conventions) inform design sessions; implementation sessions rarely
+need them at session start. Compiled targets (`.claude/agents/`,
+`.agents/agents/`) are build output — the canonical definitions live
+in `personas/`, and CI fails the build if the two drift.
 
 ## Sessions are ephemeral — state lives in the tracker
 
@@ -128,8 +127,7 @@ sessions therefore has exactly one mechanism: the GitHub issue.
   session produces traces to it.
 - **The issue thread is the session's memory.** Decisions, state, and
   pointers to artifacts land in the issue thread and the committed
-  files it references — never only in chat. Lifecycle state lives in
-  the issue's labels, never in prose.
+  files it references. Lifecycle state lives in the issue's labels.
 - **Every session ends with a handoff comment** on its issue, in this
   shape:
 
@@ -147,7 +145,7 @@ sessions therefore has exactly one mechanism: the GitHub issue.
   above): before ending, every decision discussed is an issue, a PR,
   or an explicit "deferred, no tracker" line in the handoff; every
   run artifact carries its disposition; uncommitted or unpushed work
-  is named in the handoff, not left implicit.
+  is named explicitly in the handoff.
 - **Bootstrap exception:** until the GitHub repo and its issues
   exist, INTENT.md is the tracker of record and handoffs append to
   its disposition footnote. This exception ends the day the first
@@ -189,12 +187,12 @@ resumable cold.
    defect-repair path (#32) is unchanged, because there the fix PR
    *is* the final stage.
 5. **Hand off.** End with the Done/Decided/Next/Blocked comment on
-   the issue (format above). If pausing rather than finishing, remove
+   the issue (format above). If you pause before finishing, remove
    `in-progress` so another session can claim. Tick the tracker
    issue's checklist line when an issue closes.
 6. **Gate.** The autonomous loop merges when consensus is reached. The merge *is* the state transition that
    makes the next stage claimable — state advances only through the
-   tracker and `main`, never through anyone's memory.
+   tracker and `main`.
 
 **One session, one worktree, one issue.** The claim is the mutex at
 the tracker; the filesystem must match it, or sessions that honor the
@@ -209,7 +207,7 @@ file names it.
   peer already holds the issue. If claiming by hand, run `git worktree list` (a
   locked or dirty worktree is someone's live work) and read the issue's last
   claim comment; the harness file adds its own peer check. If a peer already
-  holds the issue, stand down and report instead of duplicating.
+  holds the issue, stand down and report it.
 - **The primary checkout** (the directory the repo was cloned into,
   wherever that is on the machine) is read-only reference and stays
   on a clean `main`: never edit, stash, checkout, commit or stage
@@ -248,9 +246,9 @@ file names it.
   location is shared by every harness so one report covers them all.
 - **Work only there.** All reads for editing, all commits, and the
   push, PR and merge for the issue happen from your worktree and
-  touch only files your issue owns. Commit by path, never `git add .`
-  or `commit -a`, so a stray file can't ride along. Fetching is always
-  allowed anywhere.
+  touch only files your issue owns. Commit by path: do not use
+  `git add .` or `commit -a` — a stray file could ride along. Fetching
+  is always allowed anywhere.
 - **Finish the circle.** After the PR merges: post the handoff
   comment, `git worktree remove <path>` for your own worktree, delete
   the local branch, and confirm with `git worktree list` that it is
@@ -345,7 +343,7 @@ persona already holds the repository permission it needs
   `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@<file>`.
 - Read an issue or a pull request:
   `gh api repos/<owner>/<repo>/issues/<n>` (a pull request is an
-  issue for reads), never `gh issue view`.
+  issue for reads). Do not use `gh issue view` for this.
 - `gh pr create`, `gh issue create`, `gh issue comment`,
   `gh issue edit --add-label` are verified on these tokens and stay
   in use; personas comment through `scripts/ops/post.sh`.
@@ -392,13 +390,13 @@ handoff comment.
   `ops/charters/`, `ops/handoffs/`, `ops/waves/` (prompts, `launch.sh`,
   `watch-then-launch.sh`), `ops/worktrees/` (worktrees a seat keeps
   outside `.claude/worktrees`). One per machine, resolved like
-  `RUNS_ROOT` with `ops` in place of `runs`, never inside a worktree,
-  never flat in the home directory. Because `ops/` is ignored and
+  `RUNS_ROOT` with `ops` in place of `runs`: always the primary
+  checkout's, always a real subdirectory of it. Because `ops/` is ignored and
   inside the working tree, `git clean -xfd` at the checkout root
   deletes it, charters and handoffs included, with no copy anywhere;
   the same is true of `runs/`. Never run `git clean -x` in the
-  primary checkout. Repo documents cite it by its repo-relative path
-  (`ops/handoffs/handoff-plan-<date>.txt`), never by a `~/` path.
+  primary checkout. Repo documents cite it by its repo-relative path,
+  e.g. `ops/handoffs/handoff-plan-<date>.txt`.
   Anything that stops being dated graduates into a tracked
   location through the ladder: a charter into `personas/`, a launcher
   into `scripts/ops/`.
@@ -412,8 +410,8 @@ handoff comment.
   session unaccounted). For prose and text artifacts, append the
   disposition as a footnote at the end of the file. For
   machine-readable artifacts (JSON, CSV, JSONL — anything a parser
-  consumes), never append to the file itself: put the same line in a
-  sidecar `<name>.disposition.md` next to it. Reading an artifact (or
+  consumes), put the same line in a sidecar `<name>.disposition.md`
+  next to it; the artifact file itself stays untouched. Reading an artifact (or
   its sidecar) must answer "was this accounted for?" without
   searching. Format:
 
@@ -430,44 +428,62 @@ handoff comment.
 - Never generate derivative twins of a document (summaries, HTML
   exports, `_v2` copies) as checked-in files.
 
+## Prose style
+
+MUST NOT phrase a fact as a negated-contrast pair for rhetorical
+effect — `X, never Y`, `X, not Y`, `rather than X`, `instead of X`
+stapled onto a claim purely for parallelism or emphasis. State the
+fact once, as a plain positive sentence.
+
+- Before delivering any doc, PR body, commit message, or issue text,
+  grep it for `, never |, not |rather than|instead of` and rewrite
+  every hit into a direct positive statement.
+- A real boundary or exclusion still gets said, as its own sentence
+  earning its place among the facts it states.
+- This binds every persona and every harness. The construction
+  accumulated across README.md, AGENTS.md, INTENT.md, docs/SPEC.md and
+  more because the earlier ban lived only in one operator's private
+  notes, which no writer here reads before producing prose. It lives
+  in this file now so every writer reads it.
+
 ## The living spec (docs/SPEC.md)
 
-[docs/SPEC.md](docs/SPEC.md) specifies what the system does. It is
-maintained by the PRs that change behavior — never regenerated
-wholesale — and this discipline binds every implementer that opens a
-PR here (agent or human), regardless of harness:
+[docs/SPEC.md](docs/SPEC.md) specifies what the system does. The PRs
+that change behavior maintain it incrementally, and this discipline
+binds every implementer that opens a PR here, agent or human, on any
+harness:
 
 - **Any PR that changes system behavior updates docs/SPEC.md in the
   same PR**: add entries for new behavior, reword superseded entries
   in place, move an *Agreed, not yet built* entry into the spec body
   when its implementing PR opens, and delete entries a revert
-  removes. Upsert, never append duplicates; git history is the
-  archive.
+  removes. Upsert entries in place; git history is the archive of
+  prior versions.
 - Entries are keyed by stable dotted capability IDs
   (`component.capability`). An ID survives rewording and changes
   only when the capability itself is replaced. An entry added or
   changed after the spec's initial version cites its PR inline:
   `(PR #123)`.
 - Statements are present tense and describe merged code only. Where
-  behavior is shipped-but-broken, disabled, or prompt-only rather
-  than code-enforced, the entry or the Deployment status section
-  says so plainly. Planned work goes only to *Agreed, not yet
-  built*, and only when an explicit material decision is on the
-  record (issue or thread reference required) — never filler.
+  behavior is shipped-but-broken, disabled, or prompt-only instead of
+  code-enforced, the entry or the Deployment status section says so
+  plainly. Planned work goes only to *Agreed, not yet built*, and
+  only when an explicit material decision is on the record (issue or
+  thread reference required).
 - A PR that touches behavior-bearing paths without changing behavior
   (refactor, comments, test-only) declares that in the PR body with
   the machine marker line `Spec-impact: none — <reason>`. This is a
-  literal, grep-matched prefix (`scripts/ci/spec_check.sh`), not a
-  sentence to paraphrase: "no spec impact", "documentation-only" or
-  any other wording that merely states the same thing in prose fails
-  the check. Write the line exactly as shown, verbatim, including the
+  literal, grep-matched prefix (`scripts/ci/spec_check.sh`). A
+  paraphrase — "no spec impact", "documentation-only", or any other
+  wording that merely states the same thing in prose — fails the
+  check. Write the line exactly as shown, verbatim, including the
   em dash before the reason.
 - CI enforces this: `scripts/ci/spec_check.sh`, run by the
   `spec-check` job in `.github/workflows/ci-gates.yml`, fails a PR
   that touches behavior-bearing paths unless the diff touches
   docs/SPEC.md or the body carries the marker. Run it before you push
-  — `bash scripts/ci/spec_check.sh <base-ref>` — rather than
-  discovering it as a red X. The check verifies that the choice was
+  — `bash scripts/ci/spec_check.sh <base-ref>` — to catch it before it
+  shows up as a red X. The check verifies that the choice was
   made; whether the entry or the reason is *good* stays with the
   reviewers.
 - Spec entries are claims and are reviewed like claims: reviewers
@@ -511,8 +527,8 @@ and why, complementing the capability-keyed living spec
   `changelog-check` job in `.github/workflows/ci-gates.yml`, fails a PR
   that touches behavior-bearing paths unless the diff touches
   CHANGELOG.md or the body carries a valid marker. Run it before you
-  push — `bash scripts/ci/changelog_check.sh <base-ref>` — rather than
-  discovering it as a red X.
+  push — `bash scripts/ci/changelog_check.sh <base-ref>` — to catch it
+  before it shows up as a red X.
 - Changelog entries are claims and are reviewed like claims: reviewers
   verify each entry against the diff, verify bypass reasons on marker
   lines, and flag inaccurate, low-quality, or frivolous entries as
@@ -530,10 +546,10 @@ conversation lean.
   of the main context; only its summary returns. The main loop is for
   decisions, design discussion, and review of results — not for
   running 100+ shell/edit calls directly.
-- Never pull large tool output into the main conversation. Pipe
-  through `head`/`grep`/`jq`, read file excerpts rather than whole
-  files, or delegate the reading to a search subagent. A large dump
-  is re-read (and re-billed) on every later call in the session.
+- Keep large tool output out of the main conversation. Pipe through
+  `head`/`grep`/`jq`, read file excerpts, or delegate the reading to a
+  search subagent. A large dump is re-read (and re-billed) on every
+  later call in the session.
 - **200K is the working ceiling for any single context** — main
   session or subagent, on every harness. Crossing it either re-prices
   the whole request at a long-context premium (both vendors) or
@@ -548,14 +564,14 @@ conversation lean.
 - One session per phase. When work shifts phase (design →
   implementation, implementation → review) or scope changes
   materially, say so and recommend ending the session and starting
-  fresh from the spec or issue instead of carrying the transcript
-  forward.
+  fresh from the spec or issue, with a short handoff carrying forward
+  what the transcript would have.
 - **Warn before it gets expensive.** When the conversation has grown
   very large (deep into a long multi-hour session), the agent
   proactively flags that the context is expensive — stating the
   approximate accumulated context size — and suggests compacting or a
   fresh session with a short handoff. Silence while the meter runs is
-  a protocol violation, not politeness.
+  a protocol violation.
 - Route mechanical, fully specified subagent work (batch edits from a
   spec, greps/searches, running tests, formatting sweeps) to a cheaper
   model tier than the main conversation, where the harness supports
@@ -572,8 +588,8 @@ Search the tracker first, every time, before creating a new issue:
 2. Search open issues and PRs by the feature's key terms in title and
    body (e.g. `gh search issues --repo <owner>/<repo> --state open
    "<term>"` and the same query via `gh search prs`).
-3. If the issue concerns specific file(s) — nearly always true for a
-   defect you just diagnosed rather than a feature you're proposing —
+3. If the issue concerns specific file(s) — this is nearly always true
+   when diagnosing a defect, less often when proposing a feature —
    also run a **file-scoped** check, identity-agnostic since every
    session's writes land under the same handful of shared bot
    identities: `scripts/ops/tracker_search.sh --files <path>...
@@ -583,16 +599,15 @@ Search the tracker first, every time, before creating a new issue:
    read its output before filing anything. A keyword search alone
    misses a PR whose title and body don't happen to use your words;
    the file-scoped pass catches it regardless of phrasing. Run it
-   again immediately before `gh pr create`, not only when you filed
-   the issue — minutes are enough for a peer's fix to land
+   again immediately before `gh pr create`, in addition to when you
+   filed the issue — minutes are enough for a peer's fix to land
    (agentic-sdlc #130/PR #132 duplicated #126/PR #127 this way on
    2026-09-04: same defect, independently diagnosed, 19 minutes apart,
    because the search ran once at issue-filing time and was never
    repeated at PR time — and #141 duplicated #129/PR #138 the same
    way in the same session, even with this rule already written down,
-   because writing the rule down did not make the check run. If the
-   tool reports a match, that is the point of the check working, not
-   an obstacle to route around).
+   because writing the rule down did not make the check run. A match
+   from the tool is the check doing its job).
 4. Read the matches — including their comment threads. Agreed findings
    in an existing thread are settled design; do not re-propose what a
    thread has already killed.
@@ -612,8 +627,8 @@ A new issue that ignores an existing thread duplicates tracking,
 splits the discussion, and burns reviewer rounds re-litigating
 settled findings. This applies even to a defect you found incidentally
 while working something else, under direct pressure to "just fix it
-now": the defect-repair path (#32) skips the claim ceremony, not this
-search.
+now": the defect-repair path (#32) skips the claim ceremony; this
+search still applies.
 
 ## Subagent model tiers
 
@@ -636,15 +651,15 @@ trusted with:
 - `FRONTIER_TIER` — design, architecture, adversarial spec grilling,
   tricky debugging.
 
-Which model serves each tier is a harness fact, not a shared
-standard: [CLAUDE.md](CLAUDE.md) binds the tiers for interactive
+Which model serves each tier is a per-harness fact:
+[CLAUDE.md](CLAUDE.md) binds the tiers for interactive
 Claude Code sessions, [GEMINI.md](GEMINI.md) for Gemini/Antigravity
 sessions. Never hardcode vendor model IDs in persona instructions or
 shared specs — personas name a semantic tier; the tier→model mapping
 lives in one central config per harness (`config/model_tiers.yaml`
 once the compiler exists). Adjacent tiers may share one model on a
 given harness; the ladder still holds, because the tier names the
-task contract (what the agent may decide), not just the price.
+task contract (what the agent may decide) as well as the price.
 Workflow-driven agents without a subagent tool are exempt: they run
 single-loop on the model their workflow pins.
 
@@ -676,10 +691,9 @@ numbers cited were measured in the predecessor repo
   file once and it is re-sent on every remaining turn. A high cache
   hit rate does not fix this — one session ran at 95% and still cost
   $2,576, because it averaged 441K tokens per message.
-- Rank spend in dollars, never in tokens. Cache writes cost a
-  multiple of base input while reads cost a fraction, so a token
-  ranking and a dollar ranking of the same week name different
-  culprits. Measure with the harness's spend tooling (the harness
+- Rank spend in dollars. Cache writes cost a multiple of base input
+  while reads cost a fraction, so a token ranking and a dollar ranking
+  of the same week name different culprits. Measure with the harness's spend tooling (the harness
   file names it) and read two numbers: hit rate
   `read/(read+write+fresh)` for price, and tokens-per-message for
   volume. Both, always — either one alone hides the other.
