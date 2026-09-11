@@ -18,10 +18,9 @@ the existing teaching material each covers only a slice:
 - The playbook (docs/BLOG.md) defines the six-stage loop but is
   single-vendor by construction, has no multi-model review, and no
   living system spec.
-- The colleague codelab (workshop-agentic-sdlc-lab) nails adversarial
-  spec-grilling and contract traceability but is single-harness
-  (everything Antigravity-coupled), has no review step, no CI, and no
-  cost discipline.
+- The existing colleague codelabs nail adversarial spec-grilling and
+  contract traceability but are usually single-harness, with no review
+  step, no CI, and no cost discipline.
 - The predecessor repo (agentic-experiments-lab) proved dual-model
   review consensus, bot identities, and cost discipline — but its
   per-harness prompts were hand-maintained and drifted.
