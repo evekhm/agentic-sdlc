@@ -13,19 +13,98 @@ different model families judge the result, and a maintainer watches
 it run and proposes what comes next. A human sets direction and
 decides escalations.
 
-This is a **harness-agnostic SDLC**. The process comes first: the
-roles, the protocols, the gates and the artifacts are defined once,
-in vendor-free sources that carry over to any harness. Each persona
-is then assigned its own coding harness and model,
-whichever fits the team's needs and requirements: frontier reasoning
-where judgment shapes the outcome, fast capacity where the process has
-matured, or the platform a team already runs on. Currently supported
-harnesses are Antigravity and Claude Code.
-Reassigning a persona is a one-line change, and the process stays the
-same (the [placement thesis](#two-harnesses-two-model-families)). The
-system follows the
+The system follows the
 [AI-native SDLC playbook](https://claude.com/blog/the-ai-native-sdlc-playbook)
 and builds itself with its own loop.
+
+## What it solves
+
+A team that hands software work to AI agents meets three problems at
+once. Each coding harness ships its own agent format and its own
+commands, so a process written for one harness belongs to that vendor.
+Model prices span a tenfold range, so a team on one model pays
+frontier rates for mechanical work. An agent that takes an ask from
+idea to code in one pass leaves a result no person can review.
+
+This system answers all three with one process and a team you compose.
+
+**The process is a ladder.** This is a **harness-agnostic SDLC**: the
+stages, the protocols and the gates are defined once, in vendor-free
+sources, and compile to every supported harness (currently Antigravity
+and Claude Code). An ask climbs a fixed sequence of stages, one persona
+per stage. Every stage ends in one artifact that a person and the next
+agent both read: `intent.md`, `spec.md`, `plan.md` with its failing
+tests, then the code itself. Each artifact lands as a pull request, and
+a merge is its acceptance.
+
+**The team is yours to compose.** Each persona names the grade of
+judgment its work needs. You decide which harness and which model
+serve that grade: budget first, then the complexity of the system
+being built, then what the organization already runs on and how you
+like to work. A frontier model where a wrong call is expensive, a
+fast and cheap model where the stage is well specified and well gated,
+the platform the team already licenses everywhere else. The pins are
+one line per persona in
+[`config/deployments.yaml`](config/deployments.yaml), resolved against
+[`config/model_tiers.yaml`](config/model_tiers.yaml). Copy the file,
+edit the pins, and point the `DEPLOYMENTS` environment variable at
+your copy ([#433](https://github.com/evekhm/agentic-sdlc/issues/433)).
+One rule holds for every composition: the two reviewers resolve to
+different model families
+([#198](https://github.com/evekhm/agentic-sdlc/issues/198)). With the
+pins set, the team is ready to work.
+
+**What the team does on its own.** Once an issue carries `intent:new`,
+the loop owns it. The product owner sharpens the ask into a
+specification with numbered decisions, and asks you when a section is
+thin. The architect plans the work and writes the tests that fail
+until it is done. The implementer starts at a pinned commit and makes
+them pass. Two reviewers from different model families judge every
+gate, and the merge actor merges when they agree. A workflow with no
+model in it moves the issue to the next rung, and the poller
+dispatches the next persona. The maintainer watches the live system
+and files the next issue when a control band breaks. When a persona
+had to be told something it should have known, the gap becomes an
+issue and the rule moves into the repository, so each pass through the
+loop improves the system that runs it. Every session prices itself,
+and every dispatch runs under a spend ceiling.
+
+**Two ways to work with it.** Both run the same ladder through the
+same gates. They differ in where you sit.
+
+- **At the keyboard.** Open a session in the harness you prefer and
+  capture an idea with `/idea <text>`. The product owner searches the
+  tracker, files the intent and asks you what is missing. From there
+  you walk the issue rung by rung with `/work <n>`, read each pull
+  request as it opens, and answer the questions the personas raise in
+  the same sitting. You merge by hand, or the merge actor merges once
+  the reviewers agree. This is how one change is driven end to end in
+  front of an audience.
+- **Handing off the day.** Sit with the advisor, pick the issues for
+  the day and the order they run in, confirm the batch once, and step
+  away. The loop dispatches each rung, reviews it, merges on consensus
+  and moves on, and the maintainer refills the backlog from what it
+  measures. You are called on escalation only: a `hold`, a failed
+  consensus, a tripped budget, an open security finding.
+
+```text
+ at the keyboard                         handing off the day
+ -------------------------------------   -------------------------------------
+ /idea <text> ... the intent is filed    advisor ...... pick the batch, confirm
+ /work <n> ...... one rung; you read     poller ....... every rung, every issue
+                  the pull request       merge actor .. merges on consensus
+ you answer, you merge                   you .......... escalations only
+```
+
+One key, `loop.autonomous_merge` in
+[`config/execution.yaml`](config/execution.yaml), arms the second way
+("The orchestrator"). You choose it per issue
+([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
+[#147](https://github.com/evekhm/agentic-sdlc/issues/147)), a
+coordinator walks the rungs from inside one session
+([#441](https://github.com/evekhm/agentic-sdlc/issues/441)), and the
+advisor sequences the batch across the whole backlog
+([#446](https://github.com/evekhm/agentic-sdlc/issues/446)).
 
 ## What this is
 
@@ -240,8 +319,10 @@ one rung to the next.
 
 **Two modes.** One key, `loop.autonomous_merge` in
 [`config/execution.yaml`](config/execution.yaml), arms the merge and
-the next-rung dispatch. A per-issue override is tracked
-([#147](https://github.com/evekhm/agentic-sdlc/issues/147)).
+the next-rung dispatch. It is the switch between the two ways to work
+in "What it solves"; a per-issue form of the same switch is
+[#147](https://github.com/evekhm/agentic-sdlc/issues/147) and
+[#439](https://github.com/evekhm/agentic-sdlc/issues/439).
 
 - **Manual.** The owner is the gate. Every guard still runs and every
   ledger row is still written. The owner reads each pull request and

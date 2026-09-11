@@ -28,27 +28,39 @@ These `##` sections, in this order (D2; the fixed count was lifted
 2026-09-03, see D2/D4; the list was rewritten 2026-09-08 by the
 product owner, see D1, and cut the same day to eight sections that
 describe the system as designed: the actors, the flow, the
-orchestrator, the harnesses, the playbook mapping, how to run it):
+orchestrator, the harnesses, the playbook mapping, how to run it; a
+ninth section, "What it solves", was added at the front 2026-09-11 by
+the product owner to state the use case and the two ways of working
+before the actors are introduced):
 
-1. **What this is** — the two kinds of actors (persona, owner), the
+1. **What it solves** — the three problems (vendor lock-in of the
+   process, one price for every grade of work, unreviewable one-pass
+   output); the ladder as a harness-agnostic process whose every
+   stage yields an artifact both a person and the next agent read;
+   the team the owner composes and pins (`config/deployments.yaml`,
+   `DEPLOYMENTS`); what the loop does on its own; the two ways to
+   work (at the keyboard with `/idea` and `/work`, or handing off the
+   day to the advisor and the loop) and the one key that arms the
+   second.
+2. **What this is** — the two kinds of actors (persona, owner), the
    five rungs and what a merge means, the diagram, the self-building
    premise.
-2. **The cast** — one line per persona and seat, the owner, the
+3. **The cast** — one line per persona and seat, the owner, the
    sub-agents, the tiers and their model bindings.
-3. **The flow, rung by rung** — plan, design, build, implement,
+4. **The flow, rung by rung** — plan, design, build, implement,
    review, close and maintain in prose (D7), the deterministic
    transition, the halt labels and the defect path (D10).
-4. **The orchestrator** — label in, merged code out; the one door
+5. **The orchestrator** — label in, merged code out; the one door
    `/work <n>`; the stop conditions; the self-improving loop.
-5. **Two harnesses, two model families** — the concrete harnesses,
+6. **Two harnesses, two model families** — the concrete harnesses,
    pins, the reviewer family split, the cost thesis (D6).
-6. **The playbook, and what this adds** — stages and plays, the
+7. **The playbook, and what this adds** — stages and plays, the
    mapping onto the rungs, the five additions.
-7. **Running it yourself** — prerequisites (D11), who may file (D9),
+8. **Running it yourself** — prerequisites (D11), who may file (D9),
    the one command (D5), how a session ends and its successor resumes
    (the handoff; added 2026-09-10 with the handoff paragraph), what a
    merge means (D8).
-8. **Where the rules live** — the document map (D3).
+9. **Where the rules live** — the document map (D3).
 
 Every issue or pull request README cites is a link to its tracker
 page (product owner, 2026-09-08). README describes the target design
@@ -106,7 +118,9 @@ after 7 when it lands; that PR extends this list.)
   links AGENTS.md; the diagram or section 7 states that every issue
   starts `intent:new` with no `status:*` (D9; carrier widened to the
   diagram 2026-09-08 by the product owner, #263 R1-3). (Section
-  numbers in this list follow the eight-section list of 2026-09-08.)
+  numbers in this list follow the eight-section list of 2026-09-08;
+  the "What it solves" section added at the front 2026-09-11 shifts
+  each of them by one, so "section 7" here is "Running it yourself".)
 - Section 7 states all three clauses: merge is acceptance, a closed PR
   is a rejection not relitigated, and an edit at the gate is the
   decision (D8).
