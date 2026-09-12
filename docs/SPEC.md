@@ -933,27 +933,48 @@ if a valid terminal `WORK-RESULT:` line is observed; if no valid
 `WORK-RESULT:` line is present, or if status is SUCCESS with no
 `WORK-RESULT:` line, `work.sh` fails closed with exit 1. The `/work` door is a hand-authored
 `.claude/commands/work.md` whose body is exactly
-`` !`scripts/ops/digest.sh $ARGUMENTS; echo "---"; HEADLESS=1
-scripts/ops/work.sh $ARGUMENTS; echo "[work.sh exit
-$?]"` ``, in the `` !`…` `` form that runs it rather than describing
-it, with `allowed-tools` widened to match the mode-prefixed line so it
-runs without a prompt: a command body is otherwise injected as a prompt
-and whether the script runs at all is the model's discretion.
-`scripts/ops/digest.sh <issue-or-pr-number>` runs first (#407): it is
-read-only and fail-open, so it never blocks or changes the dispatch
-that follows, and on any lookup failure it degrades to an
-`(unavailable)`-style line per field rather than aborting. It prints
+`` !`scripts/ops/work_dispatch.sh $ARGUMENTS; echo
+"[work_dispatch.sh exit $?]"` ``, in the `` !`…` `` form that runs it
+rather than describing it, with `allowed-tools` restricted to that one
+script (plus `echo`) so it runs without a prompt: a command body is
+otherwise injected as a prompt and whether the script runs at all is
+the model's discretion. `<issue-or-pr-number>` is optional on this
+door (#441): `scripts/ops/work_dispatch.sh [<n>] [--as <persona>]
+[--yolo]` resolves `<n>` via `scripts/ops/resolve_work_target.sh` —
+first an explicit argument, then the current worktree's branch
+(`claim.sh` names it `<actor>/<n>-<slug>`, so the number is already
+sitting in `git branch --show-current`), then the last issue this
+session resolved (a per-session state file keyed by
+`CLAUDE_CODE_SESSION_ID` under the `harness.sidechannel` directory,
+honored only while that issue is still open), and otherwise prints a
+`NEEDS_PICK` header with the operator's open, unclaimed candidates and
+exits 3 rather than failing on a bare "no issue number" error. `work.sh`
+itself keeps its #36 D7 contract untouched (a number is the whole
+instruction); the resolver is a layer in front of it, not a change to
+it. Without `--yolo`, a successful resolution runs
+`scripts/ops/digest.sh <n>` (#407: read-only and fail-open, so it never
+blocks or changes what follows, degrading to an `(unavailable)`-style
+line per field on any lookup failure rather than aborting; it prints
 the number's title and state, its labels, any open pull request
-referencing it, and the most recent comment. The door
-names the mode because its body runs in the harness's own non-TTY bash
-before the turn, where the interactive row cannot start; the trailing
-`echo` makes the body exit 0 whatever the script returned, so a
-designed exit 2 prints its own refusal text and its code instead of
-surfacing as a failed tool call. `.claude/commands/` is outside the
-compiler's target directories, so this is not a drift-gate bypass. The
-door invokes a relative path by design, so `/work` resolves against the
-session's working directory and a session sitting in a worktree gets
-that worktree's copy; an operator who wants their terminal to *be* the
+referencing it, and the most recent comment), claims the issue via
+`scripts/ops/claim.sh <n>` if it does not already carry `in-progress`,
+and stops there: `work.sh` is never invoked in this mode, because the
+door's body runs in the harness's own non-TTY bash before the turn,
+where `work.sh`'s interactive (`HEADLESS=0`) row cannot start a
+terminal it does not have — the session itself drives the resolved
+issue's stage from the printed digest, in the foreground, one rung at
+a time, matching README's two ways of working. `--yolo` is the
+pre-#441 behavior unchanged: once `<n>` resolves, it runs `HEADLESS=1
+scripts/ops/work.sh <n> [--as <persona>]`, an unattended headless
+dispatch of the owning persona, claim included, exit codes as above.
+The trailing `echo` after either path makes the body exit 0 whatever
+the script returned, so a designed exit (2 refused, 3 needs a pick)
+prints its own text and code instead of surfacing as a failed tool
+call. `.claude/commands/` is outside the compiler's target
+directories, so this is not a drift-gate bypass. The door invokes
+relative paths by design, so `/work` resolves against the session's
+working directory and a session sitting in a worktree gets that
+worktree's copies; an operator who wants their terminal to *be* the
 session runs `scripts/ops/work.sh <n>` from a terminal, which is not a
 thing a slash command can be.
 Tests: `scripts/ops/tests/work_test.sh`,

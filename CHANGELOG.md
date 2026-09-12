@@ -2,6 +2,11 @@
 
 All notable behavioral and user-facing changes to this repository are documented in this file in reverse-chronological order. Each entry describes what capability changed, why the change was made, and the operational or user-visible impact on operators, personas, or workflows.
 
+## 2026-09-12
+
+### `/work`'s Issue Number Becomes Optional ([#441](https://github.com/evekhm/agentic-sdlc/issues/441))
+`/work` no longer requires an explicit issue number and no longer always dispatches headlessly. A bare `/work` resolves the target from the current worktree's branch, then the last issue this session touched, and otherwise asks the operator to pick from their open, unclaimed candidates — then claims the issue if nobody has and stops at its state and stage for the session itself to drive, one rung at a time, in the foreground. `--yolo` preserves the prior always-headless behavior (`HEADLESS=1 scripts/ops/work.sh`) for unattended dispatch. `scripts/ops/work.sh` itself is unchanged; the new `scripts/ops/resolve_work_target.sh` and `scripts/ops/work_dispatch.sh` are a resolution layer in front of it.
+
 ## 2026-09-11
 
 ### [PR #447](https://github.com/evekhm/agentic-sdlc/pull/447): Operator Fast-Track Door and Ladder Compression Protocol ([#444](https://github.com/evekhm/agentic-sdlc/issues/444))
