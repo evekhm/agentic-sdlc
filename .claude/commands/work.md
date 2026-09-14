@@ -1,6 +1,6 @@
 ---
 description: Work a tracker issue — at the keyboard by default (resolve <n>, claim it if nobody has, and stop at its state and stage for this session to drive), or handed off with --yolo (headless dispatch of the owning persona, the pre-#441 behavior). Relative by design, so it runs the copy of the scripts in this session's working directory, not another checkout's (#43 D16, #441)
-argument-hint: [<issue-number>] [--as <persona>] [--yolo]
+argument-hint: '[<issue-number>] [--as <persona>] [--yolo]'
 allowed-tools: Bash(scripts/ops/work_dispatch.sh:*), Bash(echo:*)
 ---
 
