@@ -124,13 +124,17 @@ Without `--yolo`, `/work <n>` runs and blocks on one stage
 advisor's scheduling of a batch across the whole backlog is
 [#446](https://github.com/evekhm/agentic-sdlc/issues/446).
 
-**The doors.** Five commands, typed inside a harness session, are the
+**The doors.** Seven commands, typed inside a harness session, are the
 whole typed input to the loop:
 
 - `/idea <text>` and `/bug <text>` search the tracker first, then
   extend a matching thread or file a new issue that names the
   relationship, so duplicates stay visible
   ([#407](https://github.com/evekhm/agentic-sdlc/issues/407)).
+- `/claim <n>` verifies the issue, posts the claim, and moves the
+  session into the worktree it creates; `/release <n>` drops the
+  claim and moves the session back
+  ([#87](https://github.com/evekhm/agentic-sdlc/issues/87)).
 - `/work <n>` resolves the rung and the owning persona, prints a
   digest, and dispatches that persona under its own identity;
   `--yolo` and `--auto-close` set the issue's autonomy as it goes.
