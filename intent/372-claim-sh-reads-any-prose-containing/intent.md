@@ -1,6 +1,6 @@
 # Intent: claim.sh reads any prose containing "depends on" as a dependency line and refuses the claim
 
-**Issue:** #372 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #372 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
