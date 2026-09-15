@@ -127,11 +127,11 @@ git checkout -q -b main
 echo base > base.txt
 printf '.claude/\n' > .gitignore   # as in the real repo: worktrees are not tracked
 
-# lifecycle.json is read straight off $ROOT's working tree (not through
-# git), so it only needs to exist on disk here — a trimmed copy of the
-# real stage/label table is enough to exercise the stage-label write (#459).
-# Tracked and committed, like the real one, so the "clean primary" tests
-# below see no untracked file.
+# lifecycle.json is read straight off $ROOT's working tree, so it only
+# needs to exist on disk here — a trimmed copy of the real stage/label
+# table is enough to exercise the stage-label write (#459). Tracked and
+# committed, like the real one, so the "clean primary" tests below see
+# no untracked file.
 mkdir -p "$PRIMARY/personas"
 cat > "$PRIMARY/personas/lifecycle.json" <<'JSON'
 {"stages":[
@@ -272,7 +272,12 @@ has "left untouched" "dirty primary: the warning says it was left alone"
 rm -f "$PRIMARY/peer.txt"
 
 # ---------------------------------------------------------------------------
-banner "the claimed stage's status:* label is written when it does not match (#459)"
+# STAGE defaults to "implement" unset — no documented caller sets
+# CLAIM_STAGE — so these scenarios `unset` the file-wide export to
+# exercise that real default, not the export itself.
+
+banner "no status:* label at all: the default stage's label fills the gap (#459)"
+unset CLAIM_STAGE
 issue 116 open "bug,intent:new" "Stage label gap"
 : > "$WRITES"
 DRY=0 run 0 "stage-label write exits 0" -- 116
@@ -280,8 +285,9 @@ grep -qF 'api --method DELETE repos/test/repo/issues/116/labels/intent:new' "$WR
   && pass "stage label: intent:new removed" || { cat "$WRITES" >&2; fail "stage label: intent:new not removed"; }
 grep -qF 'api --method POST repos/test/repo/issues/116/labels -f labels[]=status:implementing' "$WRITES" \
   && pass "stage label: status:implementing added" || { cat "$WRITES" >&2; fail "stage label: status:implementing not added"; }
+export CLAIM_STAGE=implement
 
-banner "the stage label is a no-op when it already matches the claimed stage"
+banner "the stage label is a no-op when it already matches"
 issue 117 open "status:implementing" "Already at stage"
 : > "$WRITES"
 DRY=0 run 0 "matching stage label is a no-op" -- 117
@@ -291,14 +297,25 @@ DRY=0 run 0 "matching stage label is a no-op" -- 117
 grep -qF 'labels[]=in-progress' "$WRITES" \
   && pass "stage label: the mutex label still wrote" || { cat "$WRITES" >&2; fail "stage label: mutex label missing"; }
 
-banner "CLAIM_STAGE maps through lifecycle.json, not a hardcoded status: prefix"
-issue 118 open "status:spec" "Mid-ladder issue"
+banner "an EXISTING status:* label is never overwritten, even at the default stage (#459 regression)"
+unset CLAIM_STAGE
+issue 120 open "status:planning" "Earlier-rung issue claimed the ordinary way"
+: > "$WRITES"
+DRY=0 run 0 "claiming an earlier-rung issue exits 0" -- 120
+! grep -qF 'labels/status:planning' "$WRITES" \
+  && pass "regression: status:planning was not deleted" \
+  || { cat "$WRITES" >&2; fail "regression: status:planning was deleted"; }
+! grep -qF '/labels -f labels[]=status:' "$WRITES" \
+  && pass "regression: no status:implementing was force-written over status:planning" \
+  || { cat "$WRITES" >&2; fail "regression: the default stage overwrote an existing, different status label"; }
+export CLAIM_STAGE=implement
+
+banner "CLAIM_STAGE maps through lifecycle.json when the issue has no status:* label yet"
+issue 118 open "intent:new" "Mid-ladder issue, unlabeled"
 : > "$WRITES"
 export CLAIM_STAGE=build
 DRY=0 run 0 "build stage exits 0" -- 118
 export CLAIM_STAGE=implement
-grep -qF 'api --method DELETE repos/test/repo/issues/118/labels/status:spec' "$WRITES" \
-  && pass "stage label: status:spec removed for a build-stage claim" || { cat "$WRITES" >&2; fail "status:spec not removed"; }
 grep -qF 'api --method POST repos/test/repo/issues/118/labels -f labels[]=status:build' "$WRITES" \
   && pass "stage label: status:build added for a build-stage claim" || { cat "$WRITES" >&2; fail "status:build not added"; }
 
@@ -311,6 +328,26 @@ DRY=0 run 0 "missing lifecycle.json still claims" -- 119
   && pass "stage label: no stage label written with no lifecycle.json" \
   || { cat "$WRITES" >&2; fail "stage label: wrote a stage label with no lifecycle.json"; }
 mv "$WORK/lifecycle.json.bak" "$PRIMARY/personas/lifecycle.json"
+
+banner "blocked is re-checked immediately before the stage-label write, even though it isn't an earlier refusal"
+unset CLAIM_STAGE
+issue 121 open "blocked,intent:new" "Blocked but not on hold"
+: > "$WRITES"
+run 2 "blocked refuses the stage-label write" -- 121
+has "carries blocked" "blocked: the stage-label write refuses"
+no_writes "blocked: nothing was written, including the mutex"
+export CLAIM_STAGE=implement
+
+banner "DRY_RUN previews the stage-label write on an unlabeled issue"
+unset CLAIM_STAGE
+issue 122 open "intent:new" "Unlabeled, previewed"
+run 0 "DRY_RUN stage-label preview exits 0" -- 122
+has "would: gh api --method DELETE repos/test/repo/issues/122/labels/intent:new" \
+    "DRY_RUN: the intent:new removal is previewed"
+has "would: gh api --method POST repos/test/repo/issues/122/labels -f labels[]=status:implementing" \
+    "DRY_RUN: the status:implementing add is previewed"
+no_writes "DRY_RUN: the stage-label preview wrote nothing"
+export CLAIM_STAGE=implement
 
 # ---------------------------------------------------------------------------
 banner "--release drops the label and posts nothing"

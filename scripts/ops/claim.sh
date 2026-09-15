@@ -233,6 +233,38 @@ if [ "$p_branch" != "main" ] || [ "$p_dirty" != 0 ]; then
     echo "warning: primary checkout $ROOT is on '${p_branch:-(detached)}' with $p_dirty uncommitted/untracked file(s) — left untouched (it is a peer's)" >&2
 fi
 
+# --- Stage label: fill in status:* when the issue carries none at all (#459) ----
+# STAGE is CLAIM_STAGE if the caller set it, else the literal default
+# "implement" — no documented caller sets CLAIM_STAGE today, so in
+# practice STAGE is almost always "implement" regardless of the issue's
+# actual rung. That means this must never overwrite an EXISTING status:*
+# label: an issue already at status:planning or status:in-review, claimed
+# the ordinary documented way, would otherwise be forced back to
+# status:implementing and lose real lifecycle state. The gap this closes
+# is narrower — an issue with NO status:* label at all (fresh past
+# intent:new, or one a per-stage script never labeled) leaves
+# unattended.yml's review dispatch (config/execution.yaml
+# assigned_when.status_labels) with zero subscribers — so the write fires
+# only in that no-label case, and only before the claim mutex below, so a
+# failure here can never strand it.
+if ! grep -Eq '^status:' <<<"$labels"; then
+    TARGET_LABEL="$(jq -r --arg s "$STAGE" \
+        '.stages[] | select(.stage == $s) | .label' "$ROOT/personas/lifecycle.json" 2>/dev/null || true)"
+    if [ -n "$TARGET_LABEL" ]; then
+        echo "    stage:    (no status label) -> $TARGET_LABEL"
+        fresh="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER" | jq -r '.labels[].name')" \
+            || die "failed to re-read labels on #$NUMBER immediately before the stage-label write (fail-closed)"
+        ! grep -Fxq "hold" <<<"$fresh" \
+            || refuse "#$NUMBER carries hold (re-checked immediately before the stage-label write)"
+        ! grep -Fxq "blocked" <<<"$fresh" \
+            || refuse "#$NUMBER carries blocked (re-checked immediately before the stage-label write)"
+        if grep -Fxq "intent:new" <<<"$fresh"; then
+            run gh api --method DELETE "repos/$GITHUB_REPO/issues/$NUMBER/labels/intent:new"
+        fi
+        run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$TARGET_LABEL"
+    fi
+fi
+
 # --- Claim, then enter -----------------------------------------------------------
 COMMENT="Claim: $ACTOR ($SESSION), stage: $STAGE. Worktree: $WT_REL"
 
@@ -261,38 +293,6 @@ else
             die "the comment on #$NUMBER was posted by '$actual', but CLAIM_ACTOR says '$ACTOR', whose personas/$ACTOR.yaml names '$expected'; GH_TOKEN does not belong to that persona. Delete $url and remove the $LABEL label, then re-run with the right credential"
         fi
     fi
-fi
-
-# --- Stage label: keep status:* in sync with the claimed stage (#459) -----------
-# STAGE above was only ever read, for the courtesy line in the claim
-# comment. An issue claimed straight into a stage past intent:new — any
-# interactive claim, not only fast.sh's owner-authorized compression path
-# — kept whatever status:* label it walked in with, so unattended.yml's
-# review dispatch (config/execution.yaml assigned_when.status_labels)
-# silently found zero subscribers. Same remove-old/add-new pattern as
-# fast.sh's HAS_IMPLEMENTING block, re-reading hold immediately before the
-# write (fail-closed); a no-op when the label already matches, whether set
-# by a normal per-stage script, by fast.sh, or by an earlier claim.sh run.
-verify_not_held() {
-    local fresh
-    fresh="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER" | jq -r '.labels[].name')" \
-        || die "failed to re-read labels on #$NUMBER immediately before the stage-label write (fail-closed)"
-    ! grep -Fxq "hold" <<<"$fresh" \
-        || refuse "#$NUMBER carries hold (re-checked immediately before the stage-label write)"
-}
-
-TARGET_LABEL="$(jq -r --arg s "$STAGE" \
-    '.stages[] | select(.stage == $s) | .label' "$ROOT/personas/lifecycle.json" 2>/dev/null || true)"
-if [ -n "$TARGET_LABEL" ] && ! has_label "$TARGET_LABEL"; then
-    echo "    stage:    $STAGE -> $TARGET_LABEL"
-    verify_not_held
-    while read -r old_lbl; do
-        if [ -n "$old_lbl" ] && [ "$old_lbl" != "$TARGET_LABEL" ]; then
-            run gh api --method DELETE "repos/$GITHUB_REPO/issues/$NUMBER/labels/$old_lbl" 2>/dev/null || true
-        fi
-    done < <(jq -r '.stages[].label' "$ROOT/personas/lifecycle.json" 2>/dev/null; echo "intent:new")
-    verify_not_held
-    run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$TARGET_LABEL"
 fi
 
 run git -C "$ROOT" fetch -q origin
