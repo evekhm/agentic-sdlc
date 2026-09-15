@@ -34,7 +34,12 @@
 #                  lowercased; else $USER.
 #   CLAIM_SESSION  the harness session name, so a peer can message it.
 #                  Default `unnamed`.
-#   CLAIM_STAGE    the stage being worked. Default `implement`.
+#   CLAIM_STAGE    the stage being worked. Default: derived from the
+#                  issue's status:* label through personas/lifecycle.json,
+#                  the same table scripts/ops/work.sh reads (D1/D2);
+#                  `intent:new` with no status:* label resolves to the
+#                  ladder's first stage; an issue with neither resolves
+#                  to `implement`, same as before this was derived.
 #   GITHUB_REPO    default evekhm/agentic-sdlc.
 #   DRY_RUN=1      print `would: <command>` for every mutation instead of
 #                  running it. All reads still run, so every refusal
@@ -183,7 +188,6 @@ ACTOR="${ACTOR#-}"; ACTOR="${ACTOR%-}"
 [ -n "$ACTOR" ] \
     || die "cannot derive an actor name; set CLAIM_ACTOR or git config user.name"
 SESSION="${CLAIM_SESSION:-unnamed}"
-STAGE="${CLAIM_STAGE:-implement}"
 
 # The slug is cosmetic — the issue number is the identity — so it is
 # derived, never asked for, and cut on a word boundary at 40 characters.
@@ -217,6 +221,27 @@ PRIMARY="$(git worktree list --porcelain 2>/dev/null \
     | awk '/^worktree / && !p { print $2; p = 1 }')" || true
 [ -n "$PRIMARY" ] || die "not inside a git repository"
 ROOT="$(git -C "$PRIMARY" rev-parse --show-toplevel)"
+
+# The stage named in the claim comment, derived through the same table
+# scripts/ops/work.sh dispatches from (personas/lifecycle.json), so the
+# two never disagree about what a label means. Best-effort: this is a
+# courtesy line on a comment, not a dispatch gate, so an issue with no
+# status:* label and no intent:new falls back to `implement` rather
+# than refusing the claim.
+STAGE="${CLAIM_STAGE:-}"
+if [ -z "$STAGE" ]; then
+    LIFECYCLE_JSON="$ROOT/personas/lifecycle.json"
+    status_labels="$(grep '^status:' <<<"$labels" || true)"
+    status_count=0
+    [ -z "$status_labels" ] || status_count="$(grep -c . <<<"$status_labels")"
+    if [ "$status_count" -eq 1 ] && [ -f "$LIFECYCLE_JSON" ]; then
+        STAGE="$(jq -r --arg l "$status_labels" \
+            '.stages[] | select(.label == $l) | .stage' "$LIFECYCLE_JSON" 2>/dev/null)"
+    elif [ "$status_count" -eq 0 ] && has_label "intent:new" && [ -f "$LIFECYCLE_JSON" ]; then
+        STAGE="$(jq -r '.stages[0].stage' "$LIFECYCLE_JSON" 2>/dev/null)"
+    fi
+    [ -n "$STAGE" ] || STAGE="implement"
+fi
 
 BRANCH="$ACTOR/$NUMBER-$SLUG"
 WT_REL=".claude/worktrees/$ACTOR-$NUMBER-$SLUG"

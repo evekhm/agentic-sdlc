@@ -149,6 +149,17 @@ JSON
 
 git add base.txt .gitignore personas/lifecycle.json && git commit -q -m base && git push -q -u origin main
 WT="$PRIMARY/.claude/worktrees"
+mkdir -p "$PRIMARY/personas"
+cat > "$PRIMARY/personas/lifecycle.json" <<'JSON'
+{"stages": [
+  {"stage": "plan", "label": "status:planning"},
+  {"stage": "design", "label": "status:spec"},
+  {"stage": "build", "label": "status:build"}
+]}
+JSON
+git -C "$PRIMARY" add personas/lifecycle.json
+git -C "$PRIMARY" commit -q -m "test fixture: lifecycle.json"
+git -C "$PRIMARY" push -q origin main
 
 # ---------------------------------------------------------------------------
 banner "a closed issue is not a work item"
@@ -274,6 +285,21 @@ has "warning: primary checkout" "dirty primary: the warning is printed"
 has "left untouched" "dirty primary: the warning says it was left alone"
 [ -f "$PRIMARY/peer.txt" ] && pass "dirty primary: the peer's file survived" || fail "peer file lost"
 rm -f "$PRIMARY/peer.txt"
+
+banner "the claimed stage is derived from the issue's label, not hardcoded"
+unset CLAIM_STAGE
+issue 120 open "intent:new" "A fresh idea"
+run 0 "intent:new claim previews fine" -- 120
+has "stage: plan" "intent:new with no status:* label derives the ladder's first stage"
+
+issue 121 open "status:build" "An issue mid-ladder"
+run 0 "status:build claim previews fine" -- 121
+has "stage: build" "a status:* label maps through personas/lifecycle.json"
+
+issue 122 open "" "An issue with neither label"
+run 0 "unlabeled claim previews fine" -- 122
+has "stage: implement" "no status:* label and no intent:new falls back to implement"
+export CLAIM_STAGE=implement
 
 # ---------------------------------------------------------------------------
 # The stage label is resolved the way work.sh resolves a rung (#459

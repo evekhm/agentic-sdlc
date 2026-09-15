@@ -55,5 +55,10 @@ continuing.
    `intake.sh` applies both `intent:new` and `bug` labels automatically
    for `--kind bug`; no extra labeling step is needed here.
 
-5. Print the created issue URL back to the user and stop. Do not
-   claim the issue or start working it in this command.
+5. Report the result back to the user as a chat reply in this same
+   turn: a one- or two-sentence summary of what was filed, the issue
+   number and URL, its labels (`intent:new`, `bug`), and any related
+   issues turned up by the tracker search — each named by number with
+   its current state (open/closed) and status label, or "no related
+   issues found" if step 3 found none. Do not claim the issue or start
+   working it in this command; that is `/claim <n>`.
