@@ -4,6 +4,9 @@ All notable behavioral and user-facing changes to this repository are documented
 
 ## 2026-09-15
 
+### Authority-Boundary-on-Comment-Writes Intent Closed as Designed ([#467](https://github.com/evekhm/agentic-sdlc/issues/467))
+An intent.md proposed gating `scripts/ops/post.sh` comment writes on stage ownership and claim-holder status, after Atlas commented on issue #372 while it was claimed by athena at the planning stage. The operator reviewed the proposal and ruled it is not a defect: a reviewer persona commenting on a claimed, out-of-stage issue is within the existing design, not a gap in write authority. The intent.md is withdrawn; the issue is closed as designed, not fixed.
+
 ### Open Questions Now Get Surfaced to the Operator, Not Left in Git ([#470](https://github.com/evekhm/agentic-sdlc/issues/470))
 Drafting an intent.md or spec.md with a non-empty "Open questions" section used to be the end of the turn: the file (or PR) was written and nothing looped back to the human about what was still unresolved inside it. Live on #372, athena drafted an intent.md with two open questions and neither reached the operator. `personas/skills/intake-protocol.md` gains a step: a non-empty Open questions section must be presented to the human, by name, the same turn it's drafted — before filing, before opening the PR, before anything else — and a question resolves only once the human has actually seen it and answered or explicitly deferred it, never by silent omission. `personas/athena.yaml`'s existing guard against marking a spec Approved with an open question is extended to the plan stage's intent.md the same way. `.claude/commands/work.md`'s guided-mode pause contract calls this out explicitly instead of leaving it folded into a generic "what's next" pause.
 
