@@ -109,3 +109,7 @@ the Anthropic/Vertex pricing this harness runs on:
   <transcript-dir>` and read two numbers: hit rate
   `read/(read+write+fresh)` for price, and tokens-per-message for
   volume. Both, always — either one alone hides the other.
+
+# Slash commands
+
+Claude Code slash commands in `.claude/commands/` (`/work`, `/idea`, `/bug`) are compiled targets generated from canonical sources in `commands/` via `scripts/sync_commands.py`. Do not edit `.claude/commands/` directly (except allowlisted standalone commands like `wrap.md`); modify the source in `commands/` and run `python3 scripts/sync_commands.py`.
