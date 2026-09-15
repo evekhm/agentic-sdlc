@@ -342,12 +342,12 @@ Format and Emitters:
 
 Execution Semantics and Trust Hardening:
 - Commands are classified by execution mode derived from the first non-whitespace line of the markdown body: lines starting with `!` are `kind: exec`, others are `kind: prompt`.
-- For `exec` commands (`/work`), the Antigravity emitter unwraps the shell hook and generates strict model validation instructions: (1) validate that input matches `<number> [--as <persona>]` with digits-only numbers; (2) strictly reject input containing shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`, `(`, `)`, `<`, `>`, `\n`); (3) invoke `HEADLESS=1 scripts/ops/work.sh <number> [--as <persona>]` via `run_command` and report output.
+- For `exec` commands (`/work`), the Antigravity emitter unwraps the shell hook and generates strict model validation instructions: (1) validate that input matches `<number> [--as <persona>]` (when `--yolo` is specified) or guided `[<number>]` with digits-only numbers; (2) strictly reject input containing shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`, `(`, `)`, `<`, `>`, `\n`); (3) dispatch based on mode: invoke `HEADLESS=1 scripts/ops/work.sh <number> [--as <persona>]` via `run_command` when `--yolo` is specified, or invoke `scripts/ops/work_dispatch.sh [<number>]` via `run_command` in guided mode (without shelling out to `work.sh`). Any other `exec` command is refused at compile time.
 - For `prompt` commands (`/idea`, `/bug`), canonical conversational intake instructions referencing `tracker_search.sh`, `intake.sh`, and `$ARGUMENTS` are preserved.
 
 Pruning and Allowlist:
-- The compiler prunes unmanaged targets in `.claude/commands/*.md` while respecting an allowlist (`wrap.md`, and unmigrated doors). Antigravity pruning is scoped to skills carrying the compiler's generated marker.
-- Sanitizer parity with `sync_agents.py`: refuses any source containing secrets, keys, or home paths.
+- The compiler prunes unmanaged targets in `.claude/commands/*.md` while respecting an explicit allowlist constant (`ALLOWLIST_CLAUDE_FILES` = `{"wrap.md", "claim.md", "fast.md", "release.md"}` in `scripts/sync_commands.py`) covering `wrap.md` (legacy YAML defect) and unmigrated doors. Antigravity pruning is scoped to skills carrying the compiler's generated marker.
+- Sanitizer parity with `sync_agents.py`: imports `SECRET_PATTERNS` directly from `scripts.sync_agents` to guarantee zero sanitizer drift, refusing any source containing secrets, keys, or home paths.
 
 Drift Enforcement:
 - `scripts/sync_commands.py --check` and `scripts/ci/compiler_roundtrip.sh` (Step 9) enforce zero drift in CI.

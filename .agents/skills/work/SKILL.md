@@ -5,9 +5,14 @@ description: Work a tracker issue — at the keyboard by default (resolve <n>, c
 ---
 When executing this command:
 
-1. Validate that input matches `<number> [--as <persona>]` where `<number>` contains only digits.
+1. Validate input shape:
+   - Guided mode (default): `[<number>]`
+   - Unattended mode (opt-in): `<number> [--as <persona>]` (when `--yolo` is specified)
+   Where `<number>`, if provided, contains only digits.
 2. Strictly reject any input containing shell metacharacters: `;`, `&`, `|`, `` ` ``, `$`, `(`, `)`, `<`, `>`, `\n`.
-3. Invoke `HEADLESS=1 scripts/ops/work.sh <number> [--as <persona>]` via `run_command` and report output.
+3. Dispatch based on mode:
+   - If `--yolo` is specified: Invoke `HEADLESS=1 scripts/ops/work.sh <number> [--as <persona>]` via `run_command` and report output.
+   - In guided mode (no `--yolo`): Invoke `scripts/ops/work_dispatch.sh [<number>]` via `run_command`. Do NOT shell out to `scripts/ops/work.sh` in this mode; follow the guided steps below.
 If the output above starts with `NEEDS_PICK`, ask the user which numbered
 issue to work from the list, then re-run this command with that number.
 

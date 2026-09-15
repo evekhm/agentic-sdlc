@@ -50,25 +50,18 @@ AGENTS_TARGET_DIR = ".agents/skills"
 
 ALLOWLIST_CLAUDE_FILES = {"wrap.md", "claim.md", "fast.md", "release.md"}
 
-# Every value here is a NAME or a pattern, never a credential.
-SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"/home/"), "absolute home path"),
-    (re.compile(r"/Users/"), "absolute home path"),
-    (re.compile(r"\$HOME/|~/\."), "home-relative path"),
-    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"), "GitHub token"),
-    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{16,}"), "GitHub fine-grained token"),
-    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
-    (re.compile(r"\bsk-[A-Za-z0-9]{20,}"), "API secret key"),
-    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}"), "Slack token"),
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "private key block"),
-    (
-        re.compile(
-            r"(?i)\b(password|secret|api[_-]?key|token)\s*[:=]\s*"
-            r"['\"]?(?=[A-Za-z0-9/+_.-]*[a-z0-9])[A-Za-z0-9/+_.-]{16,}"
-        ),
-        "inline credential value",
-    ),
-]
+# Import SECRET_PATTERNS directly from sync_agents (D8, R1-9) to guarantee zero sanitizer drift
+try:
+    from scripts.sync_agents import SECRET_PATTERNS as _AGENT_SECRET_PATTERNS  # type: ignore
+except ImportError:
+    try:
+        from sync_agents import SECRET_PATTERNS as _AGENT_SECRET_PATTERNS  # type: ignore
+    except ImportError:
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from scripts.sync_agents import SECRET_PATTERNS as _AGENT_SECRET_PATTERNS  # type: ignore
+
+SECRET_PATTERNS: list[tuple[re.Pattern[str], str]] = list(_AGENT_SECRET_PATTERNS)
 
 for _literal in filter(
     None,
@@ -83,6 +76,7 @@ for _literal in filter(
     SECRET_PATTERNS.append(
         (re.compile(re.escape(_literal), re.IGNORECASE), "denied local string")
     )
+
 
 
 class BuildError(Exception):
@@ -190,6 +184,19 @@ def emit_claude(cmd: CommandSource) -> str:
         lines.append(f"allowed-tools: {cmd.allowed_tools_raw}")
     lines.append("---")
     lines.append("")
+
+    # Validate that emitted frontmatter round-trips with parsed dict (R1-5)
+    emitted_fm = "\n".join(lines[1:-2])
+    try:
+        re_parsed = yaml.safe_load(emitted_fm)
+    except Exception as exc:
+        raise BuildError(f"{cmd.path}: emitted Claude frontmatter failed to parse: {exc}") from exc
+    if re_parsed != cmd.frontmatter_dict:
+        raise BuildError(
+            f"{cmd.path}: frontmatter failed roundtrip validation: {re_parsed} != {cmd.frontmatter_dict}. "
+            "The verbatim emitter could not accurately represent all frontmatter keys/values."
+        )
+
     return "\n".join(lines) + cmd.body
 
 
@@ -205,7 +212,14 @@ def emit_antigravity(cmd: CommandSource) -> str:
     ]
 
     if cmd.kind == "exec":
-        # Unpack the ! expression and emit hardened instructions (D5)
+        # Refuse exec commands whose hooks are not explicitly supported (R1-4)
+        if cmd.name != "work":
+            raise BuildError(
+                f"{cmd.path}: unsupported exec command '{cmd.name}': "
+                "compiler only supports hardened exec semantics for 'work'"
+            )
+
+        # Unpack the ! expression and emit hardened instructions (D5, R1-3)
         # Find any guidance lines after the ! expression line
         body_lines = cmd.body.splitlines(keepends=True)
         rest_lines = []
@@ -220,9 +234,14 @@ def emit_antigravity(cmd: CommandSource) -> str:
         instructions = [
             "When executing this command:",
             "",
-            "1. Validate that input matches `<number> [--as <persona>]` where `<number>` contains only digits.",
+            "1. Validate input shape:",
+            "   - Guided mode (default): `[<number>]`",
+            "   - Unattended mode (opt-in): `<number> [--as <persona>]` (when `--yolo` is specified)",
+            "   Where `<number>`, if provided, contains only digits.",
             "2. Strictly reject any input containing shell metacharacters: `;`, `&`, `|`, `` ` ``, `$`, `(`, `)`, `<`, `>`, `\\n`.",
-            "3. Invoke `HEADLESS=1 scripts/ops/work.sh <number> [--as <persona>]` via `run_command` and report output.",
+            "3. Dispatch based on mode:",
+            "   - If `--yolo` is specified: Invoke `HEADLESS=1 scripts/ops/work.sh <number> [--as <persona>]` via `run_command` and report output.",
+            "   - In guided mode (no `--yolo`): Invoke `scripts/ops/work_dispatch.sh [<number>]` via `run_command`. Do NOT shell out to `scripts/ops/work.sh` in this mode; follow the guided steps below.",
             "",
         ]
         return "\n".join(lines) + "\n".join(instructions) + "".join(rest_lines).lstrip()
@@ -230,6 +249,7 @@ def emit_antigravity(cmd: CommandSource) -> str:
         # Prompt mode retains canonical prompt instructions (D6)
         # allowed-tools is omitted from frontmatter
         return "\n".join(lines) + cmd.body
+
 
 
 def sanitize(relpath: str, content: str) -> None:
