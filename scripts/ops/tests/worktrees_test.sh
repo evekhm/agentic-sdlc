@@ -111,7 +111,7 @@ git ls-remote -q --exit-code origin refs/heads/main >/dev/null \
 # is the script's exit status — the whole report vanished on a host with 47
 # worktrees. The race cannot be provoked reliably in a fresh temp repo, so the
 # invariant is asserted on the source: whoever reads that list reads all of it.
-for s in "$SCRIPT" "$REPO/scripts/ops/claim.sh"; do
+for s in "$SCRIPT" "$REPO/scripts/ops/claim.sh" "$REPO/scripts/ops/fast.sh"; do
   grep -q "git worktree list --porcelain.*awk.*exit}" "$s" \
     && fail "$(basename "$s") exits awk early on the worktree list" \
     || pass "$(basename "$s") consumes the whole worktree list"

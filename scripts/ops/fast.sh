@@ -188,8 +188,13 @@ else
     echo "==> Issue #$ISSUE is already at status:implementing"
 fi
 
-# Locate existing worktree with strict matching (R1-7)
-WT_PATH="$(git worktree list --porcelain | awk -v issue="$ISSUE" '
+# Locate existing worktree with strict matching (R1-7).
+# Read the whole `git worktree list` output into a variable first: awk's
+# early `exit` on a live pipe from git can SIGPIPE git once the list is
+# long enough that git is still writing when awk quits (#456), and under
+# `set -euo pipefail` that surfaces as exit 141 on this assignment.
+WT_LIST="$(git worktree list --porcelain)"
+WT_PATH="$(awk -v issue="$ISSUE" '
     $1 == "worktree" {
         path = $2
         if (path ~ ("/" issue "(-[^/]+)?$") || path ~ ("/[^/]+-" issue "(-[^/]+)?$")) {
@@ -197,7 +202,7 @@ WT_PATH="$(git worktree list --porcelain | awk -v issue="$ISSUE" '
             exit
         }
     }
-')"
+' <<<"$WT_LIST")"
 
 if [ -z "$WT_PATH" ]; then
     echo "==> No active worktree found for issue #$ISSUE."

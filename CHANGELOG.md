@@ -2,6 +2,11 @@
 
 All notable behavioral and user-facing changes to this repository are documented in this file in reverse-chronological order. Each entry describes what capability changed, why the change was made, and the operational or user-visible impact on operators, personas, or workflows.
 
+## 2026-09-15
+
+### `fast.sh` No Longer SIGPIPEs on a Worktree-Heavy Checkout ([#456](https://github.com/evekhm/agentic-sdlc/issues/456))
+`scripts/ops/fast.sh` located an issue's worktree with `git worktree list --porcelain | awk '...; exit'`. On a checkout with many worktrees, awk's early exit could close the pipe before git finished writing, killing git with SIGPIPE; under `set -euo pipefail` that surfaced as exit 141 right after the stage-transition step, silently skipping worktree discovery, ahead-count, and PR creation. `fast.sh` now reads the whole `git worktree list` output into a variable before awk parses it, the same pattern already used by `scripts/ops/hooks/pre-commit` and `scripts/ops/claim.sh` for the same hazard. The source-level regression test in `scripts/ops/tests/worktrees_test.sh` (added for [#157](https://github.com/evekhm/agentic-sdlc/issues/157)) now also covers `fast.sh`.
+
 ## 2026-09-11
 
 ### [PR #447](https://github.com/evekhm/agentic-sdlc/pull/447): Operator Fast-Track Door and Ladder Compression Protocol ([#444](https://github.com/evekhm/agentic-sdlc/issues/444))
