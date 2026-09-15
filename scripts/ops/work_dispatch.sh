@@ -39,12 +39,15 @@ while [ "$#" -gt 0 ]; do
         --yolo) YOLO=1; shift ;;
         --as) [ "$#" -ge 2 ] || die "--as needs a persona name"; PASSTHROUGH+=(--as "$2"); shift 2 ;;
         --as=*) PASSTHROUGH+=("$1"); shift ;;
-        ''|*[!0-9]*)
-            die "'$1' is not an issue number, --as <persona>, or --yolo (a free-text description isn't resolved yet, #441)"
-            ;;
         *)
-            [ -z "$NUMBER" ] || die "one number per dispatch (saw '$NUMBER' and '$1')"
-            NUMBER="$1"; shift ;;
+            STRIPPED="${1#\#}"
+            case "$STRIPPED" in
+                ''|*[!0-9]*)
+                    die "'$1' is not an issue number, --as <persona>, or --yolo (a free-text description isn't resolved yet, #441)"
+                    ;;
+            esac
+            [ -z "$NUMBER" ] || die "one number per dispatch (saw '$NUMBER' and '$STRIPPED')"
+            NUMBER="$STRIPPED"; shift ;;
     esac
 done
 
@@ -63,6 +66,12 @@ fi
 [ "$STATUS" -eq 0 ] || exit "$STATUS"
 NUMBER="$RESOLVED"
 
+# --- --as is a --yolo dispatch override; guided mode has no dispatch to
+# override (#441 D3). Refused before any digest line, not just dropped.
+if [ "$YOLO" -eq 0 ] && [ "${#PASSTHROUGH[@]}" -gt 0 ]; then
+    die "--as is a --yolo dispatch override; add --yolo, or drop --as for guided mode"
+fi
+
 # --- Handing off: unchanged headless dispatch -------------------------------
 if [ "$YOLO" -eq 1 ]; then
     exec env HEADLESS=1 "$REPO_ROOT/scripts/ops/work.sh" "$NUMBER" "${PASSTHROUGH[@]}"
@@ -72,15 +81,26 @@ fi
 "$REPO_ROOT/scripts/ops/digest.sh" "$NUMBER"
 echo "---"
 
-# hold and blocked are checked here even when the issue already carries
-# in-progress: skipping straight to "leave the existing claim in place"
-# below would otherwise never invoke claim.sh, and claim.sh is the only
-# component downstream that refuses on either label. Same absolute
-# treatment work.sh already gives them under --yolo (work.sh:294-296,
-# :318) — this is the guided path getting the same circuit breaker.
-LABELS="$(gh issue view "$NUMBER" --repo "$GITHUB_REPO" --json labels -q '[.labels[].name]' 2>/dev/null || echo '[]')"
+# hold, closed, status:review-stuck and blocked are checked here even when
+# the issue already carries in-progress: skipping straight to "leave the
+# existing claim in place" below would otherwise never invoke claim.sh,
+# and claim.sh is the only component downstream that refuses on any of
+# them. Same set and order work.sh's own circuit breaker refuses at its
+# steps (a), (c) and (d) (work.sh:294-320) — this is the guided path
+# getting the same circuit breaker (#441 D4).
+ISSUE_JSON="$(gh issue view "$NUMBER" --repo "$GITHUB_REPO" --json state,labels 2>/dev/null || echo '{"state":"OPEN","labels":[]}')"
+ISSUE_STATE="$(jq -r '.state' <<<"$ISSUE_JSON")"
+LABELS="$(jq -c '[.labels[].name]' <<<"$ISSUE_JSON")"
 if jq -e 'index("hold")' <<<"$LABELS" >/dev/null 2>&1; then
     echo "work_dispatch.sh: refused: #$NUMBER carries hold" >&2
+    exit 2
+fi
+if [ "$ISSUE_STATE" != "OPEN" ]; then
+    echo "work_dispatch.sh: refused: #$NUMBER is closed" >&2
+    exit 2
+fi
+if jq -e 'index("status:review-stuck")' <<<"$LABELS" >/dev/null 2>&1; then
+    echo "work_dispatch.sh: refused: #$NUMBER carries status:review-stuck" >&2
     exit 2
 fi
 if jq -e 'index("blocked")' <<<"$LABELS" >/dev/null 2>&1; then

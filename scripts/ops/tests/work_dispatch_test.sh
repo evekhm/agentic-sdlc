@@ -63,14 +63,17 @@ chmod +x "$FIXTURE/resolve_work_target.sh" "$FIXTURE/digest.sh" "$FIXTURE/claim.
 
 export GITHUB_REPO="test/repo"
 
-# --- stub gh, for the hold/blocked/already-claimed checks in the non-yolo
-# path: LABELS is the JSON array work_dispatch.sh's `--json labels -q
-# '[.labels[].name]'` call would have produced.
+# --- stub gh, for the hold/closed/status:review-stuck/blocked/already-claimed
+# checks in the non-yolo path: STATE and LABELS (a JSON array of name
+# strings) drive the {state, labels: [{name: ...}]} object work_dispatch.sh's
+# `--json state,labels` call would have produced (GitHub's real shape: each
+# label is an object with a name field, not a bare string).
 mkdir -p "$WORK/bin"
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 if [ "$1 $2" = "issue view" ]; then
-    printf '%s' "${LABELS:-[]}"
+    LABEL_OBJS="$(jq -c '[.[] | {name: .}]' <<<"${LABELS:-[]}")"
+    printf '{"state":"%s","labels":%s}' "${STATE:-OPEN}" "$LABEL_OBJS"
     exit 0
 fi
 echo "stub gh: unexpected call: $*" >&2
@@ -121,6 +124,31 @@ rc=0; out="$(RESOLVE_OUT=7 LABELS='["hold"]' "$DISPATCH" 2>&1)" || rc=$?
 [ "$rc" -eq 2 ] || fail "hold alone: expected exit 2, got $rc -- $out"
 grep -q '^claim.sh' "$CALLS" && fail "hold alone: claim.sh must not run -- $(cat "$CALLS")"
 pass "hold on an unclaimed issue is refused before claim.sh ever runs"
+
+# --- 12. closed + in-progress -> refused, exit 2, claim.sh never runs -------
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 STATE=CLOSED LABELS='["in-progress"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] || fail "closed+in-progress: expected exit 2, got $rc -- $out"
+echo "$out" | grep -q 'refused: #7 is closed' || fail "closed+in-progress: missing refusal message -- $out"
+grep -q '^claim.sh' "$CALLS" && fail "closed+in-progress: claim.sh must not run -- $(cat "$CALLS")"
+pass "a closed issue is refused, exit 2, even though in-progress is set"
+
+# --- 13. status:review-stuck + in-progress -> refused, exit 2 --------------
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["in-progress","status:review-stuck"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] || fail "review-stuck+in-progress: expected exit 2, got $rc -- $out"
+echo "$out" | grep -q 'refused: #7 carries status:review-stuck' || fail "review-stuck+in-progress: missing refusal message -- $out"
+grep -q '^claim.sh' "$CALLS" && fail "review-stuck+in-progress: claim.sh must not run -- $(cat "$CALLS")"
+pass "status:review-stuck on an already-claimed issue is refused, exit 2, even though in-progress is set"
+
+# --- 14. --as without --yolo -> refused, exit 1, before any digest ---------
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 "$DISPATCH" 7 --as athena 2>&1)" || rc=$?
+[ "$rc" -eq 1 ] || fail "as without yolo: expected exit 1, got $rc -- $out"
+echo "$out" | grep -q -- '--as is a --yolo dispatch override' || fail "as without yolo: missing message -- $out"
+grep -q '^digest.sh' "$CALLS" && fail "as without yolo: digest.sh must not run -- $(cat "$CALLS")"
+grep -q '^claim.sh' "$CALLS" && fail "as without yolo: claim.sh must not run -- $(cat "$CALLS")"
+pass "--as without --yolo is refused before any digest line, exit 1"
 
 # --- 3. explicit argument reaches the resolver ------------------------------
 reset_calls

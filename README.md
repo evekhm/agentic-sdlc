@@ -69,15 +69,16 @@ same gates. They differ in where you sit.
   capture an idea with `/idea <text>`. The product owner searches the
   tracker, files the intent and asks you what is missing. From there
   `/work <n>` runs the next stage of that issue from inside your
-  session: it starts the owning persona on its pinned harness and
-  hands you back a short summary and the pull request. You read it,
-  answer the questions the persona raised, and merge, or the merge
-  actor merges once the reviewers agree. Then `/work <n>` again, one
-  stage at a time, until the change lands. This is how one change is
-  driven end to end in front of an audience. `<n>` is rarely typed
-  twice: inside the issue's own worktree, `/work` alone reads it from
-  the branch; from any other session it offers your open, unclaimed
-  issues to pick from.
+  session: it resolves and claims the issue if nobody has, stops at a
+  digest of its state and stage, and drives that stage with you, one
+  step at a time, in the foreground — you answer the questions,
+  produce the artifact, and open or merge the pull request yourself,
+  or the merge actor merges once the reviewers agree. Then `/work <n>`
+  again, one stage at a time, until the change lands. This is how one
+  change is driven end to end in front of an audience. `<n>` is rarely
+  typed twice: inside the issue's own worktree, `/work` alone reads it
+  from the branch; from any other session it offers your open,
+  unclaimed issues to pick from.
 - **Handing off the day.** When an issue can run without you,
   `/work <n> --yolo` picks it up and hands it to the loop: every stage
   is dispatched, reviewed and merged on consensus, and the final pull
@@ -100,8 +101,8 @@ same gates. They differ in where you sit.
  |         |                            |   |    and merged on consensus; the last   |
  |         v                            |   |    pull request waits for you          |
  | /work                                |   |                                        |
- |    one stage runs; the pull          |   | /work <n> --yolo --auto-close          |
- |    request comes back to you         |   |    the last pull request merges and    |
+ |    claims, stops at the digest,      |   | /work <n> --yolo --auto-close          |
+ |    and drives the stage with you     |   |    the last pull request merges and    |
  |         |                            |   |    the issue closes on its own         |
  |         v                            |   |                                        |
  | you answer, you merge                |   | a whole day                            |
@@ -161,13 +162,16 @@ this loop. `/claim 456` verified the issue, posted the claim, and
 moved the session into the worktree it printed:
 `.claude/worktrees/evekhm-456-fast-sh-git-worktree-list-awk-early`.
 From there, `/work` with no number resolved 456 from that worktree's
-branch and printed a digest — `#456 (issue) "fast.sh: git worktree
-list | awk early-exit triggers SIGPIPE (exit 141) with many
-worktrees" -- OPEN`, `labels: bug, in-progress, status:implementing`,
-`open PR: #458 fix(456): read the whole worktree list before awk
-exits early in fast.sh` — then stopped there for the session to drive
-the stage itself, one rung at a time, until that pull request was
-ready. `/idea <text>` and `/bug <text>` file the same way a tracker
+branch and printed a digest for issue
+[#456](https://github.com/evekhm/agentic-sdlc/issues/456) — `(issue)
+"fast.sh: git worktree list | awk early-exit triggers SIGPIPE (exit
+141) with many worktrees" -- OPEN`, `labels: bug, in-progress,
+status:implementing`, open PR
+[#458](https://github.com/evekhm/agentic-sdlc/pull/458) `fix(456):
+read the whole worktree list before awk exits early in fast.sh` —
+then stopped there for the session to drive the stage itself, one
+rung at a time, until that pull request was ready. `/idea <text>` and
+`/bug <text>` file the same way a tracker
 search turns into an issue, before `/claim` and `/work` ever run.
 
 The commands are one source compiled to each harness, the same way

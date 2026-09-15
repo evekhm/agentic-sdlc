@@ -27,8 +27,9 @@
 #
 # State file location follows the harness side-channel convention
 # (scripts/ops/harness/statusline.sh: $AGENTIC_CTX_DIR, else
-# $CLAUDE_CTX_DIR, else ~/.claude/context, else /tmp/agentic-context) but
-# is its own file, keyed by session id, so it never races that JSON.
+# $CLAUDE_CTX_DIR, else $AGY_CTX_DIR, else ~/.claude/context, else
+# /tmp/agentic-context) but is its own file, keyed by session id, so it
+# never races that JSON.
 #
 # Exit codes:
 #   0  resolved; the number is the only line on stdout
@@ -43,6 +44,7 @@ GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 die() { echo "resolve_work_target.sh: $*" >&2; exit 1; }
 
 EXPLICIT="${1:-}"
+EXPLICIT="${EXPLICIT#\#}"
 
 if [ -n "$EXPLICIT" ]; then
     case "$EXPLICIT" in
@@ -53,7 +55,7 @@ fi
 # --- Session state file location, matching the harness side-channel dir ----
 SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
 user_root=~
-CTX_DIR="${AGENTIC_CTX_DIR:-${CLAUDE_CTX_DIR:-$user_root/.claude/context}}"
+CTX_DIR="${AGENTIC_CTX_DIR:-${CLAUDE_CTX_DIR:-${AGY_CTX_DIR:-$user_root/.claude/context}}}"
 [ -d "$CTX_DIR" ] && [ -w "$CTX_DIR" ] || CTX_DIR="/tmp/agentic-context"
 STATE_FILE=""
 [ -n "$SESSION_ID" ] && STATE_FILE="$CTX_DIR/${SESSION_ID}.work-last-issue"
@@ -105,6 +107,6 @@ if NUMBER="$(resolve)"; then
 fi
 
 echo "NEEDS_PICK"
-gh issue list --repo "$GITHUB_REPO" --state open --json number,title,labels \
-    --jq '.[] | select([.labels[].name] | index("in-progress") | not) | "\(.number)\t\(.title)"'
+gh issue list --repo "$GITHUB_REPO" --state open --limit 200 --json number,title,labels \
+    --jq '.[] | select([.labels[].name] | (index("in-progress") // index("hold") // index("blocked") // index("status:review-stuck")) | not) | "\(.number)\t\(.title)"'
 exit 3
