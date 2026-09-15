@@ -73,7 +73,7 @@ cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 if [ "$1 $2" = "issue view" ]; then
     LABEL_OBJS="$(jq -c '[.[] | {name: .}]' <<<"${LABELS:-[]}")"
-    printf '{"state":"%s","labels":%s}' "${STATE:-OPEN}" "$LABEL_OBJS"
+    printf '{"state":"%s","labels":%s,"comments":%s}' "${STATE:-OPEN}" "$LABEL_OBJS" "${COMMENTS_JSON:-[]}"
     exit 0
 fi
 echo "stub gh: unexpected call: $*" >&2
@@ -193,5 +193,21 @@ pass "a free-text token is refused before the resolver runs, exit 1"
 rc=0; out="$("$DISPATCH" 7 8 2>&1)" || rc=$?
 [ "$rc" -eq 1 ] || fail "two numbers: expected exit 1, got $rc -- $out"
 pass "more than one number in a single dispatch is refused"
+
+# --- 15. already claimed: the claim comment's real author is surfaced ------
+reset_calls
+COMMENTS_JSON='[{"body":"unrelated chatter","author":{"login":"nobody"}},{"body":"Claim: eva (session-1), stage: implement. Worktree: .claude/worktrees/eva-7-x","author":{"login":"eva-bot"}}]'
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["in-progress"]' COMMENTS_JSON="$COMMENTS_JSON" "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "already claimed holder: expected exit 0, got $rc -- $out"
+echo "$out" | grep -q 'held by eva-bot' || fail "already claimed holder: missing holder login -- $out"
+pass "an already-claimed issue's message names the claim comment's actual author, not the last comment"
+
+# --- 16. already claimed, no structured claim line -> holder unresolved ----
+reset_calls
+COMMENTS_JSON='[{"body":"just a status update, not a claim","author":{"login":"someone"}}]'
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["in-progress"]' COMMENTS_JSON="$COMMENTS_JSON" "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "already claimed no-claim: expected exit 0, got $rc -- $out"
+echo "$out" | grep -q 'holder cannot be established' || fail "already claimed no-claim: missing message -- $out"
+pass "an already-claimed issue with no structured claim line says the holder cannot be established"
 
 echo "work_dispatch_test.sh: all assertions passed" >&2

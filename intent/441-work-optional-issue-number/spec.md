@@ -1,7 +1,7 @@
 # Spec: `/work` at the keyboard and handed off (#441)
 
 **Issue:** #441 · **Stage:** design · **Status:** Approved (2026-09-15) ·
-**Owner:** athena (`evekhm-athena-app[bot]`)
+**Owner:** odyssey (`evekhm-odyssey-app[bot]`)
 
 ## Why this spec exists
 
@@ -12,12 +12,12 @@ commit 3e44ed0) withdrew `/next` and folded its scope into `/work`
 without `--yolo`; PR #462 built it. Two reviewers (Argus, Atlas) found
 on PR #462 that the only authorization the code cites is a README-spec
 amendment (#35 D5), and a README decision cannot own a command's
-behaviour. This spec is the product owner's record of the decisions
-that were taken, written against PR #462's head on 2026-09-15 and
-marked Approved by the product owner; the human's merge of PR #462 is
-the acceptance. Where the shipped code and a decision below differ,
-the decision wins and the difference is a fix-round item on PR #462,
-listed under Acceptance.
+behaviour. This spec is the implementer's record of the decisions that
+were taken, under the owner-authorized fast-track (issue comment,
+2026-09-11), written against PR #462's head on 2026-09-15; the human's
+merge of PR #462 is the acceptance. Where the shipped code and a
+decision below differ, the decision wins and the difference is a
+fix-round item on PR #462, listed under Acceptance.
 
 The issue's proposed outcome items 2, 3 and 4 (harness resolution
 through the pins, dispatch to a persona, a bounded summary-and-link

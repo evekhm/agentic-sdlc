@@ -88,7 +88,7 @@ echo "---"
 # them. Same set and order work.sh's own circuit breaker refuses at its
 # steps (a), (c) and (d) (work.sh:294-320) — this is the guided path
 # getting the same circuit breaker (#441 D4).
-ISSUE_JSON="$(gh issue view "$NUMBER" --repo "$GITHUB_REPO" --json state,labels 2>/dev/null || echo '{"state":"OPEN","labels":[]}')"
+ISSUE_JSON="$(gh issue view "$NUMBER" --repo "$GITHUB_REPO" --json state,labels,comments 2>/dev/null || echo '{"state":"OPEN","labels":[],"comments":[]}')"
 ISSUE_STATE="$(jq -r '.state' <<<"$ISSUE_JSON")"
 LABELS="$(jq -c '[.labels[].name]' <<<"$ISSUE_JSON")"
 if jq -e 'index("hold")' <<<"$LABELS" >/dev/null 2>&1; then
@@ -112,5 +112,21 @@ ALREADY_CLAIMED="$(jq -r 'index("in-progress") // "null"' <<<"$LABELS")"
 if [ "$ALREADY_CLAIMED" = "null" ]; then
     "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
 else
-    echo "work_dispatch.sh: #$NUMBER already carries in-progress; leaving the existing claim in place"
+    # digest.sh's last-comment line is whatever comment is newest, which
+    # is usually a bot's review or escalation note, not the claim — so it
+    # cannot be trusted to name the holder (Argus R1-1 on PR #462). The
+    # holder is the AUTHOR of the comment that opens with a structured
+    # claim line (AGENTS.md, "Working the tracker", step 2;
+    # resume-protocol.md refusal 5), read the same way work.sh's own (g)
+    # check does — never a name out of the body, which any commenter
+    # could forge.
+    CLAIM_RE='\A[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
+    CLAIM_LOGIN="$(jq -r --arg re "$CLAIM_RE" \
+        '[.comments[] | select((.body // "") | test($re; "i"))] | last | .author.login // ""' \
+        <<<"$ISSUE_JSON" 2>/dev/null)"
+    if [ -n "$CLAIM_LOGIN" ]; then
+        echo "work_dispatch.sh: #$NUMBER already carries in-progress, held by $CLAIM_LOGIN; leaving the existing claim in place"
+    else
+        echo "work_dispatch.sh: #$NUMBER already carries in-progress, but the holder cannot be established (no comment opens with a structured claim line); leaving the existing claim in place"
+    fi
 fi
