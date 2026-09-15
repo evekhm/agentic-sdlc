@@ -970,7 +970,22 @@ lookup failure rather than aborting; it prints the number's title and
 state, its labels, any open pull request referencing it, and the most
 recent comment), claims the issue via `scripts/ops/claim.sh <n>` if it
 does not already carry `in-progress`, and stops there: `work.sh` is
-never invoked in this mode, because the door's body runs in the
+never invoked in this mode. The claim is posted as the stage's owning
+persona rather than under whatever identity happens to be ambient
+(#466): the door resolves the stage the same way `claim.sh` derives it
+for the claim comment (a single `status:*` label, else `intent:new`
+names `personas/lifecycle.json`'s first rung, else `implement`), finds
+that stage's owner the same way `work.sh`'s `owners_of()` does
+(`personas/*.yaml` entries with `kind: persona` whose `stage: [...]`
+array contains it, first in alphabetical order), mints that persona's
+GitHub App installation token via `scripts/auth/mint_app_token.py`,
+and calls `claim.sh` with `CLAIM_ACTOR=<persona> GH_TOKEN=<minted
+token>` so the claim comment's author matches the identity the digest
+already named. If no persona owns the resolved stage or no token can
+be minted, the door falls back to calling `claim.sh` with neither set
+— today's behavior, posting under `git config user.name` and whatever
+`gh` login is ambient — rather than refusing the claim outright.
+`work.sh` is never invoked in this mode, because the door's body runs in the
 harness's own non-TTY bash before the turn, where `work.sh`'s
 interactive (`HEADLESS=0`) row cannot start a terminal it does not
 have — the session itself drives the resolved issue's stage from the
