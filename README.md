@@ -135,12 +135,13 @@ whole typed input to the loop:
   session into the worktree it creates; `/release <n>` drops the
   claim and moves the session back
   ([#87](https://github.com/evekhm/agentic-sdlc/issues/87)).
-- `/work <n>` resolves the rung and the owning persona, prints a
-  digest, and dispatches that persona under its own identity;
-  `--yolo` and `--auto-close` set the issue's autonomy as it goes.
-  Without `--yolo` it runs one stage and hands back the pull request;
-  `<n>` itself is optional, read from the current worktree's branch
-  or, failing that, offered as a pick from your open issues
+- `/work <n>` resolves the rung, claims the issue if nobody has, and
+  prints a digest, then stops there for the session itself to drive
+  that stage, one rung at a time. `--yolo` hands it off instead:
+  it dispatches the owning persona under its own identity, unattended;
+  `--auto-close` sets the issue's autonomy as it goes. `<n>` itself is
+  optional, read from the current worktree's branch or, failing that,
+  offered as a pick from your open issues
   ([#439](https://github.com/evekhm/agentic-sdlc/issues/439),
   [#441](https://github.com/evekhm/agentic-sdlc/issues/441); full
   contract [`docs/SPEC.md`](docs/SPEC.md) `ops.dispatch`).
@@ -152,6 +153,22 @@ whole typed input to the loop:
   what the session learned, and writes a dated handoff so the next
   session at that seat starts warm and never re-derives a decision
   ([#85](https://github.com/evekhm/agentic-sdlc/issues/85)).
+
+**A worked example.** Issue
+[#456](https://github.com/evekhm/agentic-sdlc/issues/456) ("fast.sh:
+git worktree list | awk early-exit triggers SIGPIPE") moved through
+this loop. `/claim 456` verified the issue, posted the claim, and
+moved the session into the worktree it printed:
+`.claude/worktrees/evekhm-456-fast-sh-git-worktree-list-awk-early`.
+From there, `/work` with no number resolved 456 from that worktree's
+branch and printed a digest — `#456 (issue) "fast.sh: git worktree
+list | awk early-exit triggers SIGPIPE (exit 141) with many
+worktrees" -- OPEN`, `labels: bug, in-progress, status:implementing`,
+`open PR: #458 fix(456): read the whole worktree list before awk
+exits early in fast.sh` — then stopped there for the session to drive
+the stage itself, one rung at a time, until that pull request was
+ready. `/idea <text>` and `/bug <text>` file the same way a tracker
+search turns into an issue, before `/claim` and `/work` ever run.
 
 The commands are one source compiled to each harness, the same way
 the personas are
