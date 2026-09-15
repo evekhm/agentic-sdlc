@@ -977,14 +977,16 @@ for the claim comment (a single `status:*` label, else `intent:new`
 names `personas/lifecycle.json`'s first rung, else `implement`), finds
 that stage's owner the same way `work.sh`'s `owners_of()` does
 (`personas/*.yaml` entries with `kind: persona` whose `stage: [...]`
-array contains it, first in alphabetical order), mints that persona's
-GitHub App installation token via `scripts/auth/mint_app_token.py`,
-and calls `claim.sh` with `CLAIM_ACTOR=<persona> GH_TOKEN=<minted
-token>` so the claim comment's author matches the identity the digest
-already named. If no persona owns the resolved stage or no token can
-be minted, the door falls back to calling `claim.sh` with neither set
-— today's behavior, posting under `git config user.name` and whatever
-`gh` login is ambient — rather than refusing the claim outright.
+array contains it), mints that persona's GitHub App installation token
+via `scripts/auth/mint_app_token.py` (with `--require-repo`), and calls
+`claim.sh` with `CLAIM_ACTOR=<persona> GH_TOKEN=<minted token>`. Only
+stages with exactly one owner whose declared `github_write` authority
+is not comment-only are claimed as that persona (reviewers never claim
+an issue or write labels; Argus R1-1 on PR #468). If the stage has multiple
+owners, no owner, or the owner is comment-only, or no token can be
+minted, the door falls back to calling `claim.sh` with neither set —
+posting under `git config user.name` and whatever `gh` login is ambient
+— rather than refusing the claim outright.
 `work.sh` is never invoked in this mode, because the door's body runs in the
 harness's own non-TTY bash before the turn, where `work.sh`'s
 interactive (`HEADLESS=0`) row cannot start a terminal it does not

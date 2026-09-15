@@ -62,6 +62,7 @@ STUB
 chmod +x "$FIXTURE/resolve_work_target.sh" "$FIXTURE/digest.sh" "$FIXTURE/claim.sh" "$FIXTURE/work.sh"
 
 export GITHUB_REPO="test/repo"
+unset GH_TOKEN GITHUB_TOKEN
 
 # --- stub gh, for the hold/closed/status:review-stuck/blocked/already-claimed
 # checks in the non-yolo path: STATE and LABELS (a JSON array of name
@@ -217,20 +218,40 @@ reset_calls
 PERSONA_DIR="$WORK/fixture/personas"
 mkdir -p "$PERSONA_DIR" "$WORK/fixture/scripts/auth"
 cat > "$PERSONA_DIR/lifecycle.json" <<'JSON'
-{"stages":[{"stage":"plan","label":"status:planning"},{"stage":"implement","label":"status:implementing"}]}
+{"stages":[{"stage":"plan","label":"status:planning"},{"stage":"implement","label":"status:implementing"},{"stage":"review","label":"status:in-review"}]}
 JSON
 cat > "$PERSONA_DIR/athena.yaml" <<'YAML'
 kind: persona
 stage: [intake, plan, design]
+authority:
+  github_write: "branch:athena/*"
 YAML
 cat > "$PERSONA_DIR/odyssey.yaml" <<'YAML'
 kind: persona
 stage: [implement]
+authority:
+  github_write: "branch:odyssey/*"
+YAML
+cat > "$PERSONA_DIR/argus.yaml" <<'YAML'
+kind: persona
+stage: [review]
+authority:
+  github_write: "comments"
+YAML
+cat > "$PERSONA_DIR/atlas.yaml" <<'YAML'
+kind: persona
+stage: [review]
+authority:
+  github_write: "comments"
 YAML
 cat > "$WORK/fixture/scripts/auth/mint_app_token.py" <<'STUB'
 #!/usr/bin/env python3
 import sys
-print("minted-token-for-" + sys.argv[1])
+persona = sys.argv[-1]
+if persona == "fail-mint":
+    sys.stderr.write("rejected: private key not found\n")
+    sys.exit(1)
+print("minted-token-for-" + persona)
 STUB
 chmod +x "$WORK/fixture/scripts/auth/mint_app_token.py"
 cat > "$FIXTURE/claim.sh" <<'STUB'
@@ -239,10 +260,59 @@ echo "claim.sh CLAIM_ACTOR=${CLAIM_ACTOR:-} GH_TOKEN=${GH_TOKEN:-} $*" >> "$CALL
 echo "claimed #$1"
 STUB
 chmod +x "$FIXTURE/claim.sh"
+
+# 17a. intent:new resolves to athena
+reset_calls
 rc=0; out="$(RESOLVE_OUT=7 LABELS='["intent:new"]' "$DISPATCH" 2>&1)" || rc=$?
-[ "$rc" -eq 0 ] || fail "stage-owner claim: expected exit 0, got $rc -- $out"
+[ "$rc" -eq 0 ] || fail "stage-owner claim (intent:new): expected exit 0, got $rc -- $out"
 grep -q '^claim.sh CLAIM_ACTOR=athena GH_TOKEN=minted-token-for-athena 7$' "$CALLS" \
-    || fail "stage-owner claim: claim.sh did not receive the resolved persona's CLAIM_ACTOR/GH_TOKEN -- $(cat "$CALLS")"
-pass "an unclaimed issue claims and posts as the stage-owning persona, not git config user.name or an ambient gh login"
+    || fail "stage-owner claim: claim.sh did not receive athena CLAIM_ACTOR/GH_TOKEN -- $(cat "$CALLS")"
+pass "an unclaimed issue with intent:new claims as athena"
+
+# 17b. status:implementing resolves to odyssey
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["status:implementing"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "stage-owner claim (status:implementing): expected exit 0, got $rc -- $out"
+grep -q '^claim.sh CLAIM_ACTOR=odyssey GH_TOKEN=minted-token-for-odyssey 7$' "$CALLS" \
+    || fail "stage-owner claim: claim.sh did not receive odyssey CLAIM_ACTOR/GH_TOKEN -- $(cat "$CALLS")"
+pass "an unclaimed issue with status:implementing claims as odyssey"
+
+# 17c. stage with multiple owners or comment-only authority (review -> argus, atlas) falls back to unqualified claim
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["status:in-review"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "stage-owner claim (status:in-review): expected exit 0, got $rc -- $out"
+grep -q '^claim.sh CLAIM_ACTOR= GH_TOKEN= 7$' "$CALLS" \
+    || fail "stage-owner claim: review stage did not fall back to unqualified claim -- $(cat "$CALLS")"
+pass "an unclaimed issue at a stage with multiple or comment-only owners falls back to unqualified claim"
+
+# 17d. corrupted multi-status issue falls back to implement (odyssey)
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["status:planning","status:implementing"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "stage-owner claim (multi-status): expected exit 0, got $rc -- $out"
+grep -q '^claim.sh CLAIM_ACTOR=odyssey GH_TOKEN=minted-token-for-odyssey 7$' "$CALLS" \
+    || fail "stage-owner claim: multi-status did not fall back to implement (odyssey) -- $(cat "$CALLS")"
+pass "an unclaimed issue with multiple status:* labels falls back to implement"
+
+# 17e. mint failure captures stderr and falls back to unqualified claim
+cat > "$PERSONA_DIR/lifecycle.json" <<'JSON'
+{"stages":[{"stage":"fail-stage","label":"status:failing"}]}
+JSON
+cat > "$PERSONA_DIR/fail-mint.yaml" <<'YAML'
+kind: persona
+stage: [fail-stage]
+authority:
+  github_write: "branch:fail-mint/*"
+YAML
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["status:failing"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "stage-owner claim (mint failure): expected exit 0, got $rc -- $out"
+grep -q '^claim.sh CLAIM_ACTOR= GH_TOKEN= 7$' "$CALLS" \
+    || fail "stage-owner claim: mint failure did not fall back to unqualified claim -- $(cat "$CALLS")"
+grep -q 'could not mint an App token for fail-mint (rejected: private key not found)' <<<"$out" \
+    || fail "stage-owner claim: missing warning with stderr diagnostic -- $out"
+pass "mint failure reports diagnostic and falls back to unqualified claim"
+
+# Clean up fixture customizations
+rm -rf "$PERSONA_DIR" "$WORK/fixture/scripts/auth"
 
 echo "work_dispatch_test.sh: all assertions passed" >&2
