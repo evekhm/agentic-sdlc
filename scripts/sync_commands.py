@@ -212,24 +212,26 @@ def emit_antigravity(cmd: CommandSource) -> str:
     ]
 
     if cmd.kind == "exec":
-        # Refuse exec commands whose hooks are not explicitly supported (R1-4)
-        if cmd.name != "work":
-            raise BuildError(
-                f"{cmd.path}: unsupported exec command '{cmd.name}': "
-                "compiler only supports hardened exec semantics for 'work'"
-            )
-
         # Unpack the ! expression and emit hardened instructions (D5, R1-3)
         # Find any guidance lines after the ! expression line
         body_lines = cmd.body.splitlines(keepends=True)
         rest_lines = []
         found_exec_line = False
+        exec_line = ""
         for line in body_lines:
             if not found_exec_line and line.strip().startswith("!"):
                 found_exec_line = True
+                exec_line = line.strip()
                 continue
             if found_exec_line:
                 rest_lines.append(line)
+
+        # Refuse exec commands whose hooks are not explicitly supported (R1-4)
+        if cmd.name != "work" or "work_dispatch.sh" not in exec_line:
+            raise BuildError(
+                f"{cmd.path}: unsupported exec command '{cmd.name}': "
+                "compiler only supports hardened exec semantics for 'work' invoking 'work_dispatch.sh'"
+            )
 
         instructions = [
             "When executing this command:",
