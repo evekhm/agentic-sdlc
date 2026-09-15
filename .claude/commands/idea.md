@@ -49,8 +49,8 @@ a Given section does not cover.
 
 5. Report the result back to the user as a chat reply in this same
    turn: a one- or two-sentence summary of what was filed, the issue
-   number and URL, and any related issues turned up by the tracker
-   search — each named by number with its current state (open/closed)
-   and status label, or "no related issues found" if step 3 found
-   none. Do not claim the issue or start working it in this command;
-   that is `/claim <n>`.
+   number and URL, its label (`intent:new`), and any related issues
+   turned up by the tracker search — each named by number with its
+   current state (open/closed) and status label, or "no related issues
+   found" if step 3 found none. Do not claim the issue or start
+   working it in this command; that is `/claim <n>`.
