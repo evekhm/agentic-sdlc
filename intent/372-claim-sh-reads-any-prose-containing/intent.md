@@ -8,11 +8,11 @@
 whole issue body for any line matching `grep -Ei 'depends on'`
 (`claim.sh:166`), then treats every `#n` found on a matching line as a
 blocker that must be closed before the claim proceeds (`claim.sh:167-177`).
-The scan has no anchor: a sentence that merely contains the words
-"depends on" — in prose, in a citation, in a quotation of a prior
-error — is indistinguishable from an actual declaration.
+The scan has no anchor. A sentence that merely contains the words
+"depends on," in prose, in a citation, or in a quotation of a prior
+error, reads as an actual declaration.
 
-Four live instances so far:
+Three live instances so far:
 
 1. **2026-09-10, #353.** The body carried "Provenance verification
    stays in place (#318 depends on it). No closing keyword closes
@@ -27,8 +27,8 @@ Four live instances so far:
 3. **2026-09-15, #372's own body** (this issue). The evidence
    paragraph quoting the #353 sentence above itself contains "depends
    on" on the same physical line as `#245`, so claim.sh refused the
-   claim on #372 with `#372 depends on #245, which is still open` —
-   the bug report about the bug tripped the bug.
+   claim on #372 with `#372 depends on #245, which is still open`.
+   The bug report about the bug tripped the bug.
 
 Beyond blocking individual claims, `scripts/placement/vm-local/poll.sh`
 calls `claim.sh` for every dispatch row; a false match there is logged
@@ -46,7 +46,7 @@ in this repo's own filing convention:
 - `.claude/commands/idea.md:28`, `.claude/commands/bug.md:35`,
   `personas/athena.yaml:15`, and `personas/skills/intake-protocol.md:25`
   all instruct the filer to name a related issue's relationship using
-  one of four words — "absorbs, refines, depends on, supersedes" — as
+  one of four words ("absorbs, refines, depends on, supersedes") as
   descriptive prose in the Relationships section of an issue body.
 - `claim.sh`'s dependency check searches the same body for the same
   phrase to derive a hard, machine-enforced blocker.
@@ -62,73 +62,84 @@ itself.
 ## Proposed outcome
 
 The operator has directed (2026-09-15) that prose parsing of "depends
-on" be retired outright rather than hardened further, given the
-structural collision above. GitHub's native Issue Dependencies
-(`blocked_by`/`blocking`, live and queryable on this repo — verified
-via `gh api repos/evekhm/agentic-sdlc/issues/372` returning
-`issue_dependencies_summary`, and via
+on" be retired outright. Hardening the regex further was rejected
+given the structural collision above. GitHub's native Issue
+Dependencies (`blocked_by`/`blocking`, live and queryable on this
+repo, verified via `gh api repos/evekhm/agentic-sdlc/issues/372`
+returning `issue_dependencies_summary`, and via
 `repos/.../issues/372/dependencies/blocked_by`) become the sole
 mechanism for a machine-enforced dependency:
 
 1. `claim.sh`'s dependency check no longer reads the issue body at
    all. It calls `repos/$GITHUB_REPO/issues/$NUMBER/dependencies/blocked_by`
    (each returned item already carries `.state`, per GitHub's response
-   shape — no per-item follow-up fetch needed), filters to
+   shape; no per-item follow-up fetch needed), filters to
    `.state == "open"`, and refuses the claim naming each still-open
    blocker by number and title. `claim.sh` already fetches the full
    issue payload into `view` (`claim.sh:104`), which includes
    `issue_dependencies_summary`, so a `total_blocked_by == 0` check can
-   skip the extra API call entirely when there is nothing to check.
+   skip the extra API call when there is nothing to check.
 2. The word "depends on" becomes machine-inert everywhere in an issue
    body, permanently. The Relationships-section convention in
    `idea.md`/`bug.md`/`athena.yaml`/`intake-protocol.md` keeps "depends
-   on" as one of its four descriptive relationship words — that
-   convention is about naming prior art, not declaring a blocker — but
-   nothing in `claim.sh` ever reads it again.
+   on" as one of its four descriptive relationship words for naming
+   prior art. `claim.sh` never reads it again.
 3. When a filer needs a real hard dependency, they link it natively at
-   file time instead of writing a body line:
+   file time:
    `gh api --method POST repos/$GITHUB_REPO/issues/<n>/dependencies/blocked_by -F issue_id=<blocker's database id>`
    (the database id comes from `gh api repos/.../issues/<blocker> --jq .id`).
    `.claude/commands/idea.md` and `bug.md`, and AGENTS.md's "Before
-   filing an issue" step, gain this instruction in place of any mention
-   of writing a "Depends on" line as a blocking declaration.
+   filing an issue" step, gain this instruction and drop any mention of
+   writing a "Depends on" line as a blocking declaration.
 4. `AGENTS.md` ("Working the tracker", step 1: "every issue named in
    its 'Depends on' line is closed") is rewritten to describe the
-   native mechanism instead.
+   native mechanism.
 5. `scripts/ops/tests/claim_test.sh` drops every "Depends on"
    line-parsing test case (there is nothing left in `claim.sh` to
    parse) and gains cases for: a native open blocker refuses the claim
-   and names it; a native blocker whose only links are closed does not
-   refuse; a body containing "depends on" anywhere at all — prose,
-   citation, or a leading Relationships-section "Depends on #n" bullet
-   — never affects the claim regardless of what native links exist.
-
-No open issue on this repo currently carries a genuine leading
-"Depends on" declaration line (checked 2026-09-15 across all open
-issues), so this change migrates with zero backfill: nothing currently
-relies on the prose form for real enforcement.
+   and names it; a native blocker whose only links are closed leaves
+   the claim alone; a body containing "depends on" anywhere at all
+   (prose, citation, or a leading Relationships-section "Depends on
+   #n" bullet) never affects the claim, regardless of what native
+   links exist.
+6. **Migration.** Five open issues currently carry a genuine leading
+   "Depends on" line pointing to a still-open blocker, and none of
+   them hold a native link yet (checked 2026-09-15):
+   `issue_dependencies_summary.total_blocked_by == 0` on each. Cutover
+   creates the matching native link for each pair before `claim.sh`
+   stops reading body text, so no issue loses its live protection at
+   the switch:
+   - #408 → #85
+   - #31 → #11
+   - #399 → #85, #330
+   - #148 → #64, #147
+   - #147 → #44
+   The plan/spec stage re-checks this list immediately before cutover,
+   since new prose-form dependencies can appear on newly filed issues
+   between now and then.
 
 ## Affected users and systems
 
-- **`scripts/ops/claim.sh`** — the dependency check (`claim.sh:163-177`)
+- **`scripts/ops/claim.sh`**: the dependency check (`claim.sh:163-177`)
   is replaced with a native-dependency lookup; no body-text scan
   remains.
-- **`scripts/ops/tests/claim_test.sh`** — line-parsing cases removed,
+- **`scripts/ops/tests/claim_test.sh`**: line-parsing cases removed,
   native-dependency cases added.
-- **`scripts/placement/vm-local/poll.sh`** — calls `claim.sh` for
-  every dispatch row; removing the body scan removes this class of
-  false-positive stall entirely, not just the anchored subset of it.
-- **`AGENTS.md`** ("Working the tracker" step 1) and **`.claude/commands/idea.md`,
-  `bug.md`** (filing instructions) — updated to point filers at the
-  native link instead of a body line.
-- **`personas/athena.yaml`, `personas/skills/intake-protocol.md`** —
+- **`scripts/placement/vm-local/poll.sh`**: calls `claim.sh` for
+  every dispatch row; removing the body scan removes this entire class
+  of false-positive stall.
+- **`AGENTS.md`** ("Working the tracker" step 1) and
+  **`.claude/commands/idea.md`, `bug.md`** (filing instructions):
+  updated to point filers at the native link.
+- **`personas/athena.yaml`, `personas/skills/intake-protocol.md`**:
   the "absorbs, refines, depends on, supersedes" Relationships wording
   stays as descriptive prose; a note that it has no enforcement effect
-  may help future filers avoid assuming otherwise.
-- **Operators and personas filing/claiming issues** — declare a real
-  dependency once, natively, at file time; free-text mentions of
-  "depends on" anywhere in a body can never again block or fail to
-  block a claim.
+  helps future filers avoid assuming otherwise.
+- **#408, #31, #399, #148, #147**: the five open issues named in the
+  migration step above, each needing a native link created at cutover.
+- **Operators and personas filing/claiming issues**: declare a real
+  dependency once, natively, at file time. Free-text mentions of
+  "depends on" anywhere in a body have zero effect on any claim.
 
 ## Constraints
 
@@ -144,21 +155,21 @@ relies on the prose form for real enforcement.
 
 ## Relationships
 
-- **Refs #353, #363** (named in the issue body) and **#404** — all
-  three are live instances of the defect that motivated this issue,
-  cited above as evidence.
+- **Refs #353, #404** (live instances of the defect that motivated
+  this issue, cited above as evidence) and **#363** (named in the
+  issue body as related tracker plumbing; a separate poller defect,
+  not another live instance of this one).
 - **Comment from Atlas (evekhm-atlas-app)** on this issue proposed
   native Issue Dependencies as a fallback-backed alternative: check
-  `total_blocked_by > 0` first, fall back to an anchored regex
+  `total_blocked_by > 0` first, and fall back to an anchored regex
   (`^[[:space:]]*Depends on:?[[:space:]]+#[0-9]`) for issues without a
   native link. That anchored fallback is correct and would have closed
-  the four reported false positives; it was verified against the live
+  the three reported false positives; it was verified against the live
   API and against `claim.sh`'s existing `view` fetch during this
   intent's drafting. This intent goes further than Atlas's proposal
-  per the operator's direction above: it drops the regex fallback
-  entirely rather than keeping it, since a fallback still leaves the
-  Relationships-section collision open for any issue that never gets a
-  native link.
+  per the operator's direction above: it drops the regex fallback,
+  since a fallback still leaves the Relationships-section collision
+  open for any issue that never gets a native link.
 
 ## Open questions
 
@@ -170,6 +181,20 @@ Both resolved by the operator (2026-09-15):
    (open): <title>`.
 2. **Filing ergonomics for the database-id lookup.** Resolved: no new
    helper script. `idea.md`/`bug.md` document the two-command sequence
-   inline — `gh api repos/.../issues/<blocker> --jq .id`, then `gh api
+   inline: `gh api repos/.../issues/<blocker> --jq .id`, then `gh api
    --method POST repos/.../issues/<n>/dependencies/blocked_by -F
    issue_id=<id>`.
+
+## Non-goals
+
+- No new CLI helper or wrapper script for linking native dependencies.
+  The two-command `gh api` sequence above is the whole mechanism.
+- No use of GitHub's separate "sub-issues" feature. This intent covers
+  the `blocked_by`/`blocking` dependency relationship only.
+- No change to the Relationships-section filing convention itself.
+  `idea.md`, `bug.md`, `athena.yaml`, and `intake-protocol.md` keep
+  "absorbs, refines, depends on, supersedes" as descriptive prose;
+  only its machine effect on `claim.sh` is removed.
+- No `claim.sh` code change in this stage. This document is the plan
+  stage's artifact; the file-level implementation steps belong to the
+  plan.md/spec.md that follow.
