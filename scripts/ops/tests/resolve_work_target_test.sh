@@ -7,7 +7,7 @@
 # stub `gh` and `git` first on PATH answer every call from env-controlled
 # fixtures; an unrecognised call is a loud failure rather than a silent
 # one. The state-file directory is a scratch dir per scenario, never the
-# operator's real $HOME/.claude/context.
+# operator's real home directory's .claude/context.
 #
 # Exit 0 with a PASS line per assertion, non-zero on the first failure.
 

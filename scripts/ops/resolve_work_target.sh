@@ -52,7 +52,8 @@ fi
 
 # --- Session state file location, matching the harness side-channel dir ----
 SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
-CTX_DIR="${AGENTIC_CTX_DIR:-${CLAUDE_CTX_DIR:-$HOME/.claude/context}}"
+user_root=~
+CTX_DIR="${AGENTIC_CTX_DIR:-${CLAUDE_CTX_DIR:-$user_root/.claude/context}}"
 [ -d "$CTX_DIR" ] && [ -w "$CTX_DIR" ] || CTX_DIR="/tmp/agentic-context"
 STATE_FILE=""
 [ -n "$SESSION_ID" ] && STATE_FILE="$CTX_DIR/${SESSION_ID}.work-last-issue"
