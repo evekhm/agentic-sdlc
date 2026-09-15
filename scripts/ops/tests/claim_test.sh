@@ -41,12 +41,16 @@ cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 # `gh api <path>` is a read and is answered from a fixture. Anything
 # else is a write: it is logged verbatim and reported as success, so a
-# test can assert on exactly what would have reached GitHub.
+# test can assert on exactly what would have reached GitHub. A
+# fixture's ".next" sibling, if present, replaces it after being served
+# once — this simulates a label landing on the issue between two reads
+# in the same claim.sh run (R2-1).
 printf '%s\n' "$*" >> "$CALLS"
 if [ "${1:-}" = "api" ] && [ "$#" -eq 2 ]; then
   file="$FIXTURES/${2//\//_}.json"
   [ -f "$file" ] || { echo "stub gh: no fixture for $2" >&2; exit 1; }
   cat "$file"
+  if [ -f "$file.next" ]; then mv "$file.next" "$file"; fi
   exit 0
 fi
 printf '%s\n' "$*" >> "$WRITES"
@@ -272,19 +276,25 @@ has "left untouched" "dirty primary: the warning says it was left alone"
 rm -f "$PRIMARY/peer.txt"
 
 # ---------------------------------------------------------------------------
-# STAGE defaults to "implement" unset — no documented caller sets
-# CLAIM_STAGE — so these scenarios `unset` the file-wide export to
-# exercise that real default, not the export itself.
+# The stage label is resolved the way work.sh resolves a rung (#459
+# round 2, R1-1): from intent:new/status:* presence, never from
+# STAGE/CLAIM_STAGE. CLAIM_STAGE stays exported at "implement" (the
+# file-wide default) through these scenarios on purpose, to prove it is
+# inert for this decision; a couple of them additionally `unset` or
+# override it to prove the point directly.
 
-banner "no status:* label at all: the default stage's label fills the gap (#459)"
+banner "intent:new with no status:* label resolves to rung 1, never the CLAIM_STAGE default (#459 R1-1 round 2)"
 unset CLAIM_STAGE
 issue 116 open "bug,intent:new" "Stage label gap"
 : > "$WRITES"
 DRY=0 run 0 "stage-label write exits 0" -- 116
 grep -qF 'api --method DELETE repos/test/repo/issues/116/labels/intent:new' "$WRITES" \
   && pass "stage label: intent:new removed" || { cat "$WRITES" >&2; fail "stage label: intent:new not removed"; }
-grep -qF 'api --method POST repos/test/repo/issues/116/labels -f labels[]=status:implementing' "$WRITES" \
-  && pass "stage label: status:implementing added" || { cat "$WRITES" >&2; fail "stage label: status:implementing not added"; }
+grep -qF 'api --method POST repos/test/repo/issues/116/labels -f labels[]=status:planning' "$WRITES" \
+  && pass "stage label: status:planning (rung 1) added" || { cat "$WRITES" >&2; fail "status:planning not added"; }
+! grep -qF 'labels[]=status:implementing' "$WRITES" \
+  && pass "regression: the CLAIM_STAGE default (implement) did not drive the write" \
+  || { cat "$WRITES" >&2; fail "regression: status:implementing was written from the STAGE default"; }
 export CLAIM_STAGE=implement
 
 banner "the stage label is a no-op when it already matches"
@@ -297,7 +307,7 @@ DRY=0 run 0 "matching stage label is a no-op" -- 117
 grep -qF 'labels[]=in-progress' "$WRITES" \
   && pass "stage label: the mutex label still wrote" || { cat "$WRITES" >&2; fail "stage label: mutex label missing"; }
 
-banner "an EXISTING status:* label is never overwritten, even at the default stage (#459 regression)"
+banner "an EXISTING status:* label is never overwritten, even with intent:new absent (#459 regression)"
 unset CLAIM_STAGE
 issue 120 open "status:planning" "Earlier-rung issue claimed the ordinary way"
 : > "$WRITES"
@@ -310,18 +320,32 @@ DRY=0 run 0 "claiming an earlier-rung issue exits 0" -- 120
   || { cat "$WRITES" >&2; fail "regression: the default stage overwrote an existing, different status label"; }
 export CLAIM_STAGE=implement
 
-banner "CLAIM_STAGE maps through lifecycle.json when the issue has no status:* label yet"
+banner "CLAIM_STAGE is irrelevant to the stage label: intent:new still resolves to rung 1, not the caller's stage"
 issue 118 open "intent:new" "Mid-ladder issue, unlabeled"
 : > "$WRITES"
 export CLAIM_STAGE=build
-DRY=0 run 0 "build stage exits 0" -- 118
+DRY=0 run 0 "explicit CLAIM_STAGE=build exits 0" -- 118
 export CLAIM_STAGE=implement
-grep -qF 'api --method POST repos/test/repo/issues/118/labels -f labels[]=status:build' "$WRITES" \
-  && pass "stage label: status:build added for a build-stage claim" || { cat "$WRITES" >&2; fail "status:build not added"; }
+grep -qF 'api --method POST repos/test/repo/issues/118/labels -f labels[]=status:planning' "$WRITES" \
+  && pass "stage label: status:planning (rung 1) added regardless of CLAIM_STAGE" \
+  || { cat "$WRITES" >&2; fail "status:planning not added"; }
+! grep -qF 'labels[]=status:build' "$WRITES" \
+  && pass "regression: CLAIM_STAGE=build did not drive the write" \
+  || { cat "$WRITES" >&2; fail "regression: status:build was written from CLAIM_STAGE"; }
+
+banner "no status:* and no intent:new: deliberately not on the ladder, no label is written (#459 R1-1 round 2, case b)"
+issue 124 open "bug" "Defect-repair issue, never on the ladder"
+: > "$WRITES"
+DRY=0 run 0 "claiming an unranked issue still succeeds" -- 124
+! grep -qF '/labels -f labels[]=status:' "$WRITES" \
+  && pass "stage label: no status:* label written for an unranked issue" \
+  || { cat "$WRITES" >&2; fail "stage label: wrote a status:* label for a deliberately unranked issue"; }
+grep -qF 'labels[]=in-progress' "$WRITES" \
+  && pass "stage label: the claim itself still succeeds" || { cat "$WRITES" >&2; fail "mutex label missing"; }
 
 banner "a missing lifecycle.json is a best-effort no-op, never a refusal"
 mv "$PRIMARY/personas/lifecycle.json" "$WORK/lifecycle.json.bak"
-issue 119 open "" "No lifecycle file"
+issue 119 open "intent:new" "No lifecycle file"
 : > "$WRITES"
 DRY=0 run 0 "missing lifecycle.json still claims" -- 119
 ! grep -qF '/labels -f labels[]=status:' "$WRITES" \
@@ -329,25 +353,37 @@ DRY=0 run 0 "missing lifecycle.json still claims" -- 119
   || { cat "$WRITES" >&2; fail "stage label: wrote a stage label with no lifecycle.json"; }
 mv "$WORK/lifecycle.json.bak" "$PRIMARY/personas/lifecycle.json"
 
-banner "blocked is re-checked immediately before the stage-label write, even though it isn't an earlier refusal"
-unset CLAIM_STAGE
+banner "blocked refuses unconditionally, before anything about the issue's stage is examined (#459 R1-6 round 2)"
 issue 121 open "blocked,intent:new" "Blocked but not on hold"
 : > "$WRITES"
-run 2 "blocked refuses the stage-label write" -- 121
-has "carries blocked" "blocked: the stage-label write refuses"
+run 2 "blocked refuses the claim" -- 121
+has "carries blocked" "blocked: the claim refuses"
 no_writes "blocked: nothing was written, including the mutex"
-export CLAIM_STAGE=implement
+
+banner "blocked refuses even when a status:* label is already present"
+issue 123 open "blocked,status:implementing" "Blocked mid-ladder"
+: > "$WRITES"
+run 2 "blocked refuses regardless of an existing status:* label" -- 123
+has "carries blocked" "blocked: refuses with a status:* label present"
+no_writes "blocked: nothing was written"
 
 banner "DRY_RUN previews the stage-label write on an unlabeled issue"
-unset CLAIM_STAGE
 issue 122 open "intent:new" "Unlabeled, previewed"
 run 0 "DRY_RUN stage-label preview exits 0" -- 122
 has "would: gh api --method DELETE repos/test/repo/issues/122/labels/intent:new" \
     "DRY_RUN: the intent:new removal is previewed"
-has "would: gh api --method POST repos/test/repo/issues/122/labels -f labels[]=status:implementing" \
-    "DRY_RUN: the status:implementing add is previewed"
+has "would: gh api --method POST repos/test/repo/issues/122/labels -f labels[]=status:planning" \
+    "DRY_RUN: the status:planning add is previewed"
 no_writes "DRY_RUN: the stage-label preview wrote nothing"
-export CLAIM_STAGE=implement
+
+banner "a status:* label landing between the two reads refuses the write (#459 R2-1 round 2)"
+issue 125 open "intent:new" "Race: a status:* label lands mid-claim"
+jq '.labels += [{name: "status:build"}]' "$FIXTURES/repos_test_repo_issues_125.json" \
+    > "$FIXTURES/repos_test_repo_issues_125.json.next"
+: > "$WRITES"
+run 2 "the race is refused" -- 125
+has "gained a status:* label" "race: the fresh re-read catches the new status:* label"
+no_writes "race: nothing was written"
 
 # ---------------------------------------------------------------------------
 banner "--release drops the label and posts nothing"
