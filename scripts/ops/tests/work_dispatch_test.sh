@@ -63,12 +63,14 @@ chmod +x "$FIXTURE/resolve_work_target.sh" "$FIXTURE/digest.sh" "$FIXTURE/claim.
 
 export GITHUB_REPO="test/repo"
 
-# --- stub gh, for the already-claimed check in the non-yolo path -----------
+# --- stub gh, for the hold/blocked/already-claimed checks in the non-yolo
+# path: LABELS is the JSON array work_dispatch.sh's `--json labels -q
+# '[.labels[].name]'` call would have produced.
 mkdir -p "$WORK/bin"
 cat > "$WORK/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 if [ "$1 $2" = "issue view" ]; then
-    printf '%s' "${ALREADY_CLAIMED:-null}"
+    printf '%s' "${LABELS:-[]}"
     exit 0
 fi
 echo "stub gh: unexpected call: $*" >&2
@@ -81,7 +83,7 @@ reset_calls() { : > "$CALLS"; }
 
 # --- 1. bare dispatch: resolves, digests, claims (not yet claimed) ---------
 reset_calls
-rc=0; out="$(RESOLVE_OUT=7 ALREADY_CLAIMED=null "$DISPATCH" 2>&1)" || rc=$?
+rc=0; out="$(RESOLVE_OUT=7 LABELS='[]' "$DISPATCH" 2>&1)" || rc=$?
 [ "$rc" -eq 0 ] || fail "bare: expected exit 0, got $rc -- $out"
 grep -q '^resolve_work_target.sh $' "$CALLS" || fail "bare: resolver not called with no args -- $(cat "$CALLS")"
 grep -q '^digest.sh 7$' "$CALLS" || fail "bare: digest.sh not called with resolved number -- $(cat "$CALLS")"
@@ -91,11 +93,34 @@ pass "bare dispatch resolves, digests, and claims an unclaimed issue"
 
 # --- 2. bare dispatch: already claimed -> claim.sh is skipped --------------
 reset_calls
-rc=0; out="$(RESOLVE_OUT=7 ALREADY_CLAIMED=1 "$DISPATCH" 2>&1)" || rc=$?
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["in-progress"]' "$DISPATCH" 2>&1)" || rc=$?
 [ "$rc" -eq 0 ] || fail "already claimed: expected exit 0, got $rc -- $out"
 grep -q '^claim.sh' "$CALLS" && fail "already claimed: claim.sh must not run -- $(cat "$CALLS")"
 echo "$out" | grep -q 'already carries in-progress' || fail "already claimed: missing notice -- $out"
 pass "an already-claimed issue is not reclaimed"
+
+# --- 9. hold + in-progress -> refused, exit 2, claim.sh never runs ----------
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["in-progress","hold"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] || fail "hold+in-progress: expected exit 2, got $rc -- $out"
+echo "$out" | grep -q 'refused: #7 carries hold' || fail "hold+in-progress: missing refusal message -- $out"
+grep -q '^claim.sh' "$CALLS" && fail "hold+in-progress: claim.sh must not run -- $(cat "$CALLS")"
+pass "hold on an already-claimed issue is refused, exit 2, even though in-progress is set"
+
+# --- 10. blocked + in-progress -> refused, exit 2, claim.sh never runs -----
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["in-progress","blocked"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] || fail "blocked+in-progress: expected exit 2, got $rc -- $out"
+echo "$out" | grep -q 'refused: #7 carries blocked' || fail "blocked+in-progress: missing refusal message -- $out"
+grep -q '^claim.sh' "$CALLS" && fail "blocked+in-progress: claim.sh must not run -- $(cat "$CALLS")"
+pass "blocked on an already-claimed issue is refused, exit 2, even though in-progress is set"
+
+# --- 11. hold alone (not yet claimed) -> refused before claim.sh runs ------
+reset_calls
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["hold"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 2 ] || fail "hold alone: expected exit 2, got $rc -- $out"
+grep -q '^claim.sh' "$CALLS" && fail "hold alone: claim.sh must not run -- $(cat "$CALLS")"
+pass "hold on an unclaimed issue is refused before claim.sh ever runs"
 
 # --- 3. explicit argument reaches the resolver ------------------------------
 reset_calls

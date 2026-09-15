@@ -9,6 +9,12 @@ allowed-tools: Bash(scripts/ops/work_dispatch.sh:*), Bash(echo:*)
 If the output above starts with `NEEDS_PICK`, ask the user which numbered
 issue to work from the list, then re-run this command with that number.
 
+If the output above contains `refused:` (exit 2 — the issue carries
+`hold` or `blocked`), stop there: tell the user the refusal reason
+plainly and do not drive the stage. This is the circuit breaker; it
+applies even when the issue already carries `in-progress` from an
+earlier claim.
+
 Otherwise, once the digest is printed, before doing anything else tell
 the user, in one short message: the issue number and title, its
 current stage, who owns that stage, and what artifact you're about to

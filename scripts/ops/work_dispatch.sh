@@ -72,8 +72,24 @@ fi
 "$REPO_ROOT/scripts/ops/digest.sh" "$NUMBER"
 echo "---"
 
-ALREADY_CLAIMED="$(gh issue view "$NUMBER" --repo "$GITHUB_REPO" --json labels -q '[.labels[].name] | index("in-progress")' 2>/dev/null || true)"
-if [ "$ALREADY_CLAIMED" = "null" ] || [ -z "$ALREADY_CLAIMED" ]; then
+# hold and blocked are checked here even when the issue already carries
+# in-progress: skipping straight to "leave the existing claim in place"
+# below would otherwise never invoke claim.sh, and claim.sh is the only
+# component downstream that refuses on either label. Same absolute
+# treatment work.sh already gives them under --yolo (work.sh:294-296,
+# :318) — this is the guided path getting the same circuit breaker.
+LABELS="$(gh issue view "$NUMBER" --repo "$GITHUB_REPO" --json labels -q '[.labels[].name]' 2>/dev/null || echo '[]')"
+if jq -e 'index("hold")' <<<"$LABELS" >/dev/null 2>&1; then
+    echo "work_dispatch.sh: refused: #$NUMBER carries hold" >&2
+    exit 2
+fi
+if jq -e 'index("blocked")' <<<"$LABELS" >/dev/null 2>&1; then
+    echo "work_dispatch.sh: refused: #$NUMBER carries blocked" >&2
+    exit 2
+fi
+
+ALREADY_CLAIMED="$(jq -r 'index("in-progress") // "null"' <<<"$LABELS")"
+if [ "$ALREADY_CLAIMED" = "null" ]; then
     "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
 else
     echo "work_dispatch.sh: #$NUMBER already carries in-progress; leaving the existing claim in place"
