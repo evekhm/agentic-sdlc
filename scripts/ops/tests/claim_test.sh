@@ -126,7 +126,24 @@ cd "$PRIMARY"
 git checkout -q -b main
 echo base > base.txt
 printf '.claude/\n' > .gitignore   # as in the real repo: worktrees are not tracked
-git add base.txt .gitignore && git commit -q -m base && git push -q -u origin main
+
+# lifecycle.json is read straight off $ROOT's working tree (not through
+# git), so it only needs to exist on disk here — a trimmed copy of the
+# real stage/label table is enough to exercise the stage-label write (#459).
+# Tracked and committed, like the real one, so the "clean primary" tests
+# below see no untracked file.
+mkdir -p "$PRIMARY/personas"
+cat > "$PRIMARY/personas/lifecycle.json" <<'JSON'
+{"stages":[
+  {"stage":"plan","label":"status:planning"},
+  {"stage":"design","label":"status:spec"},
+  {"stage":"build","label":"status:build"},
+  {"stage":"implement","label":"status:implementing"},
+  {"stage":"review","label":"status:in-review"}
+]}
+JSON
+
+git add base.txt .gitignore personas/lifecycle.json && git commit -q -m base && git push -q -u origin main
 WT="$PRIMARY/.claude/worktrees"
 
 # ---------------------------------------------------------------------------
@@ -190,7 +207,7 @@ git branch -q -D tester/107-colliding-issue
 
 # ---------------------------------------------------------------------------
 banner "DRY_RUN=1 previews all four mutations and performs none"
-issue 108 open "" "Claim script"
+issue 108 open "status:implementing" "Claim script"
 run 0 "DRY_RUN happy path exits 0" -- 108
 has "would: gh api --method POST repos/test/repo/issues/108/labels -f labels[]=in-progress" \
     "DRY_RUN: the label add is previewed"
@@ -218,13 +235,13 @@ has "would: git -C $PRIMARY worktree add -q -b tester/108-my-slug .claude/worktr
     "explicit slug: kebab-cased and used for both branch and path"
 
 banner "a long title is cut to 40 characters on a word boundary"
-issue 112 open "" "Abcdefghij klmnopqrst uvwxyz0123 456789ab cdefgh"
+issue 112 open "status:implementing" "Abcdefghij klmnopqrst uvwxyz0123 456789ab cdefgh"
 run 0 "long title exits 0" -- 112
 has "-b tester/112-abcdefghij-klmnopqrst-uvwxyz0123 " "long title: the slug stops at the last full word under 40"
 
 # ---------------------------------------------------------------------------
 banner "a real claim writes both halves of the mutex and creates the worktree"
-issue 109 open "" "Claimable issue"
+issue 109 open "status:implementing" "Claimable issue"
 DRY=0 run 0 "claim exits 0" -- 109
 grep -qF 'api --method POST repos/test/repo/issues/109/labels -f labels[]=in-progress' "$WRITES" \
   && pass "claim: in-progress was added" || { cat "$WRITES" >&2; fail "claim: no label add"; }
@@ -247,12 +264,53 @@ no_writes "re-claim: nothing was written"
 
 banner "a dirty primary checkout is reported, never touched"
 echo peer-work > "$PRIMARY/peer.txt"
-issue 110 open "" "Another claimable issue"
+issue 110 open "status:implementing" "Another claimable issue"
 run 0 "a dirty primary does not stop the claim" -- 110
 has "warning: primary checkout" "dirty primary: the warning is printed"
 has "left untouched" "dirty primary: the warning says it was left alone"
 [ -f "$PRIMARY/peer.txt" ] && pass "dirty primary: the peer's file survived" || fail "peer file lost"
 rm -f "$PRIMARY/peer.txt"
+
+# ---------------------------------------------------------------------------
+banner "the claimed stage's status:* label is written when it does not match (#459)"
+issue 116 open "bug,intent:new" "Stage label gap"
+: > "$WRITES"
+DRY=0 run 0 "stage-label write exits 0" -- 116
+grep -qF 'api --method DELETE repos/test/repo/issues/116/labels/intent:new' "$WRITES" \
+  && pass "stage label: intent:new removed" || { cat "$WRITES" >&2; fail "stage label: intent:new not removed"; }
+grep -qF 'api --method POST repos/test/repo/issues/116/labels -f labels[]=status:implementing' "$WRITES" \
+  && pass "stage label: status:implementing added" || { cat "$WRITES" >&2; fail "stage label: status:implementing not added"; }
+
+banner "the stage label is a no-op when it already matches the claimed stage"
+issue 117 open "status:implementing" "Already at stage"
+: > "$WRITES"
+DRY=0 run 0 "matching stage label is a no-op" -- 117
+! grep -qF '/labels -f labels[]=status:' "$WRITES" \
+  && pass "stage label: no stage label written when already correct" \
+  || { cat "$WRITES" >&2; fail "stage label: wrote a stage label that was already correct"; }
+grep -qF 'labels[]=in-progress' "$WRITES" \
+  && pass "stage label: the mutex label still wrote" || { cat "$WRITES" >&2; fail "stage label: mutex label missing"; }
+
+banner "CLAIM_STAGE maps through lifecycle.json, not a hardcoded status: prefix"
+issue 118 open "status:spec" "Mid-ladder issue"
+: > "$WRITES"
+export CLAIM_STAGE=build
+DRY=0 run 0 "build stage exits 0" -- 118
+export CLAIM_STAGE=implement
+grep -qF 'api --method DELETE repos/test/repo/issues/118/labels/status:spec' "$WRITES" \
+  && pass "stage label: status:spec removed for a build-stage claim" || { cat "$WRITES" >&2; fail "status:spec not removed"; }
+grep -qF 'api --method POST repos/test/repo/issues/118/labels -f labels[]=status:build' "$WRITES" \
+  && pass "stage label: status:build added for a build-stage claim" || { cat "$WRITES" >&2; fail "status:build not added"; }
+
+banner "a missing lifecycle.json is a best-effort no-op, never a refusal"
+mv "$PRIMARY/personas/lifecycle.json" "$WORK/lifecycle.json.bak"
+issue 119 open "" "No lifecycle file"
+: > "$WRITES"
+DRY=0 run 0 "missing lifecycle.json still claims" -- 119
+! grep -qF '/labels -f labels[]=status:' "$WRITES" \
+  && pass "stage label: no stage label written with no lifecycle.json" \
+  || { cat "$WRITES" >&2; fail "stage label: wrote a stage label with no lifecycle.json"; }
+mv "$WORK/lifecycle.json.bak" "$PRIMARY/personas/lifecycle.json"
 
 # ---------------------------------------------------------------------------
 banner "--release drops the label and posts nothing"
@@ -285,7 +343,7 @@ echo "claim_test.sh: all scenarios passed"
 banner "identity tests: human fallback is silent and skips read-back"
 mkdir -p "$PRIMARY/personas"
 rm -f "$PRIMARY/personas/tester.yaml"
-issue 113 open "" "Human issue"
+issue 113 open "status:implementing" "Human issue"
 : > "$WRITES"
 : > "$CALLS"
 DRY=0 run 0 "human fallback is silent" -- 113
@@ -302,7 +360,7 @@ authority:
   identity: "expected-bot"
 YAML
 echo '{"user": {"login": "wrong-bot"}, "html_url": "https://github.com/test/repo/issues/114#issuecomment-123"}' > "$FIXTURES/post_response.json"
-issue 114 open "" "Mismatch issue"
+issue 114 open "status:implementing" "Mismatch issue"
 : > "$WRITES"
 DRY=0 run 1 "mismatch fails closed" -- 114
 has "the comment on #114 was posted by 'wrong-bot', but CLAIM_ACTOR says 'tester', whose personas/tester.yaml names 'expected-bot'" "mismatch: fails with expected message"
@@ -310,7 +368,7 @@ has "remove the in-progress label" "mismatch: instructions name the label"
 
 banner "identity tests: persona path posts as the App identity"
 echo '{"user": {"login": "expected-bot"}, "html_url": "https://github.com/test/repo/issues/115#issuecomment-124"}' > "$FIXTURES/post_response.json"
-issue 115 open "" "Match issue"
+issue 115 open "status:implementing" "Match issue"
 : > "$WRITES"
 DRY=0 run 0 "match succeeds" -- 115
 grep -qF 'api --method POST repos/test/repo/issues/115/comments -f body=Claim: tester (test-session), stage: implement. Worktree: .claude/worktrees/tester-115-match-issue' "$WRITES" \

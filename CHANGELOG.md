@@ -2,6 +2,11 @@
 
 All notable behavioral and user-facing changes to this repository are documented in this file in reverse-chronological order. Each entry describes what capability changed, why the change was made, and the operational or user-visible impact on operators, personas, or workflows.
 
+## 2026-09-15
+
+### `claim.sh` Now Writes the Stage It Claims ([#459](https://github.com/evekhm/agentic-sdlc/issues/459))
+`scripts/ops/claim.sh` derived the stage named in its claim comment from the issue's existing labels but never wrote it back — an issue claimed straight into `implement` (any interactive `/work` claim, not only `fast.sh`'s owner-authorized compression path) kept whatever `status:*` label it walked in with, or none at all. `unattended.yml`'s review dispatch gates Argus and Atlas on `config/execution.yaml`'s `assigned_when.status_labels: [status:implementing]`, so a PR opened against such an issue silently got zero reviewers — the dispatch matrix showed `skipped`, with no error and no comment. `claim.sh` now reconciles the issue's `status:*` label to the claimed stage using the same table `personas/lifecycle.json` already defines (removing earlier intake/stage labels, adding the one for the claimed stage), re-checking `hold` immediately before the write, and doing nothing when the label already matches — whether set by a normal per-stage script, by `fast.sh`, or by a prior claim.
+
 ## 2026-09-11
 
 ### [PR #447](https://github.com/evekhm/agentic-sdlc/pull/447): Operator Fast-Track Door and Ladder Compression Protocol ([#444](https://github.com/evekhm/agentic-sdlc/issues/444))

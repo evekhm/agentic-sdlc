@@ -263,6 +263,38 @@ else
     fi
 fi
 
+# --- Stage label: keep status:* in sync with the claimed stage (#459) -----------
+# STAGE above was only ever read, for the courtesy line in the claim
+# comment. An issue claimed straight into a stage past intent:new — any
+# interactive claim, not only fast.sh's owner-authorized compression path
+# — kept whatever status:* label it walked in with, so unattended.yml's
+# review dispatch (config/execution.yaml assigned_when.status_labels)
+# silently found zero subscribers. Same remove-old/add-new pattern as
+# fast.sh's HAS_IMPLEMENTING block, re-reading hold immediately before the
+# write (fail-closed); a no-op when the label already matches, whether set
+# by a normal per-stage script, by fast.sh, or by an earlier claim.sh run.
+verify_not_held() {
+    local fresh
+    fresh="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER" | jq -r '.labels[].name')" \
+        || die "failed to re-read labels on #$NUMBER immediately before the stage-label write (fail-closed)"
+    ! grep -Fxq "hold" <<<"$fresh" \
+        || refuse "#$NUMBER carries hold (re-checked immediately before the stage-label write)"
+}
+
+TARGET_LABEL="$(jq -r --arg s "$STAGE" \
+    '.stages[] | select(.stage == $s) | .label' "$ROOT/personas/lifecycle.json" 2>/dev/null || true)"
+if [ -n "$TARGET_LABEL" ] && ! has_label "$TARGET_LABEL"; then
+    echo "    stage:    $STAGE -> $TARGET_LABEL"
+    verify_not_held
+    while read -r old_lbl; do
+        if [ -n "$old_lbl" ] && [ "$old_lbl" != "$TARGET_LABEL" ]; then
+            run gh api --method DELETE "repos/$GITHUB_REPO/issues/$NUMBER/labels/$old_lbl" 2>/dev/null || true
+        fi
+    done < <(jq -r '.stages[].label' "$ROOT/personas/lifecycle.json" 2>/dev/null; echo "intent:new")
+    verify_not_held
+    run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$TARGET_LABEL"
+fi
+
 run git -C "$ROOT" fetch -q origin
 run git -C "$ROOT" worktree add -q -b "$BRANCH" "$WT_REL" origin/main
 
