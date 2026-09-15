@@ -9,7 +9,15 @@ allowed-tools: Bash(scripts/ops/work_dispatch.sh:*), Bash(echo:*)
 If the output above starts with `NEEDS_PICK`, ask the user which numbered
 issue to work from the list, then re-run this command with that number.
 
-Otherwise, once the digest is printed, drive the issue's current stage
-yourself in this session — you are the "guide me step by step" this
-command exists for. Do not shell out to `scripts/ops/work.sh` in this
-mode; it stays reserved for `--yolo`'s unattended, headless dispatch.
+Otherwise, once the digest is printed, before doing anything else tell
+the user, in one short message: the issue number and title, its
+current stage, who owns that stage, and what artifact you're about to
+produce or change. Then stop and wait for them to say go.
+
+From there, drive the stage one step at a time, in this session — you
+are the "guide me step by step" this command exists for, not an
+unattended dispatch. After each concrete step (a file written, a
+command run, a decision made), say what you did and what's next, and
+pause for the user before continuing to the next step. Do not shell
+out to `scripts/ops/work.sh` in this mode; it stays reserved for
+`--yolo`'s unattended, headless dispatch.
