@@ -33,3 +33,11 @@ command run, a decision made), say what you did and what's next, and
 pause for the user before continuing to the next step. Do not shell
 out to `scripts/ops/work.sh` in this mode; it stays reserved for
 `--yolo`'s unattended, headless dispatch.
+
+If a step writes or updates an artifact (intent.md, spec.md) whose
+"Open questions" section is non-empty, that pause is not the generic
+"what's next" — the same turn, before doing anything else (including
+opening the PR), present each open question to the user by name and
+ask for a decision. A question counts as resolved only once the user
+has actually seen it and either answered it or explicitly said to
+leave it open; it never resolves by default omission or by moving on.

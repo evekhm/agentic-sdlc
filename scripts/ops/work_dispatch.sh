@@ -110,7 +110,70 @@ fi
 
 ALREADY_CLAIMED="$(jq -r 'index("in-progress") // "null"' <<<"$LABELS")"
 if [ "$ALREADY_CLAIMED" = "null" ]; then
-    "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
+    # Resolve the stage-owning persona the same way claim.sh derives the
+    # claim comment's own stage (a single status:* label, else intent:new
+    # names rung 1, else "implement" — personas/lifecycle.json, mirrored
+    # from claim.sh's own STAGE derivation so the two never disagree),
+    # then claim AND post as that persona: CLAIM_ACTOR unset falls back to
+    # `git config user.name`, and an unset GH_TOKEN posts as whatever `gh`
+    # login happens to be ambient (the operator's own admin login on this
+    # machine) — neither matches the stage-owning persona (#466).
+    LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
+    PERSONA_DIR="$REPO_ROOT/personas"
+    dispatch_stage=""
+    status_count="$(jq -r '[.[] | select(startswith("status:"))] | length' <<<"$LABELS")"
+    if [ "$status_count" -eq 1 ]; then
+        status_label="$(jq -r '[.[] | select(startswith("status:"))] | .[0]' <<<"$LABELS")"
+        dispatch_stage="$(jq -r --arg l "$status_label" '.stages[] | select(.label == $l) | .stage // empty' "$LIFECYCLE_JSON" 2>/dev/null || true)"
+    elif [ "$status_count" -eq 0 ] && jq -e 'index("intent:new")' <<<"$LABELS" >/dev/null 2>&1; then
+        dispatch_stage="$(jq -r '.stages[0].stage // empty' "$LIFECYCLE_JSON" 2>/dev/null || true)"
+    fi
+    [ -n "$dispatch_stage" ] || dispatch_stage="implement"
+
+    dispatch_owners=()
+    for persona_file in "$PERSONA_DIR"/*.yaml; do
+        [ -f "$persona_file" ] || continue
+        grep -qx 'kind: persona' "$persona_file" || continue
+        persona_stages="$(sed -n 's/^stage:[[:space:]]*\[\(.*\)\].*/\1/p' "$persona_file")"
+        [ -n "$persona_stages" ] || continue
+        case ",$(tr -d '[:space:]' <<<"$persona_stages")," in
+            *",$dispatch_stage,"*) dispatch_owners+=("$(basename "$persona_file" .yaml)") ;;
+        esac
+    done
+
+    # Only claim as a persona when the resolved stage has exactly one owner
+    # and that owner has branch-writing authority (not comment-only reviewers
+    # like argus or atlas, whose declared authority forbids label writes;
+    # Argus R1-1 on PR #468).
+    dispatch_owner=""
+    if [ "${#dispatch_owners[@]}" -eq 1 ]; then
+        candidate="${dispatch_owners[0]}"
+        candidate_file="$PERSONA_DIR/$candidate.yaml"
+        candidate_write="$(sed -n 's/^[[:space:]]*github_write:[[:space:]]*"\?\([^"]*\)"\?/\1/p' "$candidate_file")"
+        if [ "$candidate_write" != "comments" ]; then
+            dispatch_owner="$candidate"
+        fi
+    fi
+
+    if [ -n "$dispatch_owner" ]; then
+        mint_err_file="$(mktemp)"
+        dispatch_token="$("$REPO_ROOT/scripts/auth/mint_app_token.py" --require-repo "$dispatch_owner" 2>"$mint_err_file" || true)"
+        mint_err="$(head -n 1 "$mint_err_file" 2>/dev/null || true)"
+        rm -f "$mint_err_file"
+        if [ -n "$dispatch_token" ]; then
+            echo "work_dispatch.sh: claiming as $dispatch_owner (stage: $dispatch_stage)"
+            CLAIM_ACTOR="$dispatch_owner" GH_TOKEN="$dispatch_token" "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
+        else
+            if [ -n "$mint_err" ]; then
+                echo "work_dispatch.sh: warning: could not mint an App token for $dispatch_owner ($mint_err); claiming without an explicit identity override" >&2
+            else
+                echo "work_dispatch.sh: warning: could not mint an App token for $dispatch_owner; claiming without an explicit identity override" >&2
+            fi
+            "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
+        fi
+    else
+        "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
+    fi
 else
     # digest.sh's last-comment line is whatever comment is newest, which
     # is usually a bot's review or escalation note, not the claim — so it

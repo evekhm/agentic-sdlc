@@ -989,7 +989,24 @@ lookup failure rather than aborting; it prints the number's title and
 state, its labels, any open pull request referencing it, and the most
 recent comment), claims the issue via `scripts/ops/claim.sh <n>` if it
 does not already carry `in-progress`, and stops there: `work.sh` is
-never invoked in this mode, because the door's body runs in the
+never invoked in this mode. The claim is posted as the stage's owning
+persona rather than under whatever identity happens to be ambient
+(#466): the door resolves the stage the same way `claim.sh` derives it
+for the claim comment (a single `status:*` label, else `intent:new`
+names `personas/lifecycle.json`'s first rung, else `implement`), finds
+that stage's owner the same way `work.sh`'s `owners_of()` does
+(`personas/*.yaml` entries with `kind: persona` whose `stage: [...]`
+array contains it), mints that persona's GitHub App installation token
+via `scripts/auth/mint_app_token.py` (with `--require-repo`), and calls
+`claim.sh` with `CLAIM_ACTOR=<persona> GH_TOKEN=<minted token>`. Only
+stages with exactly one owner whose declared `github_write` authority
+is not comment-only are claimed as that persona (reviewers never claim
+an issue or write labels; Argus R1-1 on PR #468). If the stage has multiple
+owners, no owner, or the owner is comment-only, or no token can be
+minted, the door falls back to calling `claim.sh` with neither set —
+posting under `git config user.name` and whatever `gh` login is ambient
+— rather than refusing the claim outright.
+`work.sh` is never invoked in this mode, because the door's body runs in the
 harness's own non-TTY bash before the turn, where `work.sh`'s
 interactive (`HEADLESS=0`) row cannot start a terminal it does not
 have — the session itself drives the resolved issue's stage from the
