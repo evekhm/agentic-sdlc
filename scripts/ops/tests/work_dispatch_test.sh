@@ -210,4 +210,39 @@ rc=0; out="$(RESOLVE_OUT=7 LABELS='["in-progress"]' COMMENTS_JSON="$COMMENTS_JSO
 echo "$out" | grep -q 'holder cannot be established' || fail "already claimed no-claim: missing message -- $out"
 pass "an already-claimed issue with no structured claim line says the holder cannot be established"
 
+# --- 17. unclaimed dispatch resolves the stage owner and claims as that
+# persona, with a minted token, instead of git config user.name / an
+# ambient gh login (#466) --------------------------------------------------
+reset_calls
+PERSONA_DIR="$WORK/fixture/personas"
+mkdir -p "$PERSONA_DIR" "$WORK/fixture/scripts/auth"
+cat > "$PERSONA_DIR/lifecycle.json" <<'JSON'
+{"stages":[{"stage":"plan","label":"status:planning"},{"stage":"implement","label":"status:implementing"}]}
+JSON
+cat > "$PERSONA_DIR/athena.yaml" <<'YAML'
+kind: persona
+stage: [intake, plan, design]
+YAML
+cat > "$PERSONA_DIR/odyssey.yaml" <<'YAML'
+kind: persona
+stage: [implement]
+YAML
+cat > "$WORK/fixture/scripts/auth/mint_app_token.py" <<'STUB'
+#!/usr/bin/env python3
+import sys
+print("minted-token-for-" + sys.argv[1])
+STUB
+chmod +x "$WORK/fixture/scripts/auth/mint_app_token.py"
+cat > "$FIXTURE/claim.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "claim.sh CLAIM_ACTOR=${CLAIM_ACTOR:-} GH_TOKEN=${GH_TOKEN:-} $*" >> "$CALLS"
+echo "claimed #$1"
+STUB
+chmod +x "$FIXTURE/claim.sh"
+rc=0; out="$(RESOLVE_OUT=7 LABELS='["intent:new"]' "$DISPATCH" 2>&1)" || rc=$?
+[ "$rc" -eq 0 ] || fail "stage-owner claim: expected exit 0, got $rc -- $out"
+grep -q '^claim.sh CLAIM_ACTOR=athena GH_TOKEN=minted-token-for-athena 7$' "$CALLS" \
+    || fail "stage-owner claim: claim.sh did not receive the resolved persona's CLAIM_ACTOR/GH_TOKEN -- $(cat "$CALLS")"
+pass "an unclaimed issue claims and posts as the stage-owning persona, not git config user.name or an ambient gh login"
+
 echo "work_dispatch_test.sh: all assertions passed" >&2
