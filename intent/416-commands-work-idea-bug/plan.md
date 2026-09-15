@@ -455,9 +455,13 @@ CMD
      Outputs empty diff.
   9. Commit explicitly authored as Odyssey App identity:
      `git -c user.name="evekhm-odyssey-app[bot]" -c user.email="323814131+evekhm-odyssey-app[bot]@users.noreply.github.com" commit ...`
-  10. Push branch `odyssey/416-commands-work-idea-bug` (exact match to intent folder slug `416-commands-work-idea-bug` so `lifecycle_advance.sh` advances automatically on merge) and open PR targeting `main` with `Closes #416`.
+  10. Push branch `odyssey/416-commands-work-idea-bug` (exact match to intent folder slug `416-commands-work-idea-bug` so `lifecycle_advance.sh` advances automatically on merge) and open PR targeting `main` with `Refs #416` (not `Closes #416`, per `lifecycle_advance.sh` requirement to advance `status:implementing` -> `status:in-review`).
   11. Apply `deep-review` grant:
       `scripts/ops/post.sh <pr> --as odyssey --add-label deep-review`.
+
+### Plan Sync (Implementation Observations)
+- **Lifecycle Advancer Requirement:** Step 10 specifies `Refs #416` rather than `Closes #416`. Per `scripts/ci/lifecycle_advance.sh:25-35`, implementing PRs must reference rather than close the issue to permit advancing the issue to `status:in-review`.
+- **Door Allowlist Synchronization:** In addition to `wrap.md` (D9, D12), `claim.md`, `fast.md`, and `release.md` were merged into `.claude/commands/` on `origin/main` after #416's plan baseline. To strictly honor D13's manifest without deleting unmigrated doors, `sync_commands.py` allowlists them alongside `wrap.md`.
 
 ---
 

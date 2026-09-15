@@ -82,7 +82,7 @@ while IFS= read -r f; do
     [ -n "$f" ] || continue
     if [ "$f" = "$SPEC_PATH" ]; then spec_touched=1; continue; fi
     case "$f" in
-        .github/workflows/*|scripts/*|personas/*|config/*)
+        .github/workflows/*|scripts/*|personas/*|config/*|commands/*)
             behavior+=("$f") ;;
         AGENTS.md|REVIEW.md)
             behavior+=("$f") ;;
