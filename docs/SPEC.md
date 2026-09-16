@@ -157,7 +157,8 @@ valid, flagging low-quality or inaccurate entries as normal defects.
 Work is tracked as GitHub issues on `evekhm/agentic-sdlc`. Sessions
 follow pick → claim → read → work → hand off → gate (AGENTS.md,
 "Working the tracker"): the `in-progress` label is the claim mutex
-and the issue is the unit of parallelism; handoff comments use the
+and the issue is the unit of parallelism, while the claim is the unit
+of isolation (`ops.worktrees`); handoff comments use the
 Done/Decided/Next/Blocked format; the pinned tracker issue (#12)
 indexes the bootstrap backlog by rung; the `hold` label halts all
 automation while present. A session is started from a number and
@@ -698,6 +699,27 @@ Consensus follows assignment (`scripts/ci/merge_gate.sh`, #265):
 - For PRs where only Atlas was assigned (`<!-- assigned:atlas -->` in consensus ledger), conjunct (3) checks Atlas clean verdict at head OID alone, and conjunct (11) is skipped (`C[11]=1`).
 - For dual-assigned PRs (`<!-- assigned:argus,atlas -->`), dual sign-off from both Argus and Atlas is required.
 - If the assigned marker is absent from the ledger, the merge gate falls back to dynamic subscriber resolution via `python3 scripts/ops/execution.py --subscribers pull_request`.
+
+### ops.worktrees
+The claim is the unit of isolation (#493): a persona or subagent
+dispatched to work an issue a session already holds works in that
+claim's worktree, on that claim's branch, one at a time, and harness
+per-subagent worktree isolation is reserved for work belonging off that
+branch. `scripts/ops/claim.sh` names a claim worktree
+`.claude/worktrees/<actor>-<n>-<slug>` on branch `<actor>/<n>-<slug>`
+and refuses collisions only inside that namespace, so a harness-created
+`.claude/worktrees/agent-<hex>` worktree bypasses the filesystem guard
+and the `in-progress` mutex both. `scripts/ops/worktrees.sh` is the
+detector: alongside `primary`, `safe`, `dirty`, `unpushed` and `locked`
+it reports `shadow` (an `agent-*` worktree whose branch another worktree
+also has checked out, carrying uncommitted work) and `orphan` (an
+`agent-*` worktree on a detached HEAD carrying uncommitted work or
+commits no remote holds, which become unreachable when it is removed).
+Both verdicts are excluded from `--prune`; an `agent-*` worktree with
+nothing of its own to lose keeps its ordinary verdict and stays
+prunable, and the `LOCK` column reports `locked:pid-live` or
+`locked:pid-dead` independently of the verdict.
+Tests: `scripts/ops/tests/worktrees_test.sh`.
 
 ### ops.spend
 `scripts/ops/session_spend.sh <transcript-dir>` measures session

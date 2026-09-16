@@ -252,6 +252,19 @@ file names it.
   touch only files your issue owns. Commit by path: do not use
   `git add .` or `commit -a` — a stray file could ride along. Fetching
   is always allowed anywhere.
+- **The unit of isolation is the claim** (#493). A persona or subagent
+  dispatched to work the issue this session holds works in that claim's
+  worktree, on that claim's branch, one at a time — the dispatcher
+  passes the absolute path and suppresses whatever per-subagent
+  isolation its harness offers. A second worktree for a claimed issue
+  is a defect however it arose. On a detached HEAD its commits are
+  unreachable from any branch and no script copies the stage artifact
+  back, so the work is lost when the tree is removed. On the claim's
+  own branch two trees commit onto one ref while each reads a working
+  tree the other is changing, with no notification either way. Harness
+  worktree isolation is for work that belongs off that branch: a
+  different issue, or a throwaway experiment whose output is a summary.
+  The dispatching session owns the cleanup.
 - **Finish the circle.** After the PR merges: post the handoff
   comment, `git worktree remove <path>` for your own worktree, delete
   the local branch, and confirm with `git worktree list` that it is
@@ -261,7 +274,8 @@ file names it.
 **Worktree hygiene cadence.** `scripts/ops/worktrees.sh` is the one
 tool for this: it lists every worktree with lock (and whether the
 lock's pid is alive), dirty count, unpushed commits, merged state and a
-verdict (`safe`, `dirty`, `unpushed`, `locked`); `--prune` removes only
+verdict (`safe`, `dirty`, `unpushed`, `locked`, `shadow`, `orphan`);
+`--prune` removes only
 `safe` worktrees and local branches merged into `origin/main`;
 `--prune-remote` also deletes merged remote branches; `DRY_RUN=1`
 previews. The cadence:
@@ -274,11 +288,20 @@ previews. The cadence:
   stack lands (deleting merged head branches is also what retargets
   stacked children). Preview with `DRY_RUN=1` first when peers are
   busy.
-- **`dirty`, `unpushed`, `locked` are never pruned by the script.**
-  Each is resolved by its owner: resume it, land it, or discard it by
-  hand. A `locked:pid-dead` entry is a crashed session or subagent;
-  its owner unlocks it (`git worktree unlock <path>`) after checking
-  the diff.
+- **`dirty`, `unpushed`, `locked`, `shadow` and `orphan` are never
+  pruned by the script.** Each is resolved by its owner: resume it,
+  land it, or discard it by hand. A `locked:pid-dead` entry is a
+  crashed session or subagent; its owner unlocks it (`git worktree
+  unlock <path>`) after checking the diff.
+- **`shadow` and `orphan` are the claim rule's alarm** (#493). Both
+  name a harness-created `agent-<hex>` worktree holding work of its
+  own: a `shadow` shares a branch another worktree already has checked
+  out and carries uncommitted changes; an `orphan` sits on a detached
+  HEAD with changes or commits no remote holds. Each one means a
+  dispatch went around the claim. Read the diff before removing either;
+  an `orphan` may hold the only copy of a stage artifact. An `agent-*`
+  worktree with nothing of its own to lose keeps its ordinary verdict
+  and `--prune` may take it.
 
 **The labels are the state machine** (#4, `intent/4-labels/`). Five
 are human-facing: `intent:new` (intake — filed by people, by the

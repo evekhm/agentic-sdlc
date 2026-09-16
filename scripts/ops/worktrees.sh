@@ -24,11 +24,27 @@
 #             they become findable only by name, so the entry is kept.
 #   safe      clean, nothing unpushed. Merged (M) or not, every commit is
 #             on the remote already; removing loses nothing.
+#   shadow    path basename matches `agent-*` — a harness-created subagent
+#             worktree, which claim.sh never names that way — its branch
+#             is also checked out by another worktree in the list, and it
+#             carries uncommitted work. Two trees are committing onto one
+#             ref while each reads a tree the other is changing.
+#   orphan    path basename matches `agent-*`, HEAD is detached, and it
+#             carries uncommitted work or commits no remote holds. No
+#             branch copies those out, so they become unreachable the
+#             moment the worktree is removed.
+#
+#             Both verdicts mean a dispatch went around the claim (#493):
+#             the unit of isolation is the claim, so a subagent working a
+#             claimed issue belongs in that claim's worktree. An `agent-*`
+#             worktree with nothing of its own to lose keeps its ordinary
+#             verdict and stays prunable.
 #
 # Deterministic git only: no gh, no model, no token. Fetches origin with
 # --prune first unless NO_FETCH=1 (the tests set it against a local bare
-# origin). Dirty, unpushed and locked entries are NEVER pruned by this
-# script: each is resumed or explicitly discarded by whoever owns it.
+# origin). Dirty, unpushed, locked, shadow and orphan entries are NEVER
+# pruned by this script: each is resumed or explicitly discarded by
+# whoever owns it.
 
 set -euo pipefail
 
@@ -37,7 +53,7 @@ case "${1:-}" in
   "") ;;
   --prune) MODE="prune" ;;
   --prune-remote) MODE="prune-remote" ;;
-  -h|--help) sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "worktrees.sh: unknown argument '$1' (see --help)" >&2; exit 2 ;;
 esac
 
@@ -65,6 +81,15 @@ run() {
 
 # --- report ------------------------------------------------------------------
 
+# Branch occupancy, keyed by branch name, so an `agent-*` worktree can be
+# told apart from a claim.sh worktree camped on the same branch (`shadow`).
+declare -A BRANCH_COUNT
+while IFS= read -r path; do
+  b="$(git -C "$path" branch --show-current 2>/dev/null || true)"
+  [ -n "$b" ] || continue
+  BRANCH_COUNT["$b"]=$(( ${BRANCH_COUNT["$b"]:-0} + 1 ))
+done < <(git worktree list --porcelain | awk '/^worktree /{print $2}')
+
 SAFE=()
 printf '%-40s %-40s %-14s %5s %8s %-3s %s\n' \
   WORKTREE BRANCH LOCK DIRTY UNPUSHED MRG VERDICT
@@ -74,6 +99,13 @@ while IFS= read -r path; do
   branch="$(git -C "$path" branch --show-current 2>/dev/null || true)"
   [ -n "$branch" ] || branch="(detached)"
   head="$(git -C "$path" rev-parse HEAD)"
+
+  # A harness-spawned subagent worktree (`.claude/worktrees/agent-<hex>`),
+  # never a claim.sh worktree (`<actor>-<n>-<slug>`).
+  case "$name" in
+    agent-*) is_agent=1 ;;
+    *) is_agent=0 ;;
+  esac
 
   lock="-"
   lockfile="$GIT_COMMON/worktrees/$name/locked"
@@ -92,6 +124,10 @@ while IFS= read -r path; do
   git merge-base --is-ancestor "$head" "$BASE" 2>/dev/null && merged="M"
 
   if [ "$path" = "$PRIMARY" ]; then verdict="primary"
+  elif [ "$is_agent" = 1 ] && [ "$branch" = "(detached)" ] &&
+       { [ "$dirty" != 0 ] || [ "$unpushed" != 0 ]; }; then verdict="orphan"
+  elif [ "$is_agent" = 1 ] && [ "${BRANCH_COUNT[$branch]:-0}" -gt 1 ] &&
+       [ "$dirty" != 0 ]; then verdict="shadow"
   elif [ "$lock" != "-" ]; then verdict="locked"
   elif [ "$dirty" != 0 ]; then verdict="dirty"
   elif [ "$unpushed" != 0 ]; then verdict="unpushed"

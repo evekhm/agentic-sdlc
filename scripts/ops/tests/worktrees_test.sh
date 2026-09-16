@@ -52,6 +52,24 @@ git worktree add -q -b feat/unpushed "$WT/unpushed" main
 git worktree add -q -b feat/locked "$WT/locked" main
 git worktree lock --reason "claude agent test (pid 4000000 start 1)" "$WT/locked"
 
+# shadow: harness-created worktree (agent-*) camped on a claim worktree's
+# branch (feat/unpushed) while holding uncommitted work of its own.
+# --force bypasses git's normal one-worktree-per-branch rule, exactly as
+# the real harness worktree ends up sharing a claim worktree's branch.
+git worktree add -q -f "$WT/agent-shadow1" feat/unpushed
+echo shadow >"$WT/agent-shadow1/s.txt"
+
+# orphan: harness-created worktree (agent-*) on a detached HEAD carrying a
+# commit no branch and no remote holds — unreachable once it is removed.
+git worktree add -q --detach "$WT/agent-orphan1" main
+git -C "$WT/agent-orphan1" commit -q --allow-empty -m "work stranded on a detached HEAD"
+
+# agent-* worktrees with nothing of their own to lose: one sharing a
+# claim's branch, one detached at a commit the remote already holds.
+# Neither is a shadow or an orphan, and --prune may take the second.
+git worktree add -q -f "$WT/agent-clean1" feat/unpushed
+git worktree add -q --detach "$WT/agent-clean2" main
+
 # stale local branch merged into origin/main, checked out nowhere
 git branch -q old/merged main
 
@@ -71,6 +89,11 @@ verdict() { echo "$REPORT" | awk -v n="$1" '$1==n{print $NF}'; }
 [ "$(verdict unpushed)" = unpushed ] && pass "local-only commit -> unpushed"      || fail "unpushed: $(verdict unpushed)"
 [ "$(verdict locked)" = locked ]     && pass "lock file -> locked"                || fail "locked: $(verdict locked)"
 echo "$REPORT" | grep -q 'locked:pid-dead' && pass "dead pid in lock reason is reported" || fail "pid liveness missing"
+[ "$(verdict agent-shadow1)" = shadow ] && pass "agent-* on a claim's branch -> shadow" || fail "agent-shadow1: $(verdict agent-shadow1)"
+[ "$(verdict agent-orphan1)" = orphan ] && pass "agent-* on a detached HEAD -> orphan"  || fail "agent-orphan1: $(verdict agent-orphan1)"
+[ "$(verdict unpushed)" = unpushed ] && pass "shadowed branch's own claim worktree keeps its verdict" || fail "unpushed: $(verdict unpushed)"
+[ "$(verdict agent-clean1)" = unpushed ] && pass "clean agent-* on a claim's branch keeps its ordinary verdict" || fail "agent-clean1: $(verdict agent-clean1)"
+[ "$(verdict agent-clean2)" = safe ]     && pass "clean detached agent-* the remote holds stays safe"         || fail "agent-clean2: $(verdict agent-clean2)"
 [ "$(verdict repo)" = primary ]      && pass "primary checkout is listed as primary" || fail "primary: $(verdict repo)"
 echo "$REPORT" | awk '$1=="safe"{print $6}' | grep -qx M && pass "merged column set for merged head" || fail "merged column"
 
@@ -86,6 +109,10 @@ bash "$SCRIPT" --prune >/dev/null
 [ -d "$WT/dirty" ]    && pass "--prune kept the dirty worktree"       || fail "dirty worktree removed"
 [ -d "$WT/unpushed" ] && pass "--prune kept the unpushed worktree"    || fail "unpushed worktree removed"
 [ -d "$WT/locked" ]   && pass "--prune kept the locked worktree"      || fail "locked worktree removed"
+[ -d "$WT/agent-shadow1" ] && pass "--prune kept the shadow worktree" || fail "shadow worktree removed"
+[ -d "$WT/agent-orphan1" ] && pass "--prune kept the orphan worktree" || fail "orphan worktree removed"
+[ -d "$WT/agent-clean1" ]  && pass "--prune kept the clean shared-branch agent worktree" || fail "agent-clean1 removed"
+[ ! -d "$WT/agent-clean2" ] && pass "--prune took the clean detached agent worktree"     || fail "agent-clean2 kept"
 [ -f "$WT/dirty/d.txt" ] && pass "dirty file survived"                || fail "dirty file lost"
 ! git show-ref -q refs/heads/old/merged && pass "--prune deleted merged local branch" || fail "old/merged still exists"
 ! git show-ref -q refs/heads/feat/safe  && pass "--prune deleted merged branch of removed worktree" || fail "feat/safe still exists"

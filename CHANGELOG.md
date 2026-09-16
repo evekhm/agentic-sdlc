@@ -2,6 +2,14 @@
 
 All notable behavioral and user-facing changes to this repository are documented in this file in reverse-chronological order. Each entry describes what capability changed, why the change was made, and the operational or user-visible impact on operators, personas, or workflows.
 
+## 2026-09-16
+
+### The Unit of Isolation Is the Claim ([#493](https://github.com/evekhm/agentic-sdlc/issues/493))
+`AGENTS.md` said "one session, one worktree, one issue" and said nothing about a session that dispatches a subagent, so the harness decided instead: a subagent dispatched with worktree isolation got a second worktree for an already-claimed issue, at a `.claude/worktrees/agent-<hex>` path `claim.sh` never created and no guard can see. Live on this machine that produced two trees committing onto one claim branch and a third stranded on a detached HEAD, where no script copies a stage artifact back out. `AGENTS.md` and `CLAUDE.md` now state the rule — a persona or subagent working a claimed issue works in that claim's worktree, on that claim's branch, and harness isolation is for work that belongs off that branch — and `scripts/ops/worktrees.sh` reports the two violations as new `shadow` and `orphan` verdicts that `--prune` never removes, leaving an `agent-*` worktree with nothing of its own to lose prunable as before.
+
+### Harness Tier Documentation Points at the Compiler Instead of Restating It ([#493](https://github.com/evekhm/agentic-sdlc/issues/493))
+`CLAUDE.md`'s subagent tier bullets described a world that shipped: two of them said a repo-local compiled agent would exist "once the persona compiler exists" and pointed sessions at hand-written copies under `~/.claude/agents/`, while the section restated the whole tier-to-model table with nothing checking it against `config/model_tiers.yaml`. The bullets now name the compiled `mechanic` and `coder` agents under `.claude/agents/`, and a session resolves a tier to a model through `config/model_tiers.yaml`, the single hand-maintained model table, so a tier repin no longer leaves stale model IDs in harness documentation.
+
 ## 2026-09-15
 
 ### Per-Pull-Request Concurrency for Merge Gate and Recorder Isolation ([#308](https://github.com/evekhm/agentic-sdlc/issues/308))
