@@ -1174,4 +1174,74 @@ has "conjunct (3): false" "MG-49 (D7): conjunct (3) reports false when both revi
 has "argus verdict at $H was refused by recorder (commit-not-in-history); ledger recorded head is $H0; atlas verdict at $H was refused by recorder (missing-run-id); ledger recorded head is $H0" "MG-49 (D7): dual refusal diagnostics joined by semicolon"
 not_merged "MG-49 (D7): PR does not merge with dual refused verdicts"
 
+# ==============================================================================
+# Issue #318: Anchored Verdict Marker Parsing and Loud Declines in Consensus Recorder
+# Decisions D4, D7; Acceptance Tests AT-318-6, AT-318-7
+# ==============================================================================
+
+banner "MG-50 · D4 D7 · Conjunct (3) fails with ledger blindness diagnostic when posted finding has no ledger counterpart (AT-318-6)"
+mk_green
+argus_finding_mg50="$(cat <<EOF
+### Argus review
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:1001 -->
+<!-- round:1 -->
+<!-- finding:R1-1:high:open:none -->
+<!-- failure-scenario:R1-1 -->
+Concrete failure description
+<!-- review-verdict-end -->
+EOF
+)"
+cl_blind_mg50="$(cat <<EOF
+<!-- consensus-ledger:123 -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- assigned:argus,atlas -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+comments_fixture 123 \
+  "$(comment "evekhm-argus-app[bot]" "$argus_finding_mg50")" \
+  "$(comment "$MERGER" "$cl_blind_mg50")"
+run "MG-50: exits 0" 123
+has "conjunct (3): false" "MG-50 (D4, D7): conjunct (3) reports false when posted finding has no ledger counterpart"
+has "ledger blindness: reviewer argus posted finding R1-1 at $H with no ledger counterpart" "MG-50 (D4, AT-318-6): explanatory ledger blindness diagnostic reported"
+not_merged "MG-50 (D4, D7): PR does not merge when ledger blindness detected"
+
+banner "MG-51 · D4 D7 · Conjunct (3) does not trigger ledger blindness when posted findings match ledger rows or refusal marker is recorded (AT-318-7)"
+mk_green
+# Case 1: Finding R1-1 matches recorded ledger row in CTUP
+cl_matched_mg51="$(cat <<EOF
+<!-- consensus-ledger:123 -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- assigned:argus,atlas -->
+<!-- ledger-row:R1-1:normal:fixed:agree -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+comments_fixture 123 \
+  "$(comment "evekhm-argus-app[bot]" "$argus_finding_mg50")" \
+  "$(comment "$MERGER" "$cl_matched_mg51")"
+run "MG-51a: exits 0" 123
+hasnt "ledger blindness" "MG-51a (D4, AT-318-7): no ledger blindness diagnostic when finding matches ledger row"
+
+# Case 2: Refusal marker is recorded for Argus at $H
+cl_refused_mg51="$(cat <<EOF
+<!-- consensus-ledger:123 -->
+<!-- reviewed-head:argus:$H0 -->
+<!-- reviewed-head:atlas:$H -->
+<!-- assigned:argus,atlas -->
+<!-- refused-verdict:argus:$H:run-head-sha-mismatch -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+comments_fixture 123 \
+  "$(comment "evekhm-argus-app[bot]" "$argus_finding_mg50")" \
+  "$(comment "$MERGER" "$cl_refused_mg51")"
+run "MG-51b: exits 0" 123
+hasnt "ledger blindness" "MG-51b (D4, AT-318-7): no ledger blindness diagnostic when refusal marker is recorded"
+has "argus verdict at $H was refused by recorder" "MG-51b (D4, D7): refusal diagnostic takes precedence"
+
 echo "merge_gate_test.sh: all scenarios passed"
