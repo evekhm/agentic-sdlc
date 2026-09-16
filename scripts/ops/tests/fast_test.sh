@@ -470,5 +470,17 @@ grep -q "worktree name suggests #2 but branch name suggests #999; refusing to gu
     || fail "disagreement diagnostic message missing -- got: $err_out"
 pass "22. refuses when worktree name and branch name disagree (R1-1)"
 
+# --- Test 23: Digit-suffixed directory with no slug and numberless branch fails closed (Argus R1-1) ---
+TEST_WT_DIGITS_ONLY="$WORK/agentic-sdlc-2"
+git -C "$TEST_REPO" worktree add -b "chore/cleanup" "$TEST_WT_DIGITS_ONLY" main >/dev/null
+set +e
+err_out="$(cd "$TEST_WT_DIGITS_ONLY" && "$FAST_SH" 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 1 ] || fail "digit-suffixed directory without a slug did not exit 1 (got $status: $err_out)"
+grep -q "no issue number specified and could not infer issue number from worktree or branch" <<<"$err_out" \
+    || fail "missing inference failure error message -- got: $err_out"
+pass "23. fails closed on a digit-suffixed directory with no slug and a numberless branch (R1-1)"
+
 echo ""
 echo "=== All fast_test.sh tests passed ==="

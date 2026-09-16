@@ -28,12 +28,17 @@ source "$SCRIPT_DIR/lib/issue_inference.sh"
 
 REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 case "${1:-}" in
-    ""|-*) NUMBER="$(infer_issue_from_context 2>/dev/null || true)" ;;
+    # infer_issue_from_context() only ever writes to one stream at a
+    # time (the number to stdout on success, a disagreement diagnostic
+    # to stderr on refusal), so capturing both here and keeping
+    # whichever one is non-empty on failure surfaces the real reason
+    # below, the disagreement itself when there is one (R2-1).
+    ""|-*) if NUMBER="$(infer_issue_from_context 2>&1)"; then :; else INFER_REASON="$NUMBER"; NUMBER=""; fi ;;
     *) NUMBER="$1" ;;
 esac
 
 if [ -z "$NUMBER" ]; then
-    echo "digest: unavailable (no issue/PR number given and not inside an issue worktree)"
+    echo "digest: unavailable (${INFER_REASON:-no issue/PR number given and not inside an issue worktree})"
     exit 0
 fi
 

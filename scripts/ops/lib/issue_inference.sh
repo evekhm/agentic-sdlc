@@ -26,10 +26,15 @@
 
 _issue_from_wt_name() {
     local wt_name="$1"
-    if [[ "$wt_name" =~ -([0-9]+)(-[^/]*)?$ ]]; then
+    # Argus R1-1 (PR #455 round 3): a bare trailing `-<digits>` matched any
+    # directory whose name happened to end in a number — a second clone at
+    # `agentic-sdlc-2` inferred issue #2. Require the full convention
+    # claim.sh:246-247 actually writes, `<actor>-<n>-<slug>`, which means a
+    # non-empty slug must follow the digits.
+    if [[ "$wt_name" =~ -([0-9]+)-[^/]+$ ]]; then
         echo "${BASH_REMATCH[1]}"
         return 0
-    elif [[ "$wt_name" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
+    elif [[ "$wt_name" =~ ^([0-9]+)-[^/]+$ ]]; then
         echo "${BASH_REMATCH[1]}"
         return 0
     fi
