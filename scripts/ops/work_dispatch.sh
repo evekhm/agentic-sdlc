@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# scripts/ops/work_dispatch.sh [<issue-number>] [--as <persona>] [--yolo] (#441)
+#
+# The dispatch logic behind the `/work` command (.claude/commands/work.md).
+# Before #441 that command always ran headless (HEADLESS=1 scripts/ops/
+# work.sh), whatever it was asked and whether or not a human was watching.
+# This is the two ways of working the README names instead:
+#
+#   /work [<n>]            at the keyboard: resolve <n> (an explicit
+#                           argument, the current worktree's branch, the
+#                           last issue this session touched, or — none of
+#                           those — a picker), claim it if nobody has, and
+#                           stop at its state and stage. The session
+#                           itself drives the stage from there, one rung
+#                           at a time, in the foreground.
+#   /work [<n>] --yolo     handing off: unchanged from before #441 —
+#                           resolve <n> the same way, then
+#                           HEADLESS=1 scripts/ops/work.sh <n> [--as ...],
+#                           which dispatches the owning persona unattended.
+#
+# scripts/ops/work.sh itself is untouched by #441 (#36 D7: a number is
+# the whole instruction, nothing else is an argument); this script only
+# decides what number reaches it, whether headless mode is asked for, or
+# whether it is called at all.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
+
+die() { echo "work_dispatch.sh: $*" >&2; exit 1; }
+
+# --- Arguments: a number, --as <persona> (forwarded to work.sh), --yolo ----
+YOLO=0
+NUMBER=""
+PASSTHROUGH=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --yolo) YOLO=1; shift ;;
+        --as) [ "$#" -ge 2 ] || die "--as needs a persona name"; PASSTHROUGH+=(--as "$2"); shift 2 ;;
+        --as=*) PASSTHROUGH+=("$1"); shift ;;
+        *)
+            STRIPPED="${1#\#}"
+            case "$STRIPPED" in
+                ''|*[!0-9]*)
+                    die "'$1' is not an issue number, --as <persona>, or --yolo (a free-text description isn't resolved yet, #441)"
+                    ;;
+            esac
+            [ -z "$NUMBER" ] || die "one number per dispatch (saw '$NUMBER' and '$STRIPPED')"
+            NUMBER="$STRIPPED"; shift ;;
+    esac
+done
+
+# --- Resolve <n> ------------------------------------------------------------
+STATUS=0
+if [ -n "$NUMBER" ]; then
+    RESOLVED="$("$REPO_ROOT/scripts/ops/resolve_work_target.sh" "$NUMBER")" || STATUS=$?
+else
+    RESOLVED="$("$REPO_ROOT/scripts/ops/resolve_work_target.sh")" || STATUS=$?
+fi
+
+if [ "$STATUS" -eq 3 ]; then
+    echo "$RESOLVED"
+    exit 3
+fi
+[ "$STATUS" -eq 0 ] || exit "$STATUS"
+NUMBER="$RESOLVED"
+
+# --- --as is a --yolo dispatch override; guided mode has no dispatch to
+# override (#441 D3). Refused before any digest line, not just dropped.
+if [ "$YOLO" -eq 0 ] && [ "${#PASSTHROUGH[@]}" -gt 0 ]; then
+    die "--as is a --yolo dispatch override; add --yolo, or drop --as for guided mode"
+fi
+
+# --- Handing off: unchanged headless dispatch -------------------------------
+if [ "$YOLO" -eq 1 ]; then
+    exec env HEADLESS=1 "$REPO_ROOT/scripts/ops/work.sh" "$NUMBER" "${PASSTHROUGH[@]}"
+fi
+
+# --- At the keyboard: claim if nobody has, then stop at the digest ---------
+"$REPO_ROOT/scripts/ops/digest.sh" "$NUMBER"
+echo "---"
+
+# hold, closed, status:review-stuck and blocked are checked here even when
+# the issue already carries in-progress: skipping straight to "leave the
+# existing claim in place" below would otherwise never invoke claim.sh,
+# and claim.sh is the only component downstream that refuses on any of
+# them. Same set and order work.sh's own circuit breaker refuses at its
+# steps (a), (c) and (d) (work.sh:294-320) — this is the guided path
+# getting the same circuit breaker (#441 D4).
+ISSUE_JSON="$(gh issue view "$NUMBER" --repo "$GITHUB_REPO" --json state,labels,comments 2>/dev/null || echo '{"state":"OPEN","labels":[],"comments":[]}')"
+ISSUE_STATE="$(jq -r '.state' <<<"$ISSUE_JSON")"
+LABELS="$(jq -c '[.labels[].name]' <<<"$ISSUE_JSON")"
+if jq -e 'index("hold")' <<<"$LABELS" >/dev/null 2>&1; then
+    echo "work_dispatch.sh: refused: #$NUMBER carries hold" >&2
+    exit 2
+fi
+if [ "$ISSUE_STATE" != "OPEN" ]; then
+    echo "work_dispatch.sh: refused: #$NUMBER is closed" >&2
+    exit 2
+fi
+if jq -e 'index("status:review-stuck")' <<<"$LABELS" >/dev/null 2>&1; then
+    echo "work_dispatch.sh: refused: #$NUMBER carries status:review-stuck" >&2
+    exit 2
+fi
+if jq -e 'index("blocked")' <<<"$LABELS" >/dev/null 2>&1; then
+    echo "work_dispatch.sh: refused: #$NUMBER carries blocked" >&2
+    exit 2
+fi
+
+ALREADY_CLAIMED="$(jq -r 'index("in-progress") // "null"' <<<"$LABELS")"
+if [ "$ALREADY_CLAIMED" = "null" ]; then
+    # Resolve the stage-owning persona the same way claim.sh derives the
+    # claim comment's own stage (a single status:* label, else intent:new
+    # names rung 1, else "implement" — personas/lifecycle.json, mirrored
+    # from claim.sh's own STAGE derivation so the two never disagree),
+    # then claim AND post as that persona: CLAIM_ACTOR unset falls back to
+    # `git config user.name`, and an unset GH_TOKEN posts as whatever `gh`
+    # login happens to be ambient (the operator's own admin login on this
+    # machine) — neither matches the stage-owning persona (#466).
+    LIFECYCLE_JSON="$REPO_ROOT/personas/lifecycle.json"
+    PERSONA_DIR="$REPO_ROOT/personas"
+    dispatch_stage=""
+    status_count="$(jq -r '[.[] | select(startswith("status:"))] | length' <<<"$LABELS")"
+    if [ "$status_count" -eq 1 ]; then
+        status_label="$(jq -r '[.[] | select(startswith("status:"))] | .[0]' <<<"$LABELS")"
+        dispatch_stage="$(jq -r --arg l "$status_label" '.stages[] | select(.label == $l) | .stage // empty' "$LIFECYCLE_JSON" 2>/dev/null || true)"
+    elif [ "$status_count" -eq 0 ] && jq -e 'index("intent:new")' <<<"$LABELS" >/dev/null 2>&1; then
+        dispatch_stage="$(jq -r '.stages[0].stage // empty' "$LIFECYCLE_JSON" 2>/dev/null || true)"
+    fi
+    [ -n "$dispatch_stage" ] || dispatch_stage="implement"
+
+    dispatch_owners=()
+    for persona_file in "$PERSONA_DIR"/*.yaml; do
+        [ -f "$persona_file" ] || continue
+        grep -qx 'kind: persona' "$persona_file" || continue
+        persona_stages="$(sed -n 's/^stage:[[:space:]]*\[\(.*\)\].*/\1/p' "$persona_file")"
+        [ -n "$persona_stages" ] || continue
+        case ",$(tr -d '[:space:]' <<<"$persona_stages")," in
+            *",$dispatch_stage,"*) dispatch_owners+=("$(basename "$persona_file" .yaml)") ;;
+        esac
+    done
+
+    # Only claim as a persona when the resolved stage has exactly one owner
+    # and that owner has branch-writing authority (not comment-only reviewers
+    # like argus or atlas, whose declared authority forbids label writes;
+    # Argus R1-1 on PR #468).
+    dispatch_owner=""
+    if [ "${#dispatch_owners[@]}" -eq 1 ]; then
+        candidate="${dispatch_owners[0]}"
+        candidate_file="$PERSONA_DIR/$candidate.yaml"
+        candidate_write="$(sed -n 's/^[[:space:]]*github_write:[[:space:]]*"\?\([^"]*\)"\?/\1/p' "$candidate_file")"
+        if [ "$candidate_write" != "comments" ]; then
+            dispatch_owner="$candidate"
+        fi
+    fi
+
+    if [ -n "$dispatch_owner" ]; then
+        mint_err_file="$(mktemp)"
+        dispatch_token="$("$REPO_ROOT/scripts/auth/mint_app_token.py" --require-repo "$dispatch_owner" 2>"$mint_err_file" || true)"
+        mint_err="$(head -n 1 "$mint_err_file" 2>/dev/null || true)"
+        rm -f "$mint_err_file"
+        if [ -n "$dispatch_token" ]; then
+            echo "work_dispatch.sh: claiming as $dispatch_owner (stage: $dispatch_stage)"
+            CLAIM_ACTOR="$dispatch_owner" GH_TOKEN="$dispatch_token" "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
+        else
+            if [ -n "$mint_err" ]; then
+                echo "work_dispatch.sh: warning: could not mint an App token for $dispatch_owner ($mint_err); claiming without an explicit identity override" >&2
+            else
+                echo "work_dispatch.sh: warning: could not mint an App token for $dispatch_owner; claiming without an explicit identity override" >&2
+            fi
+            "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
+        fi
+    else
+        "$REPO_ROOT/scripts/ops/claim.sh" "$NUMBER"
+    fi
+else
+    # digest.sh's last-comment line is whatever comment is newest, which
+    # is usually a bot's review or escalation note, not the claim — so it
+    # cannot be trusted to name the holder (Argus R1-1 on PR #462). The
+    # holder is the AUTHOR of the comment that opens with a structured
+    # claim line (AGENTS.md, "Working the tracker", step 2;
+    # resume-protocol.md refusal 5), read the same way work.sh's own (g)
+    # check does — never a name out of the body, which any commenter
+    # could forge.
+    CLAIM_RE='\A[[:space:]]*\**[[:space:]]*Claim(ing)?\b'
+    CLAIM_LOGIN="$(jq -r --arg re "$CLAIM_RE" \
+        '[.comments[] | select((.body // "") | test($re; "i"))] | last | .author.login // ""' \
+        <<<"$ISSUE_JSON" 2>/dev/null)"
+    if [ -n "$CLAIM_LOGIN" ]; then
+        echo "work_dispatch.sh: #$NUMBER already carries in-progress, held by $CLAIM_LOGIN; leaving the existing claim in place"
+    else
+        echo "work_dispatch.sh: #$NUMBER already carries in-progress, but the holder cannot be established (no comment opens with a structured claim line); leaving the existing claim in place"
+    fi
+fi

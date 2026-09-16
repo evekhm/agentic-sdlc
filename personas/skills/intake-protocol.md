@@ -32,7 +32,15 @@ intent PR opens.
 6. **House shape.** Problem, Proposed outcome, Affected users and
    systems, Constraints, Relationships, Open questions, Non-goals.
    Every section filled, or marked "none" with the reason.
-7. **Search again before the PR.** Rerun the tracker search
+7. **Surface open questions before moving on.** A non-empty Open
+   questions section is not the end of the turn — the same turn,
+   before filing, opening the PR, or anything else, present each
+   question to the human by name and ask for a decision. A question is
+   resolved only once the human has actually seen it and either
+   answered it or explicitly said to leave it open; it never resolves
+   by silently filing it and moving on. Applies equally at intake and
+   at PLAN's intent.md.
+8. **Search again before the PR.** Rerun the tracker search
    immediately before opening the intent PR. A match between filing
    and PR is the check working.
 
@@ -42,6 +50,8 @@ intent PR opens.
 - An intent that touches a recorded decision without naming it.
 - Filing before the human confirmed the read-back (interactive), or
   while the body lacks a Relationships section (headless).
+- Filing, or opening the intent PR, while a drafted Open questions
+  section has not yet been put in front of the human.
 
 ## Exit condition
 

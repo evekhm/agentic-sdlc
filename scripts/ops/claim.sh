@@ -34,7 +34,12 @@
 #                  lowercased; else $USER.
 #   CLAIM_SESSION  the harness session name, so a peer can message it.
 #                  Default `unnamed`.
-#   CLAIM_STAGE    the stage being worked. Default `implement`.
+#   CLAIM_STAGE    the stage being worked. Default: derived from the
+#                  issue's status:* label through personas/lifecycle.json,
+#                  the same table scripts/ops/work.sh reads (D1/D2);
+#                  `intent:new` with no status:* label resolves to the
+#                  ladder's first stage; an issue with neither resolves
+#                  to `implement`, same as before this was derived.
 #   GITHUB_REPO    default evekhm/agentic-sdlc.
 #   DRY_RUN=1      print `would: <command>` for every mutation instead of
 #                  running it. All reads still run, so every refusal
@@ -129,6 +134,12 @@ fi
 # about the issue's contents.
 ! has_label "hold" || refuse "#$NUMBER carries hold"
 
+# blocked stops a claim unconditionally too (personas/skills/resume-protocol.md
+# refusal 3) — checked here, not only when the stage-label write below
+# happens to run, so it applies the same way regardless of the issue's
+# label state (R1-6, round 2).
+! has_label "blocked" || refuse "#$NUMBER carries blocked"
+
 # The label alone is the mutex. Naming the holder is a courtesy on top:
 # a claim comment is the structured line AGENTS.md prescribes (the body
 # OPENS with `Claim`/`Claiming`, optionally bold), and its AUTHOR is the
@@ -177,7 +188,6 @@ ACTOR="${ACTOR#-}"; ACTOR="${ACTOR%-}"
 [ -n "$ACTOR" ] \
     || die "cannot derive an actor name; set CLAIM_ACTOR or git config user.name"
 SESSION="${CLAIM_SESSION:-unnamed}"
-STAGE="${CLAIM_STAGE:-implement}"
 
 # The slug is cosmetic — the issue number is the identity — so it is
 # derived, never asked for, and cut on a word boundary at 40 characters.
@@ -212,6 +222,27 @@ PRIMARY="$(git worktree list --porcelain 2>/dev/null \
 [ -n "$PRIMARY" ] || die "not inside a git repository"
 ROOT="$(git -C "$PRIMARY" rev-parse --show-toplevel)"
 
+# The stage named in the claim comment, derived through the same table
+# scripts/ops/work.sh dispatches from (personas/lifecycle.json), so the
+# two never disagree about what a label means. Best-effort: this is a
+# courtesy line on a comment, not a dispatch gate, so an issue with no
+# status:* label and no intent:new falls back to `implement` rather
+# than refusing the claim.
+STAGE="${CLAIM_STAGE:-}"
+if [ -z "$STAGE" ]; then
+    LIFECYCLE_JSON="$ROOT/personas/lifecycle.json"
+    status_labels="$(grep '^status:' <<<"$labels" || true)"
+    status_count=0
+    [ -z "$status_labels" ] || status_count="$(grep -c . <<<"$status_labels")"
+    if [ "$status_count" -eq 1 ] && [ -f "$LIFECYCLE_JSON" ]; then
+        STAGE="$(jq -r --arg l "$status_labels" \
+            '.stages[] | select(.label == $l) | .stage' "$LIFECYCLE_JSON" 2>/dev/null)"
+    elif [ "$status_count" -eq 0 ] && has_label "intent:new" && [ -f "$LIFECYCLE_JSON" ]; then
+        STAGE="$(jq -r '.stages[0].stage' "$LIFECYCLE_JSON" 2>/dev/null)"
+    fi
+    [ -n "$STAGE" ] || STAGE="implement"
+fi
+
 BRANCH="$ACTOR/$NUMBER-$SLUG"
 WT_REL=".claude/worktrees/$ACTOR-$NUMBER-$SLUG"
 WT_ABS="$ROOT/$WT_REL"
@@ -231,6 +262,35 @@ p_branch="$(git -C "$ROOT" branch --show-current 2>/dev/null || true)"
 p_dirty="$(git -C "$ROOT" status --short 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$p_branch" != "main" ] || [ "$p_dirty" != 0 ]; then
     echo "warning: primary checkout $ROOT is on '${p_branch:-(detached)}' with $p_dirty uncommitted/untracked file(s) — left untouched (it is a peer's)" >&2
+fi
+
+# --- Stage label: fill in status:* when the issue carries none at all (#459) ----
+# Resolved exactly the way work.sh already resolves a rung
+# (scripts/ops/work.sh:349-366), not from STAGE/CLAIM_STAGE: a single
+# status:* label already IS the stage (the case above, untouched); with
+# none, intent:new names rung 1 (docs/SPEC.md:1306, personas/lifecycle.json
+# .stages[0]); anything else is deliberately not on the ladder at all
+# (docs/SPEC.md:732 — every defect-repair issue) and gets no label at all.
+# STAGE only names the claim comment below. Driving this decision from
+# STAGE's "implement" default — the literal default whenever a caller
+# does not set CLAIM_STAGE, which is every documented caller today — is
+# what force-promoted both of those states to status:implementing and
+# corrupted real lifecycle state (R1-1, rounds 1 and 2).
+if ! grep -Eq '^status:' <<<"$labels" && grep -Fxq "intent:new" <<<"$labels"; then
+    TARGET_LABEL="$(jq -r '.stages[0].label' "$ROOT/personas/lifecycle.json" 2>/dev/null || true)"
+    if [ -n "$TARGET_LABEL" ]; then
+        echo "    stage:    (no status label) -> $TARGET_LABEL"
+        fresh="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER" | jq -r '.labels[].name')" \
+            || die "failed to re-read labels on #$NUMBER immediately before the stage-label write (fail-closed)"
+        ! grep -Fxq "hold" <<<"$fresh" \
+            || refuse "#$NUMBER carries hold (re-checked immediately before the stage-label write)"
+        ! grep -Fxq "blocked" <<<"$fresh" \
+            || refuse "#$NUMBER carries blocked (re-checked immediately before the stage-label write)"
+        ! grep -Eq '^status:' <<<"$fresh" \
+            || refuse "#$NUMBER gained a status:* label since the claim began (re-checked immediately before the stage-label write)"
+        run gh api --method DELETE "repos/$GITHUB_REPO/issues/$NUMBER/labels/intent:new"
+        run gh api --method POST "repos/$GITHUB_REPO/issues/$NUMBER/labels" -f "labels[]=$TARGET_LABEL"
+    fi
 fi
 
 # --- Claim, then enter -----------------------------------------------------------

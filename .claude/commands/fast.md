@@ -12,3 +12,7 @@ allowed-tools: Bash(scripts/ops/fast.sh:*), Bash(scripts/ops/digest.sh:*), Bash(
 2. Confirm the inferred issue number, title, and description summary to the user in your response.
 3. Do not prompt the user for confirmation or pause for keyboard input — proceed directly with the execution and next steps.
 
+Once the commands above finish, tell the user in one short message:
+the issue number and title (from the digest), what `fast.sh` did (or
+would do, on `--dry-run`), and the resulting branch/PR if one was
+created. If it refused instead, state the refusal reason plainly.

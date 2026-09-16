@@ -15,7 +15,10 @@ here; a harness file must not duplicate it.
 
 Persona-specific standards (reviewer protocols, implementer rules,
 authority levels) are NOT in this file: they belong to the canonical
-persona definitions under `personas/` and are compiled per harness.
+persona definitions under `personas/` and are compiled per harness
+via `scripts/sync_agents.py`. Similarly, shared slash commands belong
+to canonical sources under `commands/` and are compiled cross-harness
+via `scripts/sync_commands.py`.
 This file carries only what binds every agent equally.
 
 ## Session checklist
@@ -370,7 +373,7 @@ checks.
 Note on compiled-target preflight: overriding `DEPLOYMENTS` switches off
 `work.sh`'s compiled-target preflight check (`launch_missing`). Operators
 running under local overrides must ensure their compiled targets stay in sync
-by running `python3 scripts/sync_agents.py --check`. Local pins that collapse both
+by running `python3 scripts/sync_agents.py --check` and `python3 scripts/sync_commands.py --check`. Local pins that collapse both
 reviewers onto one model family are suitable for authoring stages (plan, spec,
 build, implement), but review output produced under such a pin is not
 protocol-valid.
