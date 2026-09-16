@@ -13,7 +13,7 @@ this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line. Live `gh issue list` state always
 beats this file.
 
-Status line: 2026-09-16, revision fifteen (~07:35 UTC, main at
+Status line: 2026-09-16, revision fifteen (~07:45 UTC, main at
 `9e19fa1`).
 
 Since revision fourteen, six days passed and the loop dispatched
@@ -372,10 +372,14 @@ silently and waits for a person who does not know they are needed.
    | 35064696473 | #421 | 2 | 1762s | 445,970 | 602,644 |
    | 35065046628 | #458 | 6 | 1791s | 645,403 | 1,373,400 |
    | 35065153132 | #486 | 1 | 1358s | 248,680 | 314,445 |
+   | 35067230086 | #423 | 1 | 1834s | 1,057,947 | 2,165,446 |
 
-   1,761,085 fresh input and 2,827,954 cache read for four empty
-   responses, four permanently red required checks and about 100
-   minutes of runner time. The fix is a terminal state: give up after a
+   The first four are 1,761,085 fresh input and 2,827,954 cache read
+   for four empty responses, four permanently red required checks and
+   about 100 minutes of runner time. The fifth row was added at 07:45Z
+   after this revision's other entries and it alone cost more input
+   than the first four averaged; across all five, 2,819,032 fresh input
+   and 4,993,400 cache read for five empty responses. The fix is a terminal state: give up after a
    bounded number of attempts and exit distinctly enough that the layer
    above can tell a quota refusal from a review verdict. Distinct from
    #312, which is a *completed* review whose stream was interrupted;
@@ -431,8 +435,19 @@ silently and waits for a person who does not know they are needed.
    loop, and neither alone strands a PR permanently. PR #480 and PR #458
    both took a 429 within about ninety seconds of each other on
    2026-09-16 and both now hold an `atlas via gh-actions=FAILURE` that
-   no dispatch can replace. An empty commit on each branch is the only
+   no dispatch can replace. **PR #423 joined them at 07:41Z.** Its
+   atlas dispatch, run 35067230086, was fired to satisfy conjunct (3),
+   the only conjunct besides (2) that gate run 35068510323 had declined
+   on. It took a 429 at attempt 1 and held its window open to
+   `--print-timeout 30m`, so it satisfies neither conjunct and leaves
+   behind the red that #491 makes permanent. Three PRs sit in that
+   state as of 2026-09-16. An empty commit on each branch is the only
    mechanic, and it is an operator decision.
+
+   PR #423 is the sharpest single case in this plan. Every conjunct
+   except (2) and (3) reads true on it, GitHub's own `mergeStateStatus`
+   reads CLEAN, argus has reviewed it twice at the current head, and it
+   still cannot merge without a human.
 
    A second conjunct (2) hypothesis was tested and dropped. A CANCELLED
    context that is newest for its name would count as failing under the
