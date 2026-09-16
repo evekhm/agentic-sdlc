@@ -422,6 +422,18 @@ silently and waits for a person who does not know they are needed.
    cannot reach. Land it before #489 and #490, because it is what makes
    their fixes verifiable without an operator.
 
+   The rollup returns the **oldest** run for a reviewer name, and three
+   successive green dispatches across two names all failed to enter it
+   (`104696161088` argus 06:55:52Z, `104696335134` atlas 06:56:22Z,
+   `104698079394` argus 07:08:01Z). That rules out a race or one unlucky
+   suite. **#491 and #490 compound**: #490 turns a reviewer check red
+   for an infrastructure reason, #491 makes that red unclearable by the
+   loop, and neither alone strands a PR permanently. PR #480 and PR #458
+   both took a 429 within about ninety seconds of each other on
+   2026-09-16 and both now hold an `atlas via gh-actions=FAILURE` that
+   no dispatch can replace. An empty commit on each branch is the only
+   mechanic, and it is an operator decision.
+
    A second conjunct (2) hypothesis was tested and dropped. A CANCELLED
    context that is newest for its name would count as failing under the
    allowlist at `merge_gate.sh:513`, and the concurrency group looked
