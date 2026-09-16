@@ -154,6 +154,90 @@ sessions therefore has exactly one mechanism: the GitHub issue.
   its disposition footnote. This exception ends the day the first
   issue is filed.
 
+## The handover contract
+
+One invariant carries every harness-agnostic claim in this system:
+
+> **No agent communicates with another agent. Every handover is a
+> write to GitHub, then a cold read from GitHub by a process that
+> starts later.**
+
+Two agents are never alive at the same moment in the same handover.
+Athena commits `spec.md` and opens a pull request; the pull request
+merges; a label moves; a ledger row appears; minutes or days later a
+cold Daedalus process, possibly on another vendor's binary, reads that
+folder and those labels and begins. Daedalus never sees Athena.
+
+Three properties follow, and each is a reason to hold the invariant:
+
+- **Harness agnosticism.** The contract is a file path, a label and a
+  comment marker. Any program that can read a git checkout and the
+  GitHub API can hold a rung. A third harness is three functions in
+  `scripts/ops/work.sh` (`target_of`, `launch_argv`, envelope parsing)
+  plus a compiler target. It touches no persona, no protocol and no
+  gate.
+- **Zero-model transitions.** Every rung-to-rung transition is
+  deterministic code. `scripts/ci/lifecycle_advance.sh` moves the
+  label and appends the dispatch row, `scripts/ci/merge_gate.sh`
+  evaluates its conjuncts, `scripts/ci/review_recorder.py` builds the
+  consensus ledger, `scripts/placement/vm-local/poll.sh` claims the
+  row. No model is asked what happens next.
+- **Restartability.** State is durable and external, so a dead session
+  costs one rung. Any rung re-runs from its inputs.
+
+### The terms
+
+This is the whole of the machine-readable state. A rung reads these
+and nothing else.
+
+| What | Where | Sole writer |
+|---|---|---|
+| Current rung | exactly one `status:*` label; two is corrupted state and halts | `lifecycle_advance.sh` |
+| Mutex | `in-progress` label plus a comment opening `Claim: <actor> (<session>), stage: …` | `claim.sh` |
+| Dispatch queue | `<!-- loop-ledger-row: dispatch\|terminal\|refusal:<reason> rung:<n> head-oid:<40hex> pr:<n> at:<iso> event:<id> cost:<usd> -->` | Themis |
+| Review state | `<!-- consensus-ledger:<pr> -->` with `assigned:`, `reviewed-head:<persona>:<oid>`, `ledger-row:<id>:<severity>:<status>:<peer>` | `review_recorder.py` |
+| The artifacts | `intent/<issue>-<slug>/{intent,spec,plan}.md` | the rung's persona |
+| Stage → persona → artifact | `personas/lifecycle.json` | committed, read-only at runtime |
+
+The ledger and consensus schemas are stated canonically in script
+headers (`scripts/ci/merge_gate.sh:18-44`). Those headers are the
+contract until they graduate into docs/SPEC.md.
+
+### Rules
+
+- **MUST NOT** pass state between rungs through a session, a
+  transcript, a prompt, a chat message or a local file. When the next
+  rung cannot read it from the table above, it does not exist.
+- **MUST NOT** add a mechanism that requires two agents to be alive at
+  once. Live inter-agent messaging reintroduces a shared session
+  format and a transport, and each of those is a harness coupling.
+- **MUST** write the artifact before the handover fires. The merge is
+  the handover, and anything uncommitted at merge time is lost.
+- A rung **MUST** start from a cold process holding no memory of any
+  prior session.
+- Where the contract is not yet machine-readable, say so in the
+  artifact. The next reader must never have to infer it.
+
+### Where the contract is not yet honored
+
+The handover *between* rungs is model-free. The handover *into and out
+of* a rung is prose that one model writes and another model reads:
+
+- The dispatch prompt carries no state (`work.sh:637`): one literal
+  naming only the issue number, with no stage, no folder path, no
+  artifact paths and no prior findings. The agent discovers its own
+  rung by reading.
+- A fix round hands over a bare pull request number (`poll.sh:351`);
+  the reviewer's findings reach the builder because a model reads the
+  comments.
+- The outcome returns as `WORK-RESULT: <ok|refused|blocked>`, a line
+  the model prints and a launcher greps.
+- Handoff comments (Done/Decided/Next/Blocked) are unstructured, and
+  no script parses them.
+
+Closing these is the system's largest open cost lever, for the reason
+measured in "Cost of execution" below.
+
 ## Working the tracker: pick, claim, work, hand off
 
 The repository is `github.com/evekhm/agentic-sdlc`. This is the
@@ -402,7 +486,7 @@ build, implement), but review output produced under such a pin is not
 protocol-valid.
 ### Owner-authorized ladder compression: the fast-track door
 
-`scripts/ops/fast.sh <issue>` (and `/fast <issue>` in Claude Code and interactive sessions) is the operator door for ladder compression (#415, #444). When an owner directs a single-round compression for an issue:
+`scripts/ops/fast.sh [<issue>]` (and `/fast [<issue>]` in Claude Code and interactive sessions; `<issue>` is optional when already inside the issue's worktree) is the operator door for ladder compression (#415, #444, #454). When an owner directs a single-round compression for an issue:
 - Fast-tracking records the caller or owner authorization signature, requires collaborator write permissions, and refuses unattended GitHub Actions. Autonomous bot self-authorization policies remain open for exploration in a follow-up issue.
 - It transitions the issue directly to `status:implementing`, clearing intake and earlier stage labels, and posts the fast-track authorization comment.
 - The single-round PR must carry the required header `Owner-authorized ladder compression: combines intent/spec/plan/implement into one round (Refs #<n>)` and `Closes #<n>`.
@@ -788,3 +872,59 @@ numbers cited were measured in the predecessor repo
   file names it) and read two numbers: hit rate
   `read/(read+write+fresh)` for price, and tokens-per-message for
   volume. Both, always — either one alone hides the other.
+
+### Prompt caching does not cross a handover
+
+Measured on this repository: 24 poller-dispatched runs over six days
+(`ops/poller/poll.log`, 2026-09-10 to 2026-09-16, every one of them
+Antigravity/Gemini).
+
+```text
+fresh input     20,193,937
+cache reads    191,691,158     9.5x the fresh input
+output           1,374,388
+thinking           751,314
+```
+
+Cache-read ratio per run, `cache_read/(cache_read+input)`: min 0.688,
+median 0.913, mean 0.894, max 0.934. The ratio tracks **run
+duration**. A 58-second run read 150K from cache at 0.688; twenty-minute
+runs read 13M to 21M at 0.93. The cache accumulates across the internal
+tool-call turns of one session.
+
+At Flash rates the six days cost ~$37.50, of which cache reads were
+$14.38 — **38% of the bill at one-tenth the input rate**. Priced as
+fresh input those same reads would be $143.77, so caching is saving
+4.5x.
+
+The rules that follow:
+
+- **The cache is an intra-rung economy.** Budget it inside a session
+  and expect nothing from it across a handover. No provider cache
+  survives a rung boundary here: the fastest observed gap was 51
+  minutes, six-day gaps are routine, and the ceiling is a 1-hour TTL.
+- **Never buy a longer TTL to bridge a handover.** The 1-hour TTL
+  costs 2x on write and still cannot reach the next rung.
+- **A harness switch at a rung boundary costs zero extra cache**,
+  because no cross-rung cache exists to lose. Pick the harness for
+  judgment and price. Pick the placement for credential locality and
+  worktree isolation.
+- **The cache is server-side, scoped to the org or project, and keyed
+  on the request prefix.** Two machines emitting byte-identical
+  prefixes share it. Two personas on one machine emit different
+  prefixes and share nothing. Config drift between machines — a
+  changed AGENTS.md, a different harness version, a reordered tool
+  list — invalidates everything after the first differing byte.
+  Identical configuration is what produces a hit; hardware location
+  has no effect.
+- **Reduce the cold start, because you cannot cache it.** Fresh input
+  averaged 841K tokens per run, and that is the price of an agent
+  rediscovering its own rung. A dispatch that names the stage and the
+  artifact paths converts exploration into a bounded read. This is the
+  cost argument for closing the gaps in "The handover contract".
+
+Claude Code's explicit cache writes (1.25x and 2x) behave differently,
+and the poller log carries no Claude Code cohort at all: on the
+current pins every poller-dispatched rung is Antigravity, and the
+Claude seats run their reviewers from Actions. Re-measure these ratios
+before moving a rung persona onto Claude Code.
