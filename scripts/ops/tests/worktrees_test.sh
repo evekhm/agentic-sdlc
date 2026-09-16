@@ -157,4 +157,14 @@ done
 # --- argument handling -------------------------------------------------------
 bash "$SCRIPT" --bogus >/dev/null 2>&1 && fail "unknown flag accepted" || pass "unknown flag is refused"
 
+# --help prints a fixed line range of the header comment, so the range drifts
+# silently whenever the header grows. The last header line is the anchor.
+HELP="$(bash "$SCRIPT" --help)"
+echo "$HELP" | tail -1 | grep -q 'whoever owns it' \
+  && pass "--help reaches the end of the header comment" \
+  || fail "--help line range is short of the header's last line"
+echo "$HELP" | grep -q '^set -euo pipefail' \
+  && fail "--help range runs past the header into the code" \
+  || pass "--help range stops at the header"
+
 echo "worktrees_test.sh: all scenarios passed"

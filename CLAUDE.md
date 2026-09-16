@@ -15,8 +15,10 @@ tiers"), for sessions whose harness exposes subagent spawning
 agents without a subagent tool are exempt per that section:
 
 A tier resolves to a model through `config/model_tiers.yaml` under
-`harnesses.claude-code.<TIER>`, the one place in the repository where a
-model ID is written by hand. A compiled persona in `.claude/agents/`
+`harnesses.claude-code.<TIER>`, keyed by the tier name with its `_TIER`
+suffix dropped (`FAST_TIER` reads `harnesses.claude-code.FAST`). That
+table is the one place in the repository where a model ID is written by
+hand. A compiled persona in `.claude/agents/`
 already carries its resolved model in frontmatter, emitted by
 `scripts/sync_agents.py` and drift-gated by `ci-gates.yml`, so
 dispatching one needs no model override. Pass `model=` on an Agent call
