@@ -279,6 +279,30 @@ pinned in `config/deployments.yaml`, and the same line with the
 override opens it on the other harness; both start from the newest
 handoff.
 
+## Gate H: the handover contract holds without a human
+
+Gate Y assumes the handover between rungs works. Six days of poller
+logs say it holds only while every dispatch exits cleanly and every
+artifact is read by a human. This gate makes the contract carry its
+own state, its own liveness and its own visibility. All four rows were
+filed on 2026-09-16; they are the three-issue gap between the triage's
+projected open count and the measured one. The peer session that
+diagnosed them holds PR #485 for the `process.handover` capability.
+
+| # | Issue | Why it is here | State |
+|---|-------|----------------|-------|
+| H1 | #482 | Dispatch carries no state. The unattended prompt (`scripts/ops/work.sh:637`) names an issue number and nothing else: no stage, no intent folder path, no artifact paths, no prior findings; a fix round hands over a bare PR number (`scripts/placement/vm-local/poll.sh:351`). The agent discovers its own rung by reading, and that discovery is the largest controllable cost in the system. The proposal puts stage, rung number, intent folder path, existing artifacts and reviewer finding IDs into the dispatch, and replaces the grepped `WORK-RESULT:` prose with a structured marker. `scripts/ops/digest.sh` already assembles most of it for the interactive `/work` door. | Filed 2026-09-16T06:30:51Z, `intent:new`. Evidence on the issue: 24 poller runs over six days, 20,193,937 fresh input (841K per run), 191,691,158 cache reads, 1,374,388 output, 751,314 thinking; cache-read ratio min 0.688, median 0.913, mean 0.894, tracking run duration, so the whole cache economy sits inside one rung and the 841K survives no rung boundary |
+| H2 | #483 | No contract resource has a liveness check. The `in-progress` label and its `Claim:` comment, the dispatch branch and the worktree can each be held by a process that no longer exists, and nothing reaps any of them, so a crashed dispatch becomes a permanent stop. The poller already implements this pattern for its own local PR lock files (`poll.sh:244-262`, `POLL_LOCK_MAX_AGE=7200`, removes the lock when the recorded PID is dead); none of the three shared resources gets it. This is the same defect the six-day jam ran on, seen from the process side: five athena claims outlived their processes and `max_concurrent_first_hops: 1` counted every one of them. | Filed 2026-09-16T06:30:52Z, `intent:new`. Prior sightings named on the issue: #252, #363, #383, all three still open. One live instance as of 2026-09-16, reported by a peer session and confirmed here with `ps`: pid 1737758, `bash runs/2026-09-10_050016_agy-waves/run-350f.sh`, child agy pid 1737762 holding a FIX ROUND 1 prompt for #321 on PR #350, elapsed 6-02:03:54 and still running. PR #350 merged on 2026-09-10 at 05:33Z, so the prompt has been stale since roughly three minutes after it started. Revision fourteen flagged tmux and agy residue as unverified; this is the confirmed instance. Killing it is an operator decision below |
+| H3 | #484 | The machine-readable state every rung reads is stated in bash comments. The loop ledger row schema lives in `scripts/ci/merge_gate.sh:32-44` and is duplicated in `scripts/ci/lifecycle_advance.sh:560-591`; the consensus ledger schema lives in `merge_gate.sh:18-30`. docs/SPEC.md covers the loop behaviourally without stating the grammars, so a third harness has to read bash to implement the contract. PR #485 lands a `process.handover` capability holding the resource table; #484 is the grammars themselves plus drift coverage. | Filed 2026-09-16T06:30:53Z, `intent:new` |
+| H4 | #481 | The observability gap. Dispatch stops in well-defined places — `work_dispatch.sh`'s `refused:` circuit breaker, a headless `WORK-RESULT: blocked`, a non-empty "Open questions" section — and every one is prose buried in a diff, a comment or a log line. This is also the home the triage proposed for the ~25 unfiled agent open questions. | Filed 2026-09-16T06:02:55Z, `enhancement,in-progress,status:planning`. Athena's intent landed as PR #487 at 06:47Z: `status:needs-input` label, `ESCALATION: #<n> kind=… stage=…` marker, `/escalations` compiled door. The only Gate H row with a rung under way |
+
+Exit criterion: a dispatch killed mid-run self-heals within a bounded
+interval — the claim, the branch and the worktree are released by a
+sweeper reading a liveness signal, and the rung relaunches with no
+operator touch — and one command shows an operator the whole loop's
+live state: every issue waiting on a human decision, the reason, and
+the stage it stopped at.
+
 ## Order of landing
 
 Revisions ten through fourteen ordered by dependency. Revision fifteen
@@ -298,12 +322,13 @@ silently and waits for a person who does not know they are needed.
    finished issue sits at `status:in-review` forever, which is most of
    what the 121-issue backlog actually was. Highest leverage item in
    the file.
-2. **#252 / #251 follow-through** — release a claim when its holder
-   dies. Both issues are closed as delivered, and the six-day jam
-   happened anyway, so the delivered fix does not cover a poller
-   process that dies without unwinding. Re-verify before trusting it;
-   if it is genuinely uncovered, file a new issue and leave the
-   delivered one closed.
+2. **#483 (H2), with #252 / #251 re-verified under it** — release a
+   claim when its holder dies. #252 and #251 are closed as delivered,
+   and the six-day jam happened anyway, so the delivered fix does not
+   cover a poller process that dies without unwinding. #483 was filed
+   the same morning from the process side and is the live home for
+   this; re-verify the delivered fix against it and leave the closed
+   issues closed.
 3. **#397** — the withheld dispatch row. An artifact PR that merges
    while `in-progress` is held produces no ledger row, and nothing
    re-issues it, so the rung stalls with no marker saying why.
@@ -328,8 +353,11 @@ several other issues fold into it: **#224 → #227 → #236 → #463 → #203
 ### Gate 5 — the real work
 
 Everything that needs a spec: #355, #82, #405, #417, #479,
-#104/#108/#190, #356, #318, #11, #117, #481. Ordered inside the gate by
-whichever unblocks another item. Size does not set the order here.
+#104/#108/#190, #356, #318, #11, #117, #481, #482, #484. Ordered inside
+the gate by whichever unblocks another item. Size does not set the
+order here. #481, #482 and #484 are Gate H rows H4, H1 and H3; H1 pays
+for itself in cache economy the moment it lands, so run it early in
+this gate.
 
 Two cautions carried from the triage, both of which would cost a wasted
 round if missed:
@@ -477,8 +505,17 @@ Opened by the 2026-09-16 triage, newest first:
   refusals. The workflow token does it today under `issues: write`.
 - **Stale processes**: a bare `agy` process 204 hours old, the #265
   REPL in tmux `waves:265i-odyssey` (11 hours), the #350 fix-round
-  REPL in `waves:350f-odyssey` (1 hour); the operator kills, never a
-  seat.
+  REPL in `waves:350f-odyssey`; the operator kills, never a seat.
+  Updated 2026-09-16: the #350 row is still alive and `ps` puts it at
+  elapsed 6-02:03:54 — pid 1737758 running
+  `runs/2026-09-10_050016_agy-waves/run-350f.sh` with child agy pid
+  1737762 on a FIX ROUND 1 prompt for #321. PR #350 merged at 05:33Z
+  on 2026-09-10, three minutes after that prompt started, so nothing
+  it does can land. It is the verified instance of the class #483 (H2)
+  describes, and no agent will reap it, because reaping is exactly the
+  behaviour #483 asks for. agy launches carry no per-token cost here,
+  so the harm is a held slot and a confused timeline. Recommended:
+  kill both pids now and let #483 make it automatic.
 - **Reopen #321.** Closed by accident at 07:34:52Z by a closing
   reference inside PR #368's body, a sentence listing operator
   decisions, the #245 trap; the advisor note on the issue at 07:42Z
