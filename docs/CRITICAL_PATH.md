@@ -352,20 +352,41 @@ silently and waits for a person who does not know they are needed.
    edit fires no `pull_request` run. A red required check is the one
    stall in this loop that no agent can clear, which is why it belongs
    in Gate 3 and not in the XS batch its diff size would suggest.
-8. **#490** — a Vertex `RESOURCE_EXHAUSTED` (429) kills a reviewer run
-   with no retry. Filed 2026-09-16 from PR #480's atlas job (run
-   35064689660): the error reads `attempt 1` and there is no attempt
-   two, the job idles out its whole 30-minute window
-   (`duration_seconds` 1762 against `timeout 1860`) before the failure
-   becomes visible, and the rung bills 421K input plus 537K cache read
-   plus 11.6K output plus 9.2K thinking for an empty `response` and no
-   ledger row. A retry pays the cache read again and little else, so
-   retrying is the cheap path. Distinct from #312, which is a
-   *completed* review whose stream was interrupted; here the API
-   refused the turn and no work exists. Same consequence as #489: the
-   check goes red for a reason that carries no opinion about the PR,
-   and today only a human clears it. Feeder for #481's escalation
-   queue and a candidate for #483's sweeper.
+8. **#490** — a Vertex `RESOURCE_EXHAUSTED` (429) costs a reviewer run
+   its entire window. Filed 2026-09-16 from PR #480's atlas job. The
+   retry loop does exist, and the first reading of this issue said
+   otherwise: PR #480's tail reads `attempt 1` while PR #458's reads
+   `attempt 6`, so `agy` retries. The defect is that the loop has no
+   terminal state of its own. It runs until `--print-timeout 30m` ends
+   it, so the attempt count it reaches is arbitrary and a saturated
+   quota always bills the full window before anything downstream learns
+   the turn was refused. A measured cohort, all `atlas` on
+   gemini-3.8-flash-high, all launched inside six minutes on
+   2026-09-16:
+
+   | run | PR | attempt at failure | duration | input | cache read |
+   |---|---|---|---|---|---|
+   | 35064689660 | #480 | 1 | 1762s | 421,032 | 537,465 |
+   | 35064696473 | #421 | 2 | 1762s | 445,970 | 602,644 |
+   | 35065046628 | #458 | 6 | 1791s | 645,403 | 1,373,400 |
+   | 35065153132 | #486 | 1 | 1358s | 248,680 | 314,445 |
+
+   1,761,085 fresh input and 2,827,954 cache read for four empty
+   responses, four permanently red required checks and about 100
+   minutes of runner time. The fix is a terminal state: give up after a
+   bounded number of attempts and exit distinctly enough that the layer
+   above can tell a quota refusal from a review verdict. Distinct from
+   #312, which is a *completed* review whose stream was interrupted;
+   here the API refused the turn and no work exists. Same consequence
+   as #489 — the check goes red for a reason that carries no opinion
+   about the PR, and today only a human clears it. Feeder for #481's
+   escalation queue and a candidate for #483's sweeper.
+
+   The quota refuses **intermittently**, which matters more than the
+   raw failure count. `argus` succeeded throughout the same window and
+   an `atlas` run at 07:03 (35066601100, PR #485) succeeded, so any
+   release condition phrased as "one round came back clean" can pass on
+   luck while the underlying condition is unchanged.
 
 ### Gate 4 — the fast-track batch
 
@@ -383,9 +404,16 @@ never retried, burned its full 30-minute window and billed roughly
 carry two reviewer dispatches, so opening the batch into a quota that
 is already refusing turns converts a scheduling decision into a wave
 of red checks that only a human can clear, which is exactly the class
-#489 and #490 describe. Two conditions release the gate: #490's retry
-lands, and the identity theme's first PR completes a clean two-reviewer
-round on its own. Sequencing note for whoever opens it — #227 and #489
+#489 and #490 describe. Two conditions release the gate. The second is
+phrased against the loop's behaviour, because the quota refuses
+intermittently and any condition satisfied by a single clean round can
+be met by luck: **(a)** #490's terminal state lands,
+so a quota refusal ends in bounded time and reports itself as a
+refusal; **(b)** an infrastructure-red check is re-runnable by the loop
+itself, with no operator in the path. (b) is #481 and #483 territory,
+and until it holds, every red check this batch produces is a human-only
+stall however few of them there are. Sequencing note for whoever
+opens it — #227 and #489
 touch the same resolver in `scripts/ops/lib/github.sh`, so they are one
 diff or two strictly ordered ones, and #463 already carries a live
 `status:planning` rung, so it stays on the ladder and out of this
