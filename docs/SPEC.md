@@ -119,7 +119,8 @@ only harness-specific mechanics. INTENT.md is the founding
 system-level intent (change #0). `README.md` is the entry point for
 a person arriving at the repository (#35, `intent/35-readme/`): it
 introduces the system as designed — the actors, the five rungs, the
-orchestrator, the two harnesses, what it adds to the playbook — with
+orchestrator, the handover contract (`process.handover`), the two
+harnesses, what it adds to the playbook — with
 each seat or rung that lives on the tracker citing its issue and no
 narration of build status (that lives in `docs/CRITICAL_PATH.md` and
 the pinned tracker), and it never addresses an agent — no compiled prompt points an agent at it. It explains and never duplicates, so every
@@ -135,6 +136,49 @@ section ceiling of #35 D2/D4 was lifted by the product owner on
 2026-09-03).
 Reference docs live in `docs/` (BLOG.md, CONTEXT.md, this file),
 uppercase names throughout.
+
+### process.handover
+No agent communicates with another agent. Every handover is a write to
+GitHub followed by a cold read from GitHub by a process that starts
+later, and two agents are never alive at the same moment in the same
+handover. AGENTS.md ("The handover contract") is the normative
+statement; README's section 7 is the narrative one. The whole of the
+machine-readable state a rung may read is six resources, each with a
+single writer: the current rung is exactly one `status:*` label
+(`lifecycle_advance.sh`; two labels is corrupted state and halts); the
+mutex is the `in-progress` label plus a `Claim: <actor> (<session>),
+stage: …` comment (`claim.sh`); the dispatch queue is the loop-ledger
+row (Themis); review state is the consensus ledger (`review_recorder.py`);
+the artifacts are `intent/<issue>-<slug>/{intent,spec,plan}.md` (the
+rung's persona); the stage-to-persona-to-artifact map is
+`personas/lifecycle.json`, committed and read-only at runtime. The
+ledger and consensus grammars are stated canonically in
+`scripts/ci/merge_gate.sh` and duplicated in `lifecycle_advance.sh`
+(#484 removes the duplication); those headers are the contract until
+they graduate into this document. Three properties follow and are the
+reason to hold the invariant: harness agnosticism (a third harness is
+`target_of`, `launch_argv` and envelope parsing in
+`scripts/ops/work.sh` plus a compiler target, touching no persona, no
+protocol and no gate), zero-model rung-to-rung transitions
+(`lifecycle_advance.sh`, `merge_gate.sh`, `review_recorder.py`,
+`scripts/placement/vm-local/poll.sh` — no model is asked what happens
+next), and restartability (a dead session costs one rung, because
+every rung re-runs from its inputs). It binds as MUST NOT pass state
+between rungs through a session, transcript, prompt, chat message or
+local file; MUST NOT add a mechanism requiring two agents alive at
+once; MUST write the artifact before the handover fires, since the
+merge is the handover; and a rung MUST start from a cold process
+holding no memory of a prior session. Prompt caching is an intra-rung
+economy under this contract: a cache prefix is built during one rung
+and is gone by the next cold start, so a harness switch at a rung
+boundary costs no extra cache and the controllable number is the fresh
+input of the cold start (#482). The contract is not yet honored at the
+boundary *into and out of* a rung: the dispatch prompt carries no state
+(`work.sh:637`, #482), a fix round hands over a bare pull request
+number (`poll.sh:351`, #483), the outcome returns as a
+`WORK-RESULT: <ok|refused|blocked>` line a model prints and a launcher
+greps, and handoff comments are unstructured with no script parsing
+them. `docs/CRITICAL_PATH.md` Gate H tracks closing them.
 
 ### process.changelog
 `CHANGELOG.md` at the repository root documents notable behavioral

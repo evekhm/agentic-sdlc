@@ -34,7 +34,11 @@ the product owner to state the use case and the two ways of working
 before the actors are introduced; a tenth, "The living spec", was
 added the same day between the flow and the orchestrator, and
 "Running it yourself" was cut to a placeholder for a forthcoming
-step-by-step guide):
+step-by-step guide; an eleventh, "The handover contract", was added
+2026-09-16 by the product owner between the orchestrator and the
+harnesses, because the reason two harnesses can be mixed at all is
+the rule that no agent ever talks to another one, and that rule has
+to be stated before the harnesses are):
 
 1. **What it solves** — the ladder as a harness-agnostic process whose every
    stage yields an artifact both a person and the next agent read;
@@ -64,15 +68,20 @@ step-by-step guide):
    poller); the two modes and the kill switch; what a merge means
    (D8); the two internal intake sources and the filing rules (D9);
    the stop conditions; the self-improving loop.
-7. **Two harnesses, two model families** — the concrete harnesses
+7. **The handover contract** — the invariant that every handover is
+   a write to GitHub followed by a cold read by a process that starts
+   later; the six contract resources and their sole writers; what the
+   cold read costs, what prompt caching does and does not pay for
+   across a rung boundary, and what all of it buys (D16).
+8. **Two harnesses, two model families** — the concrete harnesses
    and how each is installed (one footnote), pins and the
    `DEPLOYMENTS` override, the suggested reviewer family split, the
    cost thesis (D6).
-8. **The playbook, and what this adds** — stages and plays, the
+9. **The playbook, and what this adds** — stages and plays, the
    mapping onto the rungs, the five additions.
-9. **Running it yourself** — a placeholder that will link the
+10. **Running it yourself** — a placeholder that will link the
    step-by-step setup and demo guide once it exists (D11).
-10. **Where the rules live** — the document map (D3).
+11. **Where the rules live** — the document map (D3).
 
 Every issue or pull request README cites is a link to its tracker
 page (product owner, 2026-09-08). README describes the target design
@@ -102,6 +111,7 @@ after 7 when it lands; that PR extends this list.)
 | D13 | **The implementing PR owes two documentation edits.** `docs/SPEC.md` `docs.structure` is amended to name README.md as the operator-facing entry point: its audience (D1), that it explains and never duplicates and loses every disagreement (D3), and its bounds (D2, D4). No new capability ID — README joins the existing document-map entry. INTENT.md's layout line is corrected so README is no longer "to come" (REVIEW.md already landed, so that half of the annotation goes too). README.md is not a behaviour-bearing path, so `scripts/ci/spec_check.sh` will not force this; it is owed regardless, per AGENTS.md, "The living spec". Testable: the PR diff touches `docs/SPEC.md` and `INTENT.md`, and `docs.structure` names README. |
 | D14 | **Ordering against #36 is a hard dependency, both ways.** This planning PR is branched from `athena/36-dispatch` and merges *after* #36's planning PR. The README implementing PR merges *after* #36's implementing PR, because `scripts/ops/work.sh` — the one command in D5 — and the two-reviewer dispatch in D5/section 7 do not exist until then. If #36 is overruled at its gate, this spec's D5 and D7 are re-opened before README is written. Testable: `scripts/ops/work.sh` exists at the README PR's base commit, and the README PR body cites #36's implementing PR. |
 | D15 | **The ladder is walked in full — no bootstrap compression.** Unlike #36, this change has no cross-cutting rebuild forcing one PR: PLAN and DESIGN land here, BUILD produces `plan.md` normally, and the README lands in its own implementing PR. The chain of small PRs on one issue is itself the artifact section 5 describes, so compressing it would cost the walkthrough its own worked example (intent/1-personas/spec.md D10 is not invoked). |
+| D16 | **The handover contract is named in README, with measured numbers, and binds in AGENTS.md.** *Added 2026-09-16 by the product owner.* README's section 7 states the invariant — no agent communicates with another agent; every handover is a write to GitHub followed by a cold read by a process that starts later — names the six contract resources with their sole writers, and carries the measured cost of that choice (a six-day window of poller-dispatched runs: fresh input per cold start, cache reads as a multiple of it, what the bill would be with caching off). D3 still applies: the normative form of the rule, the MUST/MUST NOT list and the places the contract is not yet honored are AGENTS.md's, and README links them. The numbers are dated in place and re-measured before any persona moves to a different harness, because a cache-read ratio measured on one harness says nothing about another. Testable: README section 7 states the invariant and links AGENTS.md; AGENTS.md carries "The handover contract" and "Prompt caching does not cross a handover"; every token figure in either document names the window it was measured over. |
 
 ## Acceptance
 
@@ -112,9 +122,13 @@ after 7 when it lands; that PR extends this list.)
   than one (D4, cap lifted 2026-09-09; the line and section-length
   caps were lifted 2026-09-03; the command block was withdrawn
   2026-09-11, D5).
-- Exactly one markdown table: `grep -c '^|---' README.md` is 1 and
-  every line matching `^|` falls between the section 5 and section 6
-  headings (D3, amended 2026-09-08). README contains no per-label
+- At most two markdown tables: `grep -c '^|---' README.md` is at most
+  2, and every line matching `^|` falls inside the handover-contract
+  section or the harnesses section (D3, amended 2026-09-08; the cap
+  was raised from one to two 2026-09-16 by the product owner, for the
+  contract-resource table D16 requires — six resources each with one
+  writer is a lookup a reader scans, and prose would bury the sole
+  writer, the piece that carries the invariant). README contains no per-label
   semantics (except the halt labels required by D10), no severity-tier list, and no `status:*` → `status:*`
   mapping; it names all five stages in ladder order (D3, D7).
 - No fenced command block exists; the seven doors are named inline in
