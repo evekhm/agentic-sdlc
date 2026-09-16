@@ -249,7 +249,7 @@ resumable cold.
 1. **Pick.** Open the pinned **tracker issue** — the index of all
    work, grouped by bootstrap rung, one checklist line per issue. An
    issue is *claimable* when: it is open, it has no `in-progress`
-   label, every issue named in its "Depends on" line is closed, and
+   label, all blocking issues in GitHub Issue Dependencies (`blocked_by`) are closed, and
    no `hold` label is present anywhere it points. A closed issue is
    never a work item, whoever or whatever pointed you at it: search
    the tracker ("Before filing an issue"), file the follow-up naming

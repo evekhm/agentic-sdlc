@@ -18,7 +18,7 @@
 #   hold          the circuit breaker, and it is absolute
 #   in-progress   somebody holds it; the last claim comment's author and
 #                 first line are printed, so the caller knows whom to ask
-#   depends on    an issue named on a "Depends on" line is still open
+#   blocked by    an issue blocking this one in native dependencies is still open
 #   collision     the branch or the worktree path already exists. Checked
 #                 before the claim on purpose: a `worktree add` that
 #                 fails after the label was set leaves the mutex held by
@@ -160,21 +160,17 @@ if has_label "$LABEL"; then
     refuse "#$NUMBER carries $LABEL — held by $holder"
 fi
 
-# "Depends on #12, #34" / "Depends on: #12". Every issue named on such a
-# line must be closed: the dependency is what makes the work orderable,
-# and starting early is how two PRs end up editing the same section.
-dep_lines="$(grep -Ei 'depends on' <<<"$body" || true)"
-if [ -n "$dep_lines" ]; then
-    while read -r dep; do
-        [ -n "$dep" ] || continue
-        [ "$dep" != "$NUMBER" ] || continue
-        dep_view=""
-        dep_view="$(gh_json "repos/$GITHUB_REPO/issues/$dep")" \
-            || die "#$NUMBER depends on #$dep, which cannot be read from $GITHUB_REPO"
-        dep_state="$(jq -r '.state' <<<"$dep_view")"
-        [ "$dep_state" = "closed" ] \
-            || refuse "#$NUMBER depends on #$dep, which is still $dep_state"
-    done < <(grep -Eo '#[0-9]+' <<<"$dep_lines" | tr -d '#' | sort -un)
+# GitHub native Issue Dependencies API: if total_blocked_by is non-zero,
+# verify every blocking issue is closed.
+total_blocked_by="$(jq -r '.issue_dependencies_summary.total_blocked_by // 0' <<<"$view")"
+if [ "$total_blocked_by" -gt 0 ]; then
+    blocked_by_json="$(gh_json "repos/$GITHUB_REPO/issues/$NUMBER/dependencies/blocked_by")" \
+        || die "failed to read dependencies for #$NUMBER from $GITHUB_REPO"
+    open_blockers="$(jq -r '
+        [.[] | select(.state == "open") | "#\(.number) (open): \(.title)"]
+        | join("; ")' <<<"$blocked_by_json")"
+    [ -z "$open_blockers" ] \
+        || refuse "#$NUMBER is blocked by $open_blockers"
 fi
 
 # --- Names: actor, slug, branch, worktree ---------------------------------------

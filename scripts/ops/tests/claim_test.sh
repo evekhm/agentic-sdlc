@@ -67,14 +67,20 @@ STUB
 chmod +x "$WORK/bin/gh"
 
 # --- fixtures -------------------------------------------------------------------
-# issue <n> <state> <labels-csv> <title> [<body>]
+# issue <n> <state> <labels-csv> <title> [<body>] [<total_blocked_by>]
 issue() {
-  jq -n --argjson n "$1" --arg state "$2" --arg labels "$3" --arg title "$4" \
-        --arg body "${5:-}" \
+  local n="$1" state="$2" labels="$3" title="$4" body="${5:-}" total_blocked_by="${6:-0}"
+  jq -n --argjson n "$n" --arg state "$state" --arg labels "$labels" --arg title "$title" \
+        --arg body "$body" --argjson total_blocked_by "$total_blocked_by" \
     '{number: $n, state: $state, title: $title, body: $body,
+      issue_dependencies_summary: {total_blocked_by: $total_blocked_by},
       labels: ($labels | if . == "" then [] else split(",") end | map({name: .}))}' \
-    > "$FIXTURES/repos_test_repo_issues_$1.json"
-  echo '[]' > "$FIXTURES/repos_test_repo_issues_$1_comments.json"
+    > "$FIXTURES/repos_test_repo_issues_$n.json"
+  echo '[]' > "$FIXTURES/repos_test_repo_issues_${n}_comments.json"
+}
+blocked_by() {
+  local n="$1" json="$2"
+  printf '%s\n' "$json" > "$FIXTURES/repos_test_repo_issues_${n}_dependencies_blocked_by.json"
 }
 # comments <n> <login> <body> [<login> <body> ...]  — the thread, in order
 comments() {
@@ -193,15 +199,27 @@ comments 104 someone "just prose"
 run 2 "unnamed claim exits 2" -- 104
 has "no comment opens with a structured claim line" "unnamed claim: the mutex names nobody"
 
-banner "an open dependency blocks the claim"
-issue 105 open "" "Dependent issue" "Body text.
-
-Depends on #101, #106 (land the docs first)."
-issue 106 open "" "The dependency"
-run 2 "open dependency exits 2" -- 105
-has "depends on #106, which is still open" "dependency: the refusal names the open issue"
-hasnt "depends on #101" "dependency: a closed dependency is not reported"
+banner "an open native dependency blocks the claim"
+issue 105 open "" "Dependent issue" "Body text" 1
+blocked_by 105 '[{"number": 106, "state": "open", "title": "The blocker"}]'
+run 2 "open native dependency exits 2" -- 105
+has "#105 is blocked by #106 (open): The blocker" "dependency: refusal names open blocker"
 no_writes "dependency: nothing was written"
+
+banner "a closed native dependency does not block the claim"
+issue 105 open "status:implementing" "Dependent issue" "" 1
+blocked_by 105 '[{"number": 106, "state": "closed", "title": "Done blocker"}]'
+run 0 "closed dependency proceeds" -- 105
+has "would: gh api --method POST repos/test/repo/issues/105/labels -f labels[]=in-progress" "dependency: claim proceeds"
+if ! grep -q "dependencies/blocked_by" "$CALLS"; then
+  fail "dependency: expected call to dependencies/blocked_by"
+fi
+
+banner "prose 'Depends on #open' is ignored when total_blocked_by is 0"
+issue 106 open "" "Open issue" "" 0
+issue 105 open "status:implementing" "Issue with prose" "Depends on #106 (docs only)" 0
+run 0 "prose dependency ignored" -- 105
+has "would: gh api --method POST repos/test/repo/issues/105/labels -f labels[]=in-progress" "dependency: prose ignored"
 
 banner "an existing branch or worktree is a collision, refused before the claim"
 issue 107 open "" "Colliding issue"

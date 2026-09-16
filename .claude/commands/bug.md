@@ -1,7 +1,7 @@
 ---
 description: Manual intake door for a defect — searches the tracker first, then files an intent:new + bug issue.
 argument-hint: '<free text describing the bug: repro, expected vs actual; may include "Given design:", "Given spec:", or "Given code:" sections>'
-allowed-tools: Bash(scripts/ops/intake.sh:*), Bash(scripts/ops/tracker_search.sh:*), Bash(gh issue create:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh search issues:*), Bash(gh search prs:*), Read, Write
+allowed-tools: Bash(scripts/ops/intake.sh:*), Bash(scripts/ops/tracker_search.sh:*), Bash(gh issue create:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh search issues:*), Bash(gh search prs:*), Bash(gh api:*), Read, Write
 ---
 
 `$ARGUMENTS` is the raw text describing the bug. It may contain one or
@@ -34,6 +34,12 @@ continuing.
    file a new issue that names the relationship to the existing one
    explicitly (absorbs/refines/depends on/supersedes). Never file a
    silent duplicate.
+   If this issue is strictly blocked by another issue that must be resolved first, link it via GitHub's native Issue Dependencies API:
+   ```bash
+   BLOCKER_ID="$(gh api repos/evekhm/agentic-sdlc/issues/<blocker> --jq .id)"
+   gh api --method POST repos/evekhm/agentic-sdlc/issues/<n>/dependencies/blocked_by -F issue_id="$BLOCKER_ID"
+   ```
+   (Note: prose in the issue body does not enforce dependencies; use the native API).
 
 4. If it exits 0 (clear): compose the real issue body, in this order,
    omitting any section that does not apply:
