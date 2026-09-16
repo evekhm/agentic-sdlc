@@ -341,6 +341,17 @@ silently and waits for a person who does not know they are needed.
 6. **#386** — `merge_gate_test.sh` red on `main` at MG-38 under the
    #308 contract. #308's implement landed, so re-run before assuming
    this is still true.
+7. **#489** — a PR that links more than one issue dies at
+   `scripts/ops/lib/github.sh:149-151` with `die` (exit 1), so both
+   reviewer checks go red permanently. The zero-issue branch three
+   lines below already returns 2, the refusal contract `unattended.yml`
+   honours by exiting 0 with a stated reason. #216 fixed the
+   zero-issue half and closed; this is the sibling it left behind.
+   Filed 2026-09-16 from PR #423, which sat `UNSTABLE` for six days on
+   it and needed a by-hand `workflow_dispatch` to clear, because a body
+   edit fires no `pull_request` run. A red required check is the one
+   stall in this loop that no agent can clear, which is why it belongs
+   in Gate 3 and not in the XS batch its diff size would suggest.
 
 ### Gate 4 — the fast-track batch
 
