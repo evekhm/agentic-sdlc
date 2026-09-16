@@ -14,27 +14,30 @@ tiers"), for sessions whose harness exposes subagent spawning
 (interactive Claude Code sessions with the Agent tool); workflow-driven
 agents without a subagent tool are exempt per that section:
 
-- `FAST_TIER` (deterministic sweeps, trivial lookups, routing):
-  `model="haiku"` on the Agent call.
-- `MECHANICAL_TIER` (batch edits from a spec, greps, test runs,
-  formatting, named fixes): the `mechanic` agent
-  (`~/.claude/agents/mechanic.md`, runs claude-sonnet-5; a repo-local
-  compiled copy will replace it once the persona compiler exists).
-  Never pass `model="sonnet"` — on this Vertex deployment that alias
-  resolves to sonnet-4.5, which is NOT enabled; sonnet-5 itself is
-  enabled and works.
-- `IMPLEMENTATION_TIER` (dispatch-ready spec, no open design
-  decisions): sonnet-5 via a dedicated agent definition (the
-  predecessor's `.agents/agents/coder.md` is the template; a
-  repo-local compiled `coder` will bind this tier). Same
-  model-alias caveat as MECHANICAL.
-- `REVIEW_TIER` (evidence-based review/analysis): `model="opus"`.
-- `FRONTIER_TIER` (design, adversarial grilling, tricky debugging):
-  `model="claude-fable-5-1"` on the Agent call, the exact ID, same
-  convention as MECHANICAL. This is the spec gate's tier only:
-  `REVIEW_TIER` stays on opus because review runs every PR round and
-  Fable is 2x the Opus rate (#105). An interactive session that
-  already runs on Fable inherits it by omitting the override.
+A tier resolves to a model through `config/model_tiers.yaml` under
+`harnesses.claude-code.<TIER>`, keyed by the tier name with its `_TIER`
+suffix dropped (`FAST_TIER` reads `harnesses.claude-code.FAST`). That
+table is the one place in the repository where a model ID is written by
+hand. A compiled persona in `.claude/agents/`
+already carries its resolved model in frontmatter, emitted by
+`scripts/sync_agents.py` and drift-gated by `ci-gates.yml`, so
+dispatching one needs no model override. Pass `model=` on an Agent call
+only for a generic agent with no compiled definition, and pass the ID
+from that table verbatim.
+
+- `FAST_TIER`: deterministic sweeps, trivial lookups, routing.
+- `MECHANICAL_TIER`: batch edits from a spec, greps, test runs,
+  formatting, named fixes. Dispatch the compiled `mechanic` agent
+  (`.claude/agents/mechanic.md`).
+- `IMPLEMENTATION_TIER`: a dispatch-ready spec with no open design
+  decisions. Dispatch the compiled `coder` agent
+  (`.claude/agents/coder.md`).
+- `REVIEW_TIER`: evidence-based review and analysis.
+- `FRONTIER_TIER`: design, adversarial grilling, tricky debugging.
+  This is the spec gate's tier alone. `REVIEW_TIER` stays a rung below
+  it because review runs every PR round and the frontier model bills at
+  2x the review model's rate (#105). An interactive session already
+  running the frontier model inherits it by omitting the override.
 
 # Parallel sessions
 
@@ -54,12 +57,20 @@ tracker"). This harness adds the tooling:
   (include your session name from ListAgents so peers can find and message
   you), and creates your worktree. **By-hand fallback:** launch the session
   with `claude -w <name>`, call EnterWorktree, or run the by-hand command
-  from AGENTS.md. Subagents
-  dispatched with `isolation: "worktree"` get their own worktree
-  automatically; do not point them at yours. A subagent's worktree
-  shows as `locked:pid-live` in the report while it runs and
-  `locked:pid-dead` if it crashed; the dispatching session unlocks and
-  cleans up its own.
+  from AGENTS.md.
+- **The unit of isolation is the claim** (AGENTS.md, "Working the
+  tracker"). A subagent dispatched to work the issue this session
+  already claimed runs in this worktree, on this branch: give it the
+  absolute path and dispatch it WITHOUT `isolation: "worktree"`.
+  Reserve `isolation: "worktree"` for work that belongs off the claim's
+  branch — a different issue, or a throwaway experiment whose only
+  output is a summary. The harness names its own worktrees
+  `.claude/worktrees/agent-<hex>`, a path `claim.sh` never created and
+  cannot see, so nothing refuses a second worktree for a claimed issue
+  and `scripts/ops/worktrees.sh` is what surfaces one. A dispatched
+  subagent's worktree shows as `locked:pid-live` in the report while it
+  runs and `locked:pid-dead` if it crashed; the dispatching session
+  unlocks and cleans up its own.
 - **Run artifacts:** `claude -w` and EnterWorktree make the worktree
   the cwd, so a relative `runs/...` path lands inside the worktree and
   dies with it. Resolve the shared root per AGENTS.md ("Outputs go in
