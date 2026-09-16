@@ -565,6 +565,127 @@ a prompt is a suggestion. A rule holds when it lives in a file, a gate
 or an independent reader
 ([`docs/PLAYBOOK.md`](docs/PLAYBOOK.md)).
 
+## The handover contract
+
+Everything above rests on one invariant, stated normatively in
+[AGENTS.md](AGENTS.md) ("The handover contract") and explained here:
+
+> **No agent communicates with another agent.** Every handover is a
+> write to GitHub, then a cold read from GitHub by a process that
+> starts later.
+
+Two agents are never alive at the same moment in the same handover.
+*Athena* commits `intent/<n>/spec.md` and opens a pull request; the
+pull request merges; a label moves; a ledger row appears; minutes or
+days later a cold *Daedalus* process, running on another vendor's
+binary, reads that folder and those labels and begins. *Daedalus*
+never sees *Athena*.
+
+The obvious alternative is a messaging protocol between two live
+agents, and it costs three couplings: both processes up at once, a
+shared session format, and a transport. Each of those is a dependency
+on a particular harness. A file in git and a label on an issue carry
+none of them.
+
+So the contract is a file path, a label and a comment marker, and this
+is the whole of it:
+
+| What | Where | Sole writer |
+|---|---|---|
+| Current rung | exactly one `status:*` label | the lifecycle workflow |
+| Mutex | `in-progress` plus a `Claim:` comment | `scripts/ops/claim.sh` |
+| Dispatch queue | one `loop-ledger-row` comment per issue | *Themis* |
+| Review state | one `consensus-ledger` comment per pull request | the recorder |
+| The artifacts | `intent/<issue>-<slug>/{intent,spec,plan}.md` | the rung's persona |
+| Stage map | [`personas/lifecycle.json`](personas/lifecycle.json) | committed |
+
+A third harness reads that same table. Adding one is three functions
+in [`scripts/ops/work.sh`](scripts/ops/work.sh) and a compiler target;
+the personas, the ladder, the review protocol and the gates carry over
+untouched. The grammars live in script headers, and
+[#484](https://github.com/evekhm/agentic-sdlc/issues/484) graduates
+them into [`docs/SPEC.md`](docs/SPEC.md).
+
+Every rung-to-rung transition is deterministic code with zero model
+calls: the lifecycle advancer moves the label and writes the dispatch
+row, the merge gate evaluates its conjuncts, the recorder builds the
+consensus ledger, the poller claims the row. No model is ever asked
+what happens next.
+
+### What it costs, and what it saves
+
+Handing over through artifacts trades one cost for another. A
+conversation carried between rungs keeps its context warm and re-bills
+that context on every later call, and it grows without bound. A cold
+start pays once to re-ground, and that price is bounded by how much
+the agent has to read.
+
+Six days of poller-dispatched runs on this repository, 24 runs, every
+one of them on Antigravity:
+
+```text
+fresh input     20,193,937      841K per run
+cache reads    191,691,158      9.5x the fresh input
+output           1,374,388
+thinking           751,314
+```
+
+At Flash rates that is about $37.50, of which cache reads are $14.38 —
+**38% of the bill at one-tenth the input rate**. Priced as fresh input
+the same reads would cost $143.77, so caching is saving 4.5x.
+
+The cache-read ratio per run runs 0.688 to 0.934, median 0.913, and it
+tracks **run duration**: a 58-second run cached at 0.688, twenty-minute
+runs at 0.93. The entire cache economy therefore lives **inside** a
+single rung, accumulating across the dozens of internal tool-call turns
+one agent takes. Nothing crosses a handover. The fastest rung-to-rung
+gap measured here was 51 minutes, against a one-hour maximum TTL, and
+six-day gaps are routine.
+
+That settles the hosting question:
+
+- **A harness switch at a rung boundary costs zero extra cache**,
+  because no cross-rung cache exists to lose. *Athena* on Gemini
+  handing to *Argus* on Claude gives up nothing that
+  *Athena*-to-*Athena* would have kept. Pick each seat for judgment
+  and price.
+- **The cache is server-side, scoped to the organization, and keyed on
+  the request prefix.** Two machines emitting byte-identical prefixes
+  share it. Two personas on one machine emit different prefixes and
+  share nothing. Identical configuration is what produces a hit;
+  hardware location has no effect. Placement earns its keep on
+  credential locality — builders run on the operator's own machine so
+  persona App keys stay off shared runners.
+- **Buying the one-hour TTL to bridge a handover is a straight loss.**
+  It costs 2x on write and still cannot reach the next rung.
+
+What remains is the cold start: 841K fresh tokens per run, the price of
+an agent rediscovering its own rung. The dispatch prompt names only an
+issue number, which makes that rediscovery an exploration. Naming the
+stage and the artifact paths turns it into a bounded read
+([#482](https://github.com/evekhm/agentic-sdlc/issues/482)). That is
+the largest open cost lever in the system.
+
+### Where the contract does not hold yet
+
+The handover *between* rungs is model-free. The handover *into and out
+of* a rung is prose that one model writes and another reads: the
+dispatch prompt carries no state, a fix round hands over a bare pull
+request number, and the outcome comes back as a `WORK-RESULT:` line a
+launcher greps
+([#482](https://github.com/evekhm/agentic-sdlc/issues/482)).
+
+No resource in the contract carries a liveness signal either, so a
+dispatch that dies leaves its claim, its branch and its worktree held
+forever, and the loop stops on each one until a human clears it
+([#483](https://github.com/evekhm/agentic-sdlc/issues/483)). An
+operator has no single view of what the loop is doing
+([#481](https://github.com/evekhm/agentic-sdlc/issues/481)).
+[AGENTS.md](AGENTS.md) carries the full list of the places the
+contract is unhonored, as the rules that bind every persona;
+[`docs/CRITICAL_PATH.md`](docs/CRITICAL_PATH.md) tracks these and
+[#484](https://github.com/evekhm/agentic-sdlc/issues/484) as Gate H.
+
 ## Two harnesses, two model families
 
 A **harness** is the program a persona runs inside: Claude Code
