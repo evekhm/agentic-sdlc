@@ -13,8 +13,95 @@ this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line. Live `gh issue list` state always
 beats this file.
 
-Status line: 2026-09-10, revision fourteen (~20:10 UTC, main at
-`019986c`).
+Status line: 2026-09-16, revision fifteen (~07:00 UTC, main at
+`9e19fa1`).
+
+Since revision fourteen, six days passed and the loop dispatched
+nothing. This revision is mostly the account of why, and the ordering
+that comes out of it.
+
+**The loop was jammed from 2026-09-10 to 2026-09-16.** Poller pid
+3847103 started 2026-09-10 18:30 and wrote 40,755 lines to
+`ops/poller/poll.log` without dispatching a single rung. About 37,000
+of those lines are four refusals repeating every 30 seconds:
+
+| Refusals | Cause |
+|---|---|
+| 9,645 | `branch odyssey/308-merge-gate-yml-repository-wide already exists` — a stale local branch with zero unique commits; the real work was PR #477 |
+| 9,646 | `#329 carries in-progress` — a claim held by dead poller pid `poll-575894` |
+| 9,461 | `#415 carries in-progress` — same, another dead pid |
+| 9,486 | `first-hop intake concurrency limit reached` |
+
+The fourth is the one that matters, because it is not a stuck branch
+or a stuck issue but the design working as written. `poll.sh:357-384`
+counts open issues whose last `Claim:` comment was written by
+`evekhm-athena-app` and compares that to
+`max_concurrent_first_hops`, which is `1`. Twelve of the eighteen
+`in-progress` claims were stale, five of them athena's (#415, #405,
+#329, #259, #204). **Any single one of those five held first-hop
+intake shut for the whole six days.** Nothing in the system releases a
+claim when the process holding it dies; that gap is #252 and #148. A
+121-issue backlog accumulated for that reason alone. No single defect
+in the ladder explains it.
+
+Two structural causes sit underneath the accumulation, and neither is
+a bug in a script. First, intake admits an issue only when it carries
+BOTH `intent:new` and `intake:auto` (`poll.sh:381`); of 72 `intent:new`
+issues, exactly one (#269) carried `intake:auto`, so the front door was
+open to one issue in seventy-two. Second, nothing closes a finished
+issue: the close rung (#148) was specified and never built, so an issue
+whose last rung merged sits at `status:in-review` forever. Most of the
+backlog was not unfinished work. It was finished work nobody swept up.
+
+**Full backlog triage, 2026-09-16** — every open issue read against the
+tree, written up in `runs/2026-09-16_062144_backlog-triage/triage.md`.
+Of 121 open issues, **40 needed no engineering at all**: 27 already
+delivered on `main`, 13 duplicates of another issue, 2 epics
+misfiled as work. 39 of those were closed the same morning with their
+commit citations (the 27th, #410, is corrected below). Open count went
+121 → 85; the delta from 82 is #482, #483 and #484, filed that morning.
+
+**PR #477 merged autonomously** at `0d5f0dd`, all eleven conjuncts
+true, landing #308's per-PR concurrency fix and retiring the largest
+jam. The poller restarted at ~06:58Z and made its first self-directed
+dispatch in six days (athena on #415, via PR #421) within ninety
+seconds.
+
+**#328 has a working route around it; the defect itself remains.** `deep-review` is in argus's
+`assigned_when.labels` (`config/execution.yaml:67`), so labelling a PR
+makes argus genuinely assigned and `unattended.yml`'s `labeled`
+trigger dispatches it. Applied to PR #480, #475 and #421; on PR #480
+the ledger took both `reviewed-head` markers and the gate returned
+**conjunct (3) true** for the first time. Argus performs a genuine
+review on this path, and no clean head has to wait on #328 any more. Worth
+recording for whoever fixes #328: the gate already resolves the
+assigned set correctly at `merge_gate.sh:297-303` via
+`execution.py --subscribers`; that path is simply unreachable, because
+it is guarded on the `assigned:` marker being *absent* and
+`review_recorder.py:415` writes it unconditionally. The fix is to make
+the recorder call the same resolver in place of the hardcoded string.
+
+**#410 was scored CLOSE-DONE by the triage and that verdict was
+wrong.** Branch protection on `main` requires exactly `drift`,
+`execution`, `sanitize` and `spec-check`. The `changelog-check` job
+exists and runs (`ci-gates.yml:210`), but it is not required, which is
+precisely the "merely a red X" the issue says is insufficient — Themis
+will merge a PR that skipped its changelog. The flip is one line of
+repo config and is deliberately deferred: PR #421, #369 and #423 carry
+no `changelog-check` run at all, and #423's fix is a PR-body edit,
+which fires no `pull_request` run, so requiring the check now would
+strand it permanently. #410 stays open until the flip lands.
+
+**#269 is larger than it reads.** `session_spend.sh:249-262` prices
+every Gemini Flash version 1.5 through 3.8 at Gemini 1.5 Flash's rate,
+and every pinned tier is `gemini-3.8-flash-*`, so 100% of antigravity
+spend this repo has ever reported is roughly 5x low in and 6x low out.
+That is not only a reporting error: `config/execution.yaml` gates
+dispatch on USD ceilings measured by this same function, so a ceiling
+meant to stop a runaway agy loop currently permits about five times the
+intended spend. Fixing the rates tightens live ceilings, so runs that
+pass today may start being refused. The choice of price basis is an
+operator decision, below.
 
 Since revision thirteen: Gate S landed its implement rung. Odyssey's
 PR #403 opened at 19:15Z and took three review rounds. Round 1 carried
@@ -54,11 +141,11 @@ Two more merges since revision thirteen: #85's plan PR #365 merged as
 `7045b7f`, and PR #400 (the README handoff paragraph, from a peer
 session) merged as `61c7a7f` at 19:27Z.
 
-#308's implement rung is still stalled. The poller refuses it every
-cycle with `branch odyssey/308-merge-gate-yml-repository-wide already
-exists`, left behind by a dead run whose worktree sits at `e946ce8`
-with one unpushed commit. Removing the branch or pushing it is an
-operator decision.
+#308's implement rung is DONE as of 2026-09-16. The stale branch
+`odyssey/308-merge-gate-yml-repository-wide` held zero unique commits
+and is gone; the real work was PR #477, which Themis merged at
+`0d5f0dd` on all eleven conjuncts. #308 itself stays open at
+`status:in-review`, waiting on #148 like every other finished issue.
 
 ## Scope (operator directive, 2026-09-10)
 
@@ -102,6 +189,20 @@ workflow refuses a PR whose issue carries `status:review-stuck`, so no
 reviewer re-verifies and D10 self-clear can never fire. The retier
 verb `@argus retier` needs a non-Bot OWNER or MEMBER, so a bot cannot
 take the retier path.
+
+**State correction, 2026-09-16.** The `State` column below was written
+on 2026-09-10 and the rows are left as they stood, so the history reads
+straight. Live state has moved; `gh issue list` beats both. Closed
+since revision fourteen: **#321, #324, #354, #361, #265, #337, #353,
+#312, #252, #251, #366, #376, #330, #85** — of which #324 retired as
+superseded by #354, and #376 folded into #412. Still open: **#331,
+#328, #339, #148, #147, #245, #345, #363, #397**, all `intent:new`, and
+**#308** at `status:in-review` with its implement rung merged. The
+practical effect on this gate is that Y1, Y3, Y4, Y5, Y8 and the #366
+half of Y13 are finished, Y6 is finished on the #308 side, Y14 is
+folded elsewhere, and what remains of Gate Y is the recorder pair
+(#331, #328), the housekeeping set (#148, #397, #363) and the policy
+items (#339, #147, #245, #345).
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
@@ -180,6 +281,69 @@ handoff.
 
 ## Order of landing
 
+Revisions ten through fourteen ordered by dependency. Revision fifteen
+re-orders by **what stops the loop from running unattended**, because
+the six-day jam showed the binding constraint is not the ladder's
+capability but its housekeeping: claims that outlive their process,
+issues nothing closes, a front door open to one issue in seventy-two.
+The 2026-09-16 triage is the evidence; the gates below are its output.
+
+### Gate 3 — the loop stops needing a human
+
+Nothing here is new capability. Each item is a place the loop stalls
+silently and waits for a person who does not know they are needed.
+
+1. **#148** — the close rung. It was specified and has never been
+   built. Without it every
+   finished issue sits at `status:in-review` forever, which is most of
+   what the 121-issue backlog actually was. Highest leverage item in
+   the file.
+2. **#252 / #251 follow-through** — release a claim when its holder
+   dies. Both issues are closed as delivered, and the six-day jam
+   happened anyway, so the delivered fix does not cover a poller
+   process that dies without unwinding. Re-verify before trusting it;
+   if it is genuinely uncovered, file a new issue and leave the
+   delivered one closed.
+3. **#397** — the withheld dispatch row. An artifact PR that merges
+   while `in-progress` is held produces no ledger row, and nothing
+   re-issues it, so the rung stalls with no marker saying why.
+4. **#363** — the poller dispatches from a stale ledger rung and keeps
+   the claim when `work.sh` refuses. Same class: a refusal that leaves
+   state dirtier than it found it.
+5. **#239** — give the review-dispatch refusals the same
+   `REVIEW_DISPATCH != 1` guard the fast-track door already has at
+   `work.sh:497`. XS, and it removes the review-stuck deadlock.
+6. **#386** — `merge_gate_test.sh` red on `main` at MG-38 under the
+   #308 contract. #308's implement landed, so re-run before assuming
+   this is still true.
+
+### Gate 4 — the fast-track batch
+
+Roughly eighteen XS fixes, one `/fast` PR each, batched by theme so a
+reviewer reads one coherent diff in place of eighteen unrelated ones.
+The identity-and-slug theme runs first because it is self-contained and
+several other issues fold into it: **#224 → #227 → #236 → #463 → #203
+→ #465b**.
+
+### Gate 5 — the real work
+
+Everything that needs a spec: #355, #82, #405, #417, #479,
+#104/#108/#190, #356, #318, #11, #117, #481. Ordered inside the gate by
+whichever unblocks another item. Size does not set the order here.
+
+Two cautions carried from the triage, both of which would cost a wasted
+round if missed:
+
+- **#356's proposed preflight cannot work as written.** It suggests
+  `gh api user` to assert the acting identity, which returns 403 for a
+  GitHub App token (`smoke_launch.sh:43,641`). The preflight has to
+  resolve the App slug instead.
+- **`personas/nestor.yaml` does not exist**, so nothing under #199 can
+  land until it does. #199 is now an epic; the child that creates the
+  file is the one that unblocks the rest.
+
+### Superseded ordering (revisions ten to fourteen)
+
 1. PR #350 merges (Y1). DONE 05:33Z, confirmed 06:52Z. From then on
    intent-stage PRs merge on their own.
 2. Y2 recorder intent filed and walked (one issue or three, operator
@@ -226,6 +390,40 @@ it is until the scope changes.
 
 Each item ends as an issue, a PR, or an explicit "deferred, no
 tracker"; the advisor's recommendation is stated where it has one.
+
+Opened by the 2026-09-16 triage, newest first:
+
+- **#269: which price basis `rate_tier()` encodes.** Either the Gemini
+  Developer API list price (3.8 Flash \$0.75/\$3.75, 3.1 Pro
+  \$2.00/\$12.00, already in the issue) or the real Vertex/Enterprise
+  rate. The Vertex pricing page renders its tables client-side and
+  returns no table body to an unauthenticated fetch — tried twice, on
+  2026-09-08 and again on 2026-09-16, same result — so only a
+  signed-in console read settles it. Recommended: land the list price
+  now with the source and date written above the table, and treat the
+  Vertex reconciliation as a follow-up. A number that is 5x low is a
+  worse failure than a number that is right for the wrong price book.
+  Secondary, unanswered either way: Gemini's cache multipliers. The
+  write-5m/write-1h/cache-read columns currently apply Claude's
+  1.25x/2x/0.1x to the Gemini base, which nobody has verified.
+- **When to make `changelog-check` a required context (#410).**
+  Recommended: immediately after PR #421, #369 and #423 are resolved.
+  Doing it sooner strands #423, whose fix fires no `pull_request` run.
+- **Whether the #252/#251 claim release actually covers a dead poller
+  process.** Both issues are closed as delivered and the jam happened
+  regardless. If the gap is real it wants a new issue; the delivered
+  behaviour is correct and simply narrower than the failure it met.
+- **103 stale git worktrees** are on the VM. Cleanup is not proposed
+  here; it is noted so the number is not a surprise later.
+- **PR #369 must not merge in its current state.** Its
+  `intent/329-context-ceiling/spec.md` is truncated at line 170 inside
+  an unterminated heredoc; the verifier returned BLOCK with two `high`
+  rows, and **those rows were never written to the ledger**, which
+  holds only `AT-R1-1@D2:normal:open`. Conjunct (4) therefore reads
+  true, so clearing (3) and (11) would merge a truncated spec. #329
+  carries `hold` for this reason, which the poller honours
+  (`poll.sh:300`). Athena owes a full redraft. The ledger-versus-verdict
+  divergence is itself a recorder defect and belongs with #328.
 
 - **Home of the seat launch without an issue number.** Under #199's
   plan (recommended: D15 already owns the launch convention) or a new
