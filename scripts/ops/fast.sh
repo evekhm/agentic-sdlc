@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/ops/fast.sh <issue-number> [options]
+# scripts/ops/fast.sh [<issue-number>] [options]
 #
 # Operator fast-track door (#444): initiates and executes owner-authorized
 # ladder compression, transitioning an issue directly to status:implementing
@@ -20,6 +20,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$REPO_ROOT/scripts/ops/lib/issue_inference.sh"
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
 AS_PERSONA="${AS_PERSONA:-odyssey}"
@@ -57,32 +58,6 @@ USAGE_EOF
 die() { echo "fast.sh: $*" >&2; exit 1; }
 refuse() { echo "refused: $*" >&2; exit 2; }
 
-extract_issue_from_context() {
-    local wt_top wt_name branch
-    wt_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-    if [ -n "$wt_top" ]; then
-        wt_name="$(basename "$wt_top")"
-        if [[ "$wt_name" =~ -([0-9]+)(-[^/]*)?$ ]]; then
-            echo "${BASH_REMATCH[1]}"
-            return 0
-        elif [[ "$wt_name" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
-            echo "${BASH_REMATCH[1]}"
-            return 0
-        fi
-    fi
-    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-    if [ -n "$branch" ] && [ "$branch" != "HEAD" ] && [ "$branch" != "main" ]; then
-        if [[ "$branch" =~ /([0-9]+)(-[^/]*)?$ ]]; then
-            echo "${BASH_REMATCH[1]}"
-            return 0
-        elif [[ "$branch" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
-            echo "${BASH_REMATCH[1]}"
-            return 0
-        fi
-    fi
-    return 1
-}
-
 # Parse arguments
 ISSUE=""
 while [ "$#" -gt 0 ]; do
@@ -107,10 +82,12 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$ISSUE" ]; then
-    INFERRED_ISSUE="$(extract_issue_from_context || true)"
-    if [ -n "$INFERRED_ISSUE" ]; then
-        ISSUE="$INFERRED_ISSUE"
+    if INFER_OUTPUT="$(infer_issue_from_context 2>&1)"; then INFER_RC=0; else INFER_RC=$?; fi
+    if [ "$INFER_RC" -eq 0 ]; then
+        ISSUE="$INFER_OUTPUT"
         echo "==> Inferred target issue #$ISSUE from worktree/branch"
+    elif [ -n "$INFER_OUTPUT" ]; then
+        die "$INFER_OUTPUT"
     else
         usage >&2
         die "no issue number specified and could not infer issue number from worktree or branch"

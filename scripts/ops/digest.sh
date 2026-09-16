@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/ops/digest.sh — read-only pre-dispatch summary for /work (#407).
 #
-#   scripts/ops/digest.sh <issue-or-pr-number> [args ignored]
+#   scripts/ops/digest.sh [<issue-or-pr-number>] [args ignored]
 #
 # Purely informational, printed by .claude/commands/work.md BEFORE
 # scripts/ops/work.sh's own dispatch line runs. Additive and read-only:
@@ -11,32 +11,26 @@
 # is no `set -e`, and the script always exits 0. This does not change
 # work.sh's documented exit-code contract (docs/SPEC.md ~line 856-891).
 #
+# The issue/PR number is optional. When the first argument is absent
+# or looks like a flag (leading `-`, e.g. a `--dry-run` passed through
+# from `/fast`'s own `$ARGUMENTS`), it is inferred from the active
+# worktree directory name or git branch via
+# scripts/ops/lib/issue_inference.sh — the same shared logic
+# scripts/ops/fast.sh uses, so the two doors never disagree about
+# which issue is current (#454, Argus R1-4). Inference failing or
+# disagreeing degrades to the "(unavailable)" line below; it never
+# aborts this fail-open script.
+#
 # Same owner/repo resolution as scripts/ops/tracker_search.sh.
 
-REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
-NUMBER="${1:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/issue_inference.sh"
 
-if [ -z "$NUMBER" ]; then
-    wt_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-    if [ -n "$wt_top" ]; then
-        wt_name="$(basename "$wt_top")"
-        if [[ "$wt_name" =~ -([0-9]+)(-[^/]*)?$ ]]; then
-            NUMBER="${BASH_REMATCH[1]}"
-        elif [[ "$wt_name" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
-            NUMBER="${BASH_REMATCH[1]}"
-        fi
-    fi
-    if [ -z "$NUMBER" ]; then
-        branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-        if [ -n "$branch" ] && [ "$branch" != "HEAD" ] && [ "$branch" != "main" ]; then
-            if [[ "$branch" =~ /([0-9]+)(-[^/]*)?$ ]]; then
-                NUMBER="${BASH_REMATCH[1]}"
-            elif [[ "$branch" =~ ^([0-9]+)(-[^/]*)?$ ]]; then
-                NUMBER="${BASH_REMATCH[1]}"
-            fi
-        fi
-    fi
-fi
+REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
+case "${1:-}" in
+    ""|-*) NUMBER="$(infer_issue_from_context 2>/dev/null || true)" ;;
+    *) NUMBER="$1" ;;
+esac
 
 if [ -z "$NUMBER" ]; then
     echo "digest: unavailable (no issue/PR number given and not inside an issue worktree)"
