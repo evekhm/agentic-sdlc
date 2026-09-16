@@ -70,6 +70,14 @@ git -C "$WT/agent-orphan1" commit -q --allow-empty -m "work stranded on a detach
 git worktree add -q -f "$WT/agent-clean1" feat/unpushed
 git worktree add -q --detach "$WT/agent-clean2" main
 
+# boundary: dirty work alone earns neither verdict. An agent-* worktree
+# on a branch of its own has no second tree to race, and a detached
+# worktree claim.sh did name is that claim's own business.
+git worktree add -q -b feat/agent-solo "$WT/agent-solo1" main
+echo solo >"$WT/agent-solo1/solo.txt"
+git worktree add -q --detach "$WT/plain-detached1" main
+echo plain >"$WT/plain-detached1/plain.txt"
+
 # stale local branch merged into origin/main, checked out nowhere
 git branch -q old/merged main
 
@@ -94,6 +102,8 @@ echo "$REPORT" | grep -q 'locked:pid-dead' && pass "dead pid in lock reason is r
 [ "$(verdict unpushed)" = unpushed ] && pass "shadowed branch's own claim worktree keeps its verdict" || fail "unpushed: $(verdict unpushed)"
 [ "$(verdict agent-clean1)" = unpushed ] && pass "clean agent-* on a claim's branch keeps its ordinary verdict" || fail "agent-clean1: $(verdict agent-clean1)"
 [ "$(verdict agent-clean2)" = safe ]     && pass "clean detached agent-* the remote holds stays safe"         || fail "agent-clean2: $(verdict agent-clean2)"
+[ "$(verdict agent-solo1)" = dirty ]      && pass "dirty agent-* on a branch of its own is plain dirty"         || fail "agent-solo1: $(verdict agent-solo1)"
+[ "$(verdict plain-detached1)" = dirty ]  && pass "dirty detached worktree outside agent-* is plain dirty"      || fail "plain-detached1: $(verdict plain-detached1)"
 [ "$(verdict repo)" = primary ]      && pass "primary checkout is listed as primary" || fail "primary: $(verdict repo)"
 echo "$REPORT" | awk '$1=="safe"{print $6}' | grep -qx M && pass "merged column set for merged head" || fail "merged column"
 

@@ -718,7 +718,9 @@ commits no remote holds, which become unreachable when it is removed).
 Both verdicts are excluded from `--prune`; an `agent-*` worktree with
 nothing of its own to lose keeps its ordinary verdict and stays
 prunable, and the `LOCK` column reports `locked:pid-live` or
-`locked:pid-dead` independently of the verdict.
+`locked:pid-dead` independently of the verdict. The session that
+dispatched a subagent owns cleanup of the worktree that dispatch
+created, including unlocking it once the subagent exits.
 Tests: `scripts/ops/tests/worktrees_test.sh`.
 
 ### ops.spend

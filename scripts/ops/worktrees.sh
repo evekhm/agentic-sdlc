@@ -34,11 +34,13 @@
 #             branch copies those out, so they become unreachable the
 #             moment the worktree is removed.
 #
-#             Both verdicts mean a dispatch went around the claim (#493):
-#             the unit of isolation is the claim, so a subagent working a
-#             claimed issue belongs in that claim's worktree. An `agent-*`
-#             worktree with nothing of its own to lose keeps its ordinary
-#             verdict and stays prunable.
+#             Both verdicts are read against the claim (#493): the unit
+#             of isolation is the claim, so a subagent working a claimed
+#             issue belongs in that claim's worktree. Read the LOCK
+#             column alongside them — `locked:pid-live` on an orphan can
+#             be a sanctioned off-branch experiment still running. An
+#             `agent-*` worktree with nothing of its own to lose keeps
+#             its ordinary verdict and stays prunable.
 #
 # Deterministic git only: no gh, no model, no token. Fetches origin with
 # --prune first unless NO_FETCH=1 (the tests set it against a local bare
@@ -53,7 +55,7 @@ case "${1:-}" in
   "") ;;
   --prune) MODE="prune" ;;
   --prune-remote) MODE="prune-remote" ;;
-  -h|--help) sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -h|--help) sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *) echo "worktrees.sh: unknown argument '$1' (see --help)" >&2; exit 2 ;;
 esac
 
@@ -100,8 +102,9 @@ while IFS= read -r path; do
   [ -n "$branch" ] || branch="(detached)"
   head="$(git -C "$path" rev-parse HEAD)"
 
-  # A harness-spawned subagent worktree (`.claude/worktrees/agent-<hex>`),
-  # never a claim.sh worktree (`<actor>-<n>-<slug>`).
+  # Harness-spawned subagent worktrees are named
+  # `.claude/worktrees/agent-<hex>`; claim.sh names its own
+  # `<actor>-<n>-<slug>`, so the prefix tells the two apart.
   case "$name" in
     agent-*) is_agent=1 ;;
     *) is_agent=0 ;;
