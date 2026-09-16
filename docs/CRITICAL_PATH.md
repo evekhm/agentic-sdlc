@@ -351,7 +351,7 @@ silently and waits for a person who does not know they are needed.
    it and needed a by-hand `workflow_dispatch` to clear, because a body
    edit fires no `pull_request` run. A red required check is the one
    stall in this loop that no agent can clear, which is why it belongs
-   in Gate 3 and not in the XS batch its diff size would suggest.
+   in Gate 3; its diff size alone would have put it in the XS batch.
 8. **#490** — a Vertex `RESOURCE_EXHAUSTED` (429) costs a reviewer run
    its entire window. Filed 2026-09-16 from PR #480's atlas job. The
    retry loop does exist, and the first reading of this issue said
