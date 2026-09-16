@@ -352,6 +352,20 @@ silently and waits for a person who does not know they are needed.
    edit fires no `pull_request` run. A red required check is the one
    stall in this loop that no agent can clear, which is why it belongs
    in Gate 3 and not in the XS batch its diff size would suggest.
+8. **#490** — a Vertex `RESOURCE_EXHAUSTED` (429) kills a reviewer run
+   with no retry. Filed 2026-09-16 from PR #480's atlas job (run
+   35064689660): the error reads `attempt 1` and there is no attempt
+   two, the job idles out its whole 30-minute window
+   (`duration_seconds` 1762 against `timeout 1860`) before the failure
+   becomes visible, and the rung bills 421K input plus 537K cache read
+   plus 11.6K output plus 9.2K thinking for an empty `response` and no
+   ledger row. A retry pays the cache read again and little else, so
+   retrying is the cheap path. Distinct from #312, which is a
+   *completed* review whose stream was interrupted; here the API
+   refused the turn and no work exists. Same consequence as #489: the
+   check goes red for a reason that carries no opinion about the PR,
+   and today only a human clears it. Feeder for #481's escalation
+   queue and a candidate for #483's sweeper.
 
 ### Gate 4 — the fast-track batch
 
@@ -360,6 +374,22 @@ reviewer reads one coherent diff in place of eighteen unrelated ones.
 The identity-and-slug theme runs first because it is self-contained and
 several other issues fold into it: **#224 → #227 → #236 → #463 → #203
 → #465b**.
+
+**This gate is held as of 2026-09-16, and the reason belongs in the
+plan.** Model quota is the binding constraint on the day; agent time
+is free by comparison. #490 records a reviewer run that took a Vertex 429 on turn one,
+never retried, burned its full 30-minute window and billed roughly
+960K tokens for an empty response. Eighteen fast-track rounds each
+carry two reviewer dispatches, so opening the batch into a quota that
+is already refusing turns converts a scheduling decision into a wave
+of red checks that only a human can clear, which is exactly the class
+#489 and #490 describe. Two conditions release the gate: #490's retry
+lands, and the identity theme's first PR completes a clean two-reviewer
+round on its own. Sequencing note for whoever opens it — #227 and #489
+touch the same resolver in `scripts/ops/lib/github.sh`, so they are one
+diff or two strictly ordered ones, and #463 already carries a live
+`status:planning` rung, so it stays on the ladder and out of this
+batch.
 
 ### Gate 5 — the real work
 
