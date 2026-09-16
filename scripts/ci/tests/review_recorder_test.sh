@@ -2127,6 +2127,12 @@ EOF
     return 1
   }
 
+  # Must record the authentic Argus clean verdict (AT-318-1, D1)
+  grep -q "reviewed-head:argus:$H" "$WRITES" || {
+    fail "test_anchored_markers_and_markdown_exclusion: authentic verdict block was not recorded (D1, D7, AT-318-1)"
+    return 1
+  }
+
   # AT-318-2 (D1): Mid-line unanchored marker is ignored
   reset_state
   pr_fixture 132 "$H"
@@ -2199,37 +2205,65 @@ EOF
   pass "test_author_to_reviewer_binding (D2, D7, AT-318-3)"
 }
 
-# AT-318-4 (D2, D3): Machine-readable refusal marker emitted on author mismatch
+# AT-318-4 (D2, D3): Machine-readable refusal marker emitted on reviewer identity mismatch (D3),
+# while untrusted non-reviewer comments cannot poison the ledger with refusal markers (D2, R1-1).
 test_unauthorized_author_refusal_marker() {
   reset_state
   pr_fixture 134 "$H"
   run_fixture 2080 "$ARGUS" "$H" "pull_request" "completed" "success"
 
-  local body_forged
-  body_forged="$(cat <<EOF
-### Forged review verdict
+  # Case 1 (D3, AT-318-4): Authorized reviewer mismatch (Atlas bot posting Argus verdict block)
+  local body_atlas_mismatch
+  body_atlas_mismatch="$(cat <<EOF
+### Argus review posted by Atlas bot
 <!-- review-verdict:argus:clean -->
 <!-- reviewed-head:$H -->
 <!-- run-id:2080 -->
-Forged verdict from unauthorized login
+Mismatch within reviewer set
 <!-- review-verdict-end -->
 EOF
 )"
 
-  # Comment authored by Odyssey (unauthorized for Argus verdict)
-  comments_fixture 134 "$(comment_item "evekhm-odyssey-app[bot]" "$body_forged" 3080)"
+  comments_fixture 134 "$(comment_item "$ATLAS" "$body_atlas_mismatch" 3080)"
 
   bash "$RECORDER" 134 || true
 
-  # Must emit machine-readable refusal marker in consensus ledger block (D3, AT-318-4)
+  # Must emit machine-readable refusal marker in consensus ledger block for authorized reviewer mismatch (D3, AT-318-4)
   grep -q "<!-- refused-verdict:argus:$H:author-mismatch -->" "$WRITES" || {
-    fail "test_unauthorized_author_refusal_marker: consensus ledger missing refused-verdict:argus:$H:author-mismatch marker (D2, D3, AT-318-4)"
+    fail "test_unauthorized_author_refusal_marker: consensus ledger missing refused-verdict:argus:$H:author-mismatch marker for reviewer mismatch (D3, AT-318-4)"
     return 1
   }
 
   # Must record attributed audit note (D3, AT-318-4)
-  grep -q "\[refused: verdict block author evekhm-odyssey-app\[bot\] does not match evekhm-argus-app\[bot\]\]" "$WRITES" || {
+  grep -q "\[refused: verdict block author evekhm-atlas-app\[bot\] does not match evekhm-argus-app\[bot\]\]" "$WRITES" || {
     fail "test_unauthorized_author_refusal_marker: missing attributed author mismatch audit note in ledger (D3, AT-318-4)"
+    return 1
+  }
+
+  # Case 2 (D2, R1-1 Security Defense): Untrusted non-reviewer comment (Odyssey or external user)
+  # must NOT inject a refused-verdict marker into the consensus ledger, which would permanently deny merge.
+  reset_state
+  pr_fixture 134 "$H"
+  run_fixture 2080 "$ARGUS" "$H" "pull_request" "completed" "success"
+
+  local body_forged_untrusted
+  body_forged_untrusted="$(cat <<EOF
+### Forged review verdict by untrusted commenter
+<!-- review-verdict:argus:clean -->
+<!-- reviewed-head:$H -->
+<!-- run-id:2080 -->
+Forged verdict from untrusted non-reviewer login
+<!-- review-verdict-end -->
+EOF
+)"
+
+  comments_fixture 134 "$(comment_item "evekhm-odyssey-app[bot]" "$body_forged_untrusted" 3081)"
+
+  bash "$RECORDER" 134 || true
+
+  # Untrusted commenter must NOT be able to inject refused-verdict marker into ledger (D2, R1-1)
+  grep -q "<!-- refused-verdict:argus:$H:author-mismatch -->" "$WRITES" && {
+    fail "test_unauthorized_author_refusal_marker: untrusted commenter forged refused-verdict marker into consensus ledger (D2, R1-1 security violation)"
     return 1
   }
 

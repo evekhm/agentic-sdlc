@@ -59,10 +59,12 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
 - In `scripts/ci/review_recorder.py`, `extract_verdict_blocks` maps the authenticated `comment.user.login` to the expected reviewer persona:
   - `evekhm-argus-app[bot]` -> `argus`
   - `evekhm-atlas-app[bot]` -> `atlas`
-- If the author is neither, the comment cannot open a valid verdict block. If a verdict block is detected in an unauthorized comment, an author mismatch refusal is recorded.
 - If the author matches a known reviewer, the search pattern matches solely opening markers for that reviewer:
   `^[[:space:]]*<!-- review-verdict:{expected_reviewer}:(clean|findings) -->`
   preventing foreign reviewer markers from opening blocks and resolving the PR #316 defect.
+- **Untrusted Commenter Defense vs Reviewer Mismatch (D2, D3, R1-1 Security Defense):**
+  - In accordance with D2 ("Comments authored by logins outside authorized reviewers are not parsed for review verdict blocks"), comments authored by accounts outside the authorized reviewer set are not parsed for review verdict blocks and NEVER inject machine-readable `refused-verdict` markers into the consensus ledger block. This strict provenance boundary prevents untrusted or external commenters from mounting a denial-of-service attack against PR merges by forging refusal markers. Such comments may only emit an attributed audit note under `#### Notes` (or be skipped).
+  - For comments authored by authorized reviewer identities (`argus` or `atlas`): if an authorized reviewer comment contains an opening marker claiming to speak for the other reviewer (e.g. `evekhm-atlas-app[bot]` attempting to post an `argus` verdict marker), an explicit machine-readable `<!-- refused-verdict:<reviewer>:<reviewed_head>:author-mismatch -->` marker is recorded in the consensus ledger block (D3, AT-318-4).
 
 ### P3: Loud Machine-Readable Refusal Markers Across All Declines (D3)
 - In `scripts/ci/review_recorder.py`, `record_refusal(reviewer, reviewed_head, reason, code)` records machine-readable markers in the consensus ledger block:
@@ -73,12 +75,12 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
   - `commit-not-in-history`: `reviewed_head` is not present in PR commit history.
   - `run-head-sha-mismatch`: Workflow run `head_sha` does not match `reviewed_head`.
   - `missing-run-id` / `malformed-run-id`: Invalid or missing `run-id`.
-  - `run-ended-failure` / `run-ended-cancelled`: Provenance workflow run did not succeed.
+  - `run-terminal-failure`: Provenance workflow run ended with terminal conclusion failure or cancelled (`review_recorder.py:240`).
 - Attributed human-readable audit notes are appended under `#### Notes` in the ledger markdown.
 
 ### P4: Merge Gate Row Comparison & Ledger-Blindness Detection in Conjunct (3) (D4)
 - In `scripts/ci/merge_gate.sh`, Conjunct (3) is augmented with an integrity verification step:
-  1. Inspect `PR_COMMENTS` for comments authored by assigned reviewers (`ARGUS_LOGIN`, `ATLAS_LOGIN`) containing review verdict blocks outside markdown code fences and blockquotes.
+  1. Inspect `PR_COMMENTS` for comments authored by assigned reviewers (`ARGUS_LOGIN`, `ATLAS_LOGIN`). Before scanning for posted finding rows, preprocess comment bodies to strip markdown code fences (lines between ```` ``` ```` and `~~~`) and blockquotes (lines starting with `>`), matching the exclusion logic of `review_recorder.py`. This ensures quoted or illustrative finding rows from earlier review rounds or intent text do not produce phantom finding IDs or false ledger-blindness failures (contract scenario `MG-52`).
   2. For reviews evaluating the current `$HEAD`, extract all posted finding identifiers: `<!-- finding:<fid>:... -->`.
   3. Compare each extracted `<fid>` against the parsed consensus ledger finding rows (`CTUP`).
   4. If a posted finding at `$HEAD` has no corresponding entry in `CTUP` and no refusal marker is recorded for that reviewer at `$HEAD`, Conjunct (3) evaluates false:
@@ -114,7 +116,12 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
   - `<!-- loop-ledger-end -->`
   - `<!-- refused-verdict:... -->`
 - Bracketed notation (e.g. `[review-verdict:...]`) is permitted in documentation without allowlisting.
-- `scripts/ci/sanitize_allowlist.txt` supports `marker <path> # <reason>` exemptions for test suites and scanner sources.
+- `scripts/ci/sanitize_allowlist.txt` supports `marker <path> # <reason>` exemptions.
+- **Allowlist Scope & Enumeration Strategy (R1-2 finding resolution):**
+  To avoid discovery dilemmas at implement time and ensure `sanitize_check.sh` exits 0 cleanly without violating the allowlist contract, the 37 existing tracked files holding live markers are explicitly categorized and enumerated for `scripts/ci/sanitize_allowlist.txt`:
+  1. *Infrastructure & Testing Sources (12 files)*: Files implementing, parsing, or testing marker mechanics.
+  2. *Protocol & Persona Specifications (8 files)*: Specification and documentation of the review protocol outside D9 manifest (preserving prompt and compiler stability).
+  3. *Historical Immutable Intent Artifacts (17 files)*: Historical intent/spec/plan artifacts created before #318 that cannot be modified post-merge.
 
 ### P7: Hermetic Historical Regression Suites (D7)
 - Historical merged ledgers remain immutable.
@@ -131,14 +138,15 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
   - `scripts/ci/tests/sanitize_check_test.sh`
 - **Actions:**
   - Add 5 contract tests to `review_recorder_test.sh`:
-    - `test_anchored_markers_and_markdown_exclusion` (AT-318-1, AT-318-2, D1, D7)
-    - `test_author_to_reviewer_binding` (AT-318-3, D2, D7)
-    - `test_unauthorized_author_refusal_marker` (AT-318-4, D2, D3)
-    - `test_malformed_reviewed_head_refusal_marker` (AT-318-5, D3)
-    - `test_anchored_maintainer_retier_directives` (AT-318-8, AT-318-9, D5, D7)
-  - Add MG-50 and MG-51 scenarios to `merge_gate_test.sh`:
-    - `MG-50` (AT-318-6, D4, D7)
-    - `MG-51` (AT-318-7, D4, D7)
+    - `test_anchored_markers_and_markdown_exclusion` (AT-318-1, AT-318-2, D1, D7): asserts exclusion of quoted/fenced/indented markers and positive survival of authentic verdict.
+    - `test_author_to_reviewer_binding` (AT-318-3, D2, D7): reproduces PR #316 defect.
+    - `test_unauthorized_author_refusal_marker` (AT-318-4, D2, D3): two-phase test asserting reviewer mismatch emits refusal marker (D3) while untrusted commenter cannot inject refusal markers into the ledger (D2, R1-1).
+    - `test_malformed_reviewed_head_refusal_marker` (AT-318-5, D3): asserts machine-readable refusal marker on malformed/missing head.
+    - `test_anchored_maintainer_retier_directives` (AT-318-8, AT-318-9, D5, D7): reproduces PR #381 defect.
+  - Add MG-50, MG-51, and MG-52 scenarios to `merge_gate_test.sh`:
+    - `MG-50` (AT-318-6, D4, D7): Conjunct (3) fails closed on unrecorded posted finding.
+    - `MG-51` (AT-318-7, D4, D7): Conjunct (3) passes when findings match CTUP or refusal is recorded.
+    - `MG-52` (AT-318-6, AT-318-7, D4): Conjunct (3) excludes quoted and fenced finding rows in comment bodies.
   - Add contract suite `sanitize_check_test.sh`:
     - `test_marker_rule_fails_on_live_verdict_marker` (AT-318-10, D6)
     - `test_bracketed_notation_passes_marker_rule` (AT-318-11, D6)
@@ -157,7 +165,8 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
   3. In `extract_verdict_blocks(comments, pr_commits)`:
      - Map `comment.user.login` to expected reviewer.
      - Only search for `<!-- review-verdict:{expected_reviewer}:... -->`.
-     - Reject unauthorized comments and emit code `author-mismatch`.
+     - Skip verdict block parsing for comments authored by accounts outside authorized reviewers (D2, R1-1); do not emit refusal markers in the ledger block for untrusted commenters.
+     - For comments from authorized reviewers with cross-reviewer blocks, emit `author-mismatch` refusal marker (D3).
      - Reject missing or malformed `reviewed-head` and emit code `missing-reviewed-head`.
   4. In `record_refusal(reviewer, reviewed_head, reason, code)`:
      - Ensure machine-readable `<!-- refused-verdict:<reviewer>:<reviewed_head>:<reason_code> -->` is recorded in the consensus ledger comment.
@@ -192,7 +201,7 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
      - If a posted finding at `$HEAD` has no ledger counterpart and no refusal marker for that reviewer at `$HEAD`, fail Conjunct (3) with `WHY[3]="ledger blindness: reviewer <reviewer> posted finding <fid> at $HEAD with no ledger counterpart"`.
      - Ensure refusal markers take precedence over ledger blindness when a refusal is recorded.
 - **Proof:**
-  `bash scripts/ci/tests/merge_gate_test.sh` runs MG-50 and MG-51 GREEN; all scenarios pass.
+  `bash scripts/ci/tests/merge_gate_test.sh` runs MG-50, MG-51, and MG-52 GREEN; all scenarios pass.
 
 ---
 
@@ -204,7 +213,13 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
 - **Actions:**
   1. Add rule `marker` to allowlist parsing logic in `scripts/ci/sanitize_check.sh` (permitting `home`, `secret`, `vendor`, and `marker`).
   2. Implement `marker` scan rule in `scripts/ci/sanitize_check.sh` detecting unescaped HTML comment markers.
-  3. Add necessary allowlist entries in `scripts/ci/sanitize_allowlist.txt` for files implementing or testing marker mechanics.
+  3. Add the enumerated 37 allowlist entries in `scripts/ci/sanitize_allowlist.txt` under rule `marker`:
+     - Testing & scanner mechanics:
+       `scripts/ci/sanitize_check.sh`, `scripts/ci/sanitize_allowlist.txt`, `scripts/ci/review_recorder.py`, `scripts/ci/merge_gate.sh`, `scripts/ci/lifecycle_advance.sh`, `scripts/ops/post.sh`, `scripts/placement/vm-local/poll.sh`, `scripts/ci/tests/review_recorder_test.sh`, `scripts/ci/tests/merge_gate_test.sh`, `scripts/ci/tests/sanitize_check_test.sh`, `scripts/ci/tests/lifecycle_advance_test.sh`, `scripts/ci/tests/e2e_chain_test.sh`.
+     - Protocol specifications & prompts:
+       `personas/skills/review-protocol.md`, `.agents/agents/argus/agent.md`, `.agents/agents/atlas/agent.md`, `.claude/agents/argus.md`, `.claude/agents/atlas.md`, `AGENTS.md`, `REVIEW.md`, `docs/SPEC.md`.
+     - Pre-#318 historical immutable intent artifacts:
+       `intent/64-autonomous-loop/spec.md`, `intent/251-e2e-chain/plan.md`, `intent/251-e2e-chain/spec.md`, `intent/267-severity-tiered-merge-gate-review-md/intent.md`, `intent/267-severity-tiered-merge-gate-review-md/plan.md`, `intent/267-severity-tiered-merge-gate-review-md/spec.md`, `intent/291-recorder-hold-parity/intent.md`, `intent/291-recorder-hold-parity/plan.md`, `intent/291-recorder-hold-parity/spec.md`, `intent/295-poller-intake-gate/plan.md`, `intent/308-merge-gate-yml/intent.md`, `intent/353-reviewer-verdict-with/intent.md`, `intent/353-reviewer-verdict-with/plan.md`, `intent/353-reviewer-verdict-with/spec.md`, `intent/354-recorder-demotes-every/intent.md`, `intent/354-recorder-demotes-every/plan.md`, `intent/354-recorder-demotes-every/spec.md`, `intent/361-review-recorder-severity-of-a-seen/intent.md`, `intent/361-review-recorder-severity-of-a-seen/plan.md`, `intent/361-review-recorder-severity-of-a-seen/spec.md`.
 - **Proof:**
   `bash scripts/ci/tests/sanitize_check_test.sh` runs 4 passed out of 4 (GREEN).  
   `bash scripts/ci/sanitize_check.sh` passes with exit 0.
@@ -245,10 +260,10 @@ scripts/ops/post.sh <pr-number> --as odyssey --add-label deep-review
 | **AT-318-1** | D1, D7 | `review_recorder_test.sh::test_anchored_markers_and_markdown_exclusion` | T2 | Quoted / fenced / indented verdict blocks ignored; authentic findings recorded |
 | **AT-318-2** | D1 | `review_recorder_test.sh::test_anchored_markers_and_markdown_exclusion` | T2 | Unanchored mid-line marker ignored; does not open verdict block |
 | **AT-318-3** | D2, D7 | `review_recorder_test.sh::test_author_to_reviewer_binding` | T2 | PR #316 regression fixture: Argus quoting Atlas block does not trigger author mismatch; Argus findings recorded |
-| **AT-318-4** | D2, D3 | `review_recorder_test.sh::test_unauthorized_author_refusal_marker` | T2 | Unauthorized comment author emits `refused-verdict:<reviewer>:<sha>:author-mismatch` |
+| **AT-318-4** | D2, D3 | `review_recorder_test.sh::test_unauthorized_author_refusal_marker` | T2 | Reviewer identity mismatch emits refusal marker (D3); untrusted commenters cannot inject refusal markers into ledger (D2, R1-1) |
 | **AT-318-5** | D3 | `review_recorder_test.sh::test_malformed_reviewed_head_refusal_marker` | T2 | Missing/malformed reviewed-head emits `refused-verdict:<reviewer>:.*:missing-reviewed-head` |
-| **AT-318-6** | D4, D7 | `merge_gate_test.sh::MG-50` | T4 | Conjunct (3) fails closed with ledger-blindness diagnostic when posted finding has no ledger counterpart |
-| **AT-318-7** | D4, D7 | `merge_gate_test.sh::MG-51` | T4 | Conjunct (3) does not trigger ledger blindness when finding matches CTUP or refusal marker recorded |
+| **AT-318-6** | D4, D7 | `merge_gate_test.sh::MG-50`, `merge_gate_test.sh::MG-52` | T4 | Conjunct (3) fails closed on unrecorded posted finding; excludes quoted/fenced finding rows |
+| **AT-318-7** | D4, D7 | `merge_gate_test.sh::MG-51`, `merge_gate_test.sh::MG-52` | T4 | Conjunct (3) does not trigger ledger blindness when finding matches CTUP or refusal marker recorded; excludes quoted/fenced rows |
 | **AT-318-8** | D5, D7 | `review_recorder_test.sh::test_anchored_maintainer_retier_directives` | T3 | PR #381 regression fixture: Quoted retier directive does not alter finding severity |
 | **AT-318-9** | D5 | `review_recorder_test.sh::test_anchored_maintainer_retier_directives` | T3 | Line-anchored maintainer retier outside code blocks updates finding severity |
 | **AT-318-10** | D6 | `sanitize_check_test.sh::test_marker_rule_fails_on_live_verdict_marker` | T5 | Tracked live verdict markers trigger `marker` rule failure unless allowlisted |

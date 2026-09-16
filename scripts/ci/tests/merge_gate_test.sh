@@ -1244,4 +1244,43 @@ run "MG-51b: exits 0" 123
 hasnt "ledger blindness" "MG-51b (D4, AT-318-7): no ledger blindness diagnostic when refusal marker is recorded"
 has "argus verdict at $H was refused by recorder" "MG-51b (D4, D7): refusal diagnostic takes precedence"
 
+banner "MG-52 · D4 · Quoted and fenced finding rows do not trigger ledger blindness (AT-318-6, AT-318-7)"
+mk_green
+argus_quoted_mg52="$(cat <<EOF
+### Argus review with quoted prior findings
+Discussing prior findings:
+> <!-- finding:R9-9:high:open:none -->
+> Quoted finding in blockquote
+
+\`\`\`markdown
+<!-- finding:R9-8:high:open:none -->
+Fenced finding in markdown code fence
+\`\`\`
+
+Authentic current findings:
+<!-- review-verdict:argus:findings -->
+<!-- reviewed-head:$H -->
+<!-- run-id:1002 -->
+<!-- round:1 -->
+<!-- finding:R1-1:normal:open:none -->
+<!-- failure-scenario:R1-1 -->
+Authentic finding scenario
+<!-- review-verdict-end -->
+EOF
+)"
+cl_matched_mg52="$(cat <<EOF
+<!-- consensus-ledger:123 -->
+<!-- reviewed-head:argus:$H -->
+<!-- reviewed-head:atlas:$H -->
+<!-- assigned:argus,atlas -->
+<!-- ledger-row:R1-1:normal:open:none -->
+<!-- consensus-ledger-end -->
+EOF
+)"
+comments_fixture 123 \
+  "$(comment "evekhm-argus-app[bot]" "$argus_quoted_mg52")" \
+  "$(comment "$MERGER" "$cl_matched_mg52")"
+run "MG-52: exits 0" 123
+hasnt "ledger blindness" "MG-52 (D4): quoted and fenced finding rows are excluded and do not trigger ledger blindness"
+
 echo "merge_gate_test.sh: all scenarios passed"
