@@ -13,7 +13,7 @@ this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line. Live `gh issue list` state always
 beats this file.
 
-Status line: 2026-09-16, revision fifteen (~07:00 UTC, main at
+Status line: 2026-09-16, revision fifteen (~07:35 UTC, main at
 `9e19fa1`).
 
 Since revision fourteen, six days passed and the loop dispatched
@@ -347,11 +347,13 @@ silently and waits for a person who does not know they are needed.
    lines below already returns 2, the refusal contract `unattended.yml`
    honours by exiting 0 with a stated reason. #216 fixed the
    zero-issue half and closed; this is the sibling it left behind.
-   Filed 2026-09-16 from PR #423, which sat `UNSTABLE` for six days on
-   it and needed a by-hand `workflow_dispatch` to clear, because a body
-   edit fires no `pull_request` run. A red required check is the one
-   stall in this loop that no agent can clear, which is why it belongs
-   in Gate 3; its diff size alone would have put it in the XS batch.
+   Filed 2026-09-16 from PR #423, which sat red for six days on it
+   because the fix was a body edit and a body edit fires no
+   `pull_request` run. An earlier revision of this line said a by-hand
+   `workflow_dispatch` clears such a red. That is wrong, and #491 below
+   is why. A red required check is the one stall in this loop that no
+   agent can clear, which is why it belongs in Gate 3; its diff size
+   alone would have put it in the XS batch.
 8. **#490** — a Vertex `RESOURCE_EXHAUSTED` (429) costs a reviewer run
    its entire window. Filed 2026-09-16 from PR #480's atlas job. The
    retry loop does exist, and the first reading of this issue said
@@ -387,6 +389,50 @@ silently and waits for a person who does not know they are needed.
    an `atlas` run at 07:03 (35066601100, PR #485) succeeded, so any
    release condition phrased as "one round came back clean" can pass on
    luck while the underlying condition is unchanged.
+9. **#491** — the gate's conjunct (2) reads a stale reviewer check
+   context that a by-hand re-dispatch can never replace, so #489 and
+   #490 have no by-hand escape hatch. Filed 2026-09-16 while verifying
+   a peer session's unrelated claim about conjunct (2). Gate run
+   35068510323 on PR #423 at head `9cacb10` prints two lines that
+   contradict each other:
+
+   ```
+   conjunct (2): false — mergeStateStatus CLEAN but check(s) not success: argus via gh-actions=FAILURE atlas via gh-actions=FAILURE
+   conjunct (11): true — ledger carries reviewed-head:argus and the head probe read 9cacb109...
+   ```
+
+   (11) is right. The commit's REST check-run list carries
+   `103073609411 argus via gh-actions failure` from Sep 10 alongside
+   `104698079394 argus via gh-actions success` from the re-dispatch that
+   morning. The GraphQL `statusCheckRollup` the gate reads at
+   `merge_gate.sh:263` returns 15 of the 22 check runs on that SHA, and
+   for each reviewer name it returns one context — the Sep-10 failure.
+   The success never enters `CHECKS_TSV`, so the dedupe-by-highest-
+   `databaseId` at `merge_gate.sh:492-516` has nothing to act on. Both
+   `workflow_dispatch` suites report `pull_requests` length 1 on the
+   PR's own branch, so the link is sound and the omission is per
+   check-run name; contexts from those same suites do appear in the
+   rollup under other names. The consequence is the reason this sits in
+   Gate 3: **a re-dispatch clears conjuncts (3), (4) and (11) and can
+   never clear (2)**, so the documented unstick recipe cannot finish the
+   job, and only a push or a `synchronize` replaces the context. GitHub's
+   own `mergeStateStatus` on #423 reads CLEAN, so conjunct (2)'s rollup
+   half is stricter than the branch protection it mirrors. #298 built
+   that dedupe and the SKIPPED allowlist; this is the case the machinery
+   cannot reach. Land it before #489 and #490, because it is what makes
+   their fixes verifiable without an operator.
+
+   A second conjunct (2) hypothesis was tested and dropped. A CANCELLED
+   context that is newest for its name would count as failing under the
+   allowlist at `merge_gate.sh:513`, and the concurrency group looked
+   like a way to produce one. It is not: the evicted run 35066559069 on
+   PR #423 reports `completed/cancelled` with an empty `jobs` array, so
+   a run evicted while queued starts nothing and registers no check
+   context. The 22 check runs on `9cacb10` are 19 success, 2 failure, 1
+   skipped and 1 in progress, with no cancelled among them. Reaching
+   that state needs a run whose jobs start and are then cancelled by
+   hand or by timeout; until someone produces one it stays out of this
+   list.
 
 ### Gate 4 — the fast-track batch
 
@@ -410,9 +456,13 @@ intermittently and any condition satisfied by a single clean round can
 be met by luck: **(a)** #490's terminal state lands,
 so a quota refusal ends in bounded time and reports itself as a
 refusal; **(b)** an infrastructure-red check is re-runnable by the loop
-itself, with no operator in the path. (b) is #481 and #483 territory,
-and until it holds, every red check this batch produces is a human-only
-stall however few of them there are. Sequencing note for whoever
+itself, with no operator in the path. (b) now has a named blocker:
+**#491**, which proves that a re-dispatched reviewer check stays red at
+the gate no matter how it finishes. Until #491 lands, (b) is
+unreachable by construction, so this is the single change that opens
+Gate 4. #481 and #483 build the queue and the sweeper on top of it, and
+until all three hold, every red check this batch produces is a
+human-only stall however few of them there are. Sequencing note for whoever
 opens it — #227 and #489
 touch the same resolver in `scripts/ops/lib/github.sh`, so they are one
 diff or two strictly ordered ones, and #463 already carries a live
@@ -574,7 +624,7 @@ Opened by the 2026-09-16 triage, newest first:
   refusals. The workflow token does it today under `issues: write`.
 - **Stale processes**: a bare `agy` process 204 hours old, the #265
   REPL in tmux `waves:265i-odyssey` (11 hours), the #350 fix-round
-  REPL in `waves:350f-odyssey`; the operator kills, never a seat.
+  REPL in `waves:350f-odyssey`; the kill is the operator's call alone.
   Updated 2026-09-16: the #350 row is still alive and `ps` puts it at
   elapsed 6-02:03:54 — pid 1737758 running
   `runs/2026-09-10_050016_agy-waves/run-350f.sh` with child agy pid
