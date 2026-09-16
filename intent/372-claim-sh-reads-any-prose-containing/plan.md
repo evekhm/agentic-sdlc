@@ -27,7 +27,7 @@ Before the implementation PR merges, an operational backfill migrates the six ac
 |---|---|---|---|
 | **athena** | plan / design | `intent/**` | Authored `intent.md` and approved `spec.md` (merged as PR #476). |
 | **daedalus** | build | `intent/**`, `scripts/*/tests/**` | Authors `plan.md` and commits contract test suite `scripts/ops/tests/claim_native_dependencies_contract_test.sh`. Daedalus **never** edits production code. |
-| **odyssey** | implement | `scripts/ops/claim.sh`, `scripts/ops/tests/claim_test.sh`, `AGENTS.md`, `.claude/commands/idea.md`, `.claude/commands/bug.md`, `docs/SPEC.md`, `CHANGELOG.md` | Executes Tasks T2 through T9 branching from the commit merging this plan, creates native dependency links on live tracker (D7), turns contract tests green, updates living spec, and verifies all CI gates. |
+| **odyssey** | implement | `scripts/ops/claim.sh`, `scripts/ops/tests/claim_test.sh`, `AGENTS.md`, `commands/idea.md`, `commands/bug.md`, `docs/SPEC.md`, `CHANGELOG.md` | Executes Tasks T2 through T9 branching from the commit merging this plan, creates native dependency links on live tracker (D7), turns contract tests green, updates living spec, and verifies all CI gates. |
 | **themis** | autonomous merge | GitHub Actions (`merge-gate.yml`) | Autonomously gates and merges pull requests upon consensus. |
 | **argus / atlas** | review | comments only | Review pull requests against spec and plan. |
 
@@ -95,11 +95,8 @@ Before the implementation PR merges, an operational backfill migrates the six ac
   ```
   #   blocked by    an issue blocking this one in native dependencies is still open
   ```
-- **`AGENTS.md` Claimable definition (`AGENTS.md:164-165`):** Update the claimable definition from "every issue named in its 'Depends on' line is closed" to:
-  ```markdown
-  - Claimable: Open, carries no in-progress label, no hold label, and all blocking issues in GitHub Issue Dependencies (blocked_by) are closed.
-  ```
-- **Filing commands (`.claude/commands/idea.md` and `.claude/commands/bug.md`):**
+- **`AGENTS.md` Claimable definition (`AGENTS.md:167-168`):** The sentence reads "An issue is *claimable* when: it is open, it has no `in-progress` label, every issue named in its 'Depends on' line is closed, and no `hold` label is present anywhere it points." Update the clause "every issue named in its 'Depends on' line is closed" to "all blocking issues in GitHub Issue Dependencies (`blocked_by`) are closed".
+- **Filing commands (`commands/idea.md` and `commands/bug.md`, the compiled source; `.claude/commands/idea.md` and `.claude/commands/bug.md` are generated from these by `scripts/sync_commands.py` and must not be edited directly):**
   - Retain the prose relationship convention for context ("absorbs, refines, depends on, supersedes").
   - Explicitly document the two-command native-linking sequence for hard blocking dependencies:
     ```bash
@@ -159,7 +156,7 @@ Before the implementation PR merges, an operational backfill migrates the six ac
   1. In `scripts/ops/claim.sh`, update docstring at line 21:
      Change `#   depends on    an issue named on a "Depends on" line is still open` to:
      `#   blocked by    an issue blocking this one in native dependencies is still open`.
-  2. In `scripts/ops/claim.sh`, delete lines 163–178 (the entire `dep_lines` grep and loop scanning `body` for `depends on`).
+  2. In `scripts/ops/claim.sh`, delete lines 163–178: the comment block at 163–165 documenting the body scan and the `dep_lines` grep-and-loop code at 166–178 that implements it.
   3. Replace with the native lookup block:
      ```bash
      # GitHub native Issue Dependencies API: if total_blocked_by is non-zero,
@@ -246,23 +243,20 @@ Before the implementation PR merges, an operational backfill migrates the six ac
 - **Decisions implemented:** D4
 - **Acceptance criteria proven:** AT-372-7
 - **Step-by-step diff description:**
-  1. In `AGENTS.md` under "Working the tracker" step 1, edit lines 164–165.
-  2. Replace:
-     `- Claimable: Open, carries no in-progress label, no hold label, and every issue named in its "Depends on" line is closed.`
-     with:
-     `- Claimable: Open, carries no in-progress label, no hold label, and all blocking issues in GitHub Issue Dependencies (blocked_by) are closed.`
+  1. In `AGENTS.md` under "Working the tracker" step 1 (lines 167–168), the sentence reads: "An issue is *claimable* when: it is open, it has no `in-progress` label, every issue named in its 'Depends on' line is closed, and no `hold` label is present anywhere it points."
+  2. Replace the clause "every issue named in its 'Depends on' line is closed" with "all blocking issues in GitHub Issue Dependencies (`blocked_by`) are closed".
 - **Done-When:**
   Contract test assertion 8 passes.
 
 ---
 
-### Task T5: Update Issue Filing Templates in `.claude/commands/idea.md` and `.claude/commands/bug.md`
+### Task T5: Update Issue Filing Templates in `commands/idea.md` and `commands/bug.md`
 - **Owner:** odyssey (Implement stage)
-- **Files touched:** `.claude/commands/idea.md`, `.claude/commands/bug.md`
+- **Files touched:** `commands/idea.md`, `commands/bug.md` (the compiled source files). After editing, run `python3 scripts/sync_commands.py` to regenerate `.claude/commands/idea.md` and `.claude/commands/bug.md`; do not edit the generated `.claude/commands/*` files directly, since `scripts/ci/compiler_roundtrip.sh` runs `scripts/sync_commands.py --check` and fails the build on any drift between source and generated copy.
 - **Decisions implemented:** D5
 - **Acceptance criteria proven:** AT-372-8
 - **Step-by-step diff description:**
-  1. In `.claude/commands/idea.md` (around line 28), where relationships are documented, add instruction for hard dependencies:
+  1. In `commands/idea.md` (around line 28), where relationships are documented, add instruction for hard dependencies:
      ```markdown
      If this issue is strictly blocked by another issue that must be resolved first, link it via GitHub's native Issue Dependencies API:
      ```bash
@@ -271,9 +265,11 @@ Before the implementation PR merges, an operational backfill migrates the six ac
      ```
      (Note: prose in the issue body does not enforce dependencies; use the native API).
      ```
-  2. In `.claude/commands/bug.md` (around line 35), add the identical native-linking instructions.
+  2. In `commands/bug.md` (around line 35), add the identical native-linking instructions.
+  3. Run `python3 scripts/sync_commands.py` to regenerate the compiled `.claude/commands/idea.md` and `.claude/commands/bug.md` from the edited sources.
+  4. In both `commands/idea.md` and `commands/bug.md`, add `Bash(gh api:*)` to the `allowed-tools` frontmatter, needed for the two-command native-linking sequence documented above.
 - **Done-When:**
-  Contract test assertions 9 and 10 pass.
+  Contract test assertions 9 and 10 pass, and `python3 scripts/sync_commands.py --check` exits 0.
 
 ---
 
@@ -331,20 +327,24 @@ Before the implementation PR merges, an operational backfill migrates the six ac
 
 ---
 
-### Task T9: Verify Contract Tests, Regression Suites, and Merge Readiness
+### Task T9: Wire Contract Test into CI, Verify Gates, and Merge Readiness
 - **Owner:** odyssey (Implement stage)
-- **Files touched:** None
+- **Files touched:** `.github/workflows/ci-gates.yml`
 - **Decisions implemented:** All (D1–D8)
 - **Acceptance criteria proven:** AT-372-1 through AT-372-10
-- **Description:** Run all test suites locally:
-  - `bash scripts/ops/tests/claim_native_dependencies_contract_test.sh` (must be 12 passed, 0 failed, exit 0).
-  - `bash scripts/ops/tests/claim_test.sh` (must exit 0).
-  - `python3 scripts/sync_agents.py --check` (must exit 0).
-  - `bash scripts/ci/sanitize_check.sh` (must exit 0).
-  - `python3 scripts/ops/execution.py --check` (must exit 0).
-  - Verify PR status, post handoff comment, and apply `deep-review` grant.
+- **Description:**
+  1. In `.github/workflows/ci-gates.yml`, add `bash scripts/ops/tests/claim_native_dependencies_contract_test.sh` and `bash scripts/ops/tests/claim_test.sh` to the same step that runs the sibling contract suites (`review_split_contract_test.sh`, `athena_front_door_contract_test.sh`), so the regression guard for #353/#404's false-positive runs on every PR, not just locally.
+  2. Run all test suites locally:
+     - `bash scripts/ops/tests/claim_native_dependencies_contract_test.sh` (must be 12 passed, 0 failed, exit 0).
+     - `bash scripts/ops/tests/claim_test.sh` (must exit 0).
+     - `python3 scripts/sync_agents.py --check` (must exit 0).
+     - `python3 scripts/sync_commands.py --check` (must exit 0, per T5).
+     - `bash scripts/ci/compiler_roundtrip.sh` (must exit 0).
+     - `bash scripts/ci/sanitize_check.sh` (must exit 0).
+     - `python3 scripts/ops/execution.py --check` (must exit 0).
+     - Verify PR status, post handoff comment, and apply `deep-review` grant.
 - **Done-When:**
-  All tests and CI gates pass green.
+  All tests and CI gates pass green, including the newly wired contract suites in `ci-gates.yml`.
 
 ---
 

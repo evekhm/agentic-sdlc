@@ -13,8 +13,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 CLAIM_SH="$REPO/scripts/ops/claim.sh"
 CLAIM_TEST_SH="$REPO/scripts/ops/tests/claim_test.sh"
 AGENTS_MD="$REPO/AGENTS.md"
-IDEA_MD="$REPO/.claude/commands/idea.md"
-BUG_MD="$REPO/.claude/commands/bug.md"
+IDEA_MD="$REPO/commands/idea.md"
+BUG_MD="$REPO/commands/bug.md"
 SPEC_MD="$REPO/docs/SPEC.md"
 
 TOTAL=0
@@ -228,9 +228,13 @@ fi
 # Assertion 8: D4 / AT-372-7: AGENTS.md claimable definition updated
 # ==============================================================================
 banner "D4 / AT-372-7: AGENTS.md claimable definition describes native mechanism"
-claimable_line="$(grep -n 'Claimable:' "$AGENTS_MD" | head -1 || true)"
-if printf '%s' "$claimable_line" | grep -qiE '(blocked_by|native dependenc)' && \
-   ! printf '%s' "$claimable_line" | grep -q 'issue named in its "Depends on" line'; then
+claimable_anchor="$(grep -n 'is \*claimable\* when' "$AGENTS_MD" | head -1 | cut -d: -f1 || true)"
+claimable_window=""
+if [ -n "$claimable_anchor" ]; then
+    claimable_window="$(sed -n "${claimable_anchor},$((claimable_anchor + 2))p" "$AGENTS_MD" | tr '\n' ' ')"
+fi
+if printf '%s' "$claimable_window" | grep -qiE '(blocked_by|native dependenc)' && \
+   ! printf '%s' "$claimable_window" | grep -q 'issue named in its "Depends on" line'; then
     pass "D4 / AT-372-7: AGENTS.md claimable definition specifies native dependencies"
 else
     fail "D4 / AT-372-7: AGENTS.md claimable definition still references 'Depends on' line"
