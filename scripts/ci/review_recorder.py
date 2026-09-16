@@ -13,6 +13,91 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EXECUTION_PY = REPO_ROOT / "scripts" / "ops" / "execution.py"
+
+DEFAULT_ASSIGNED = "argus,atlas"
+
+
+def resolve_assigned(pr, repo, pr_data):
+    """Derive the assigned reviewer set the way `.github/workflows/unattended.yml`
+    resolves `pull_request` subscribers (#328), so the ledger's `assigned` marker
+    reflects who was actually dispatched.
+
+    Any resolution failure returns DEFAULT_ASSIGNED, the same default
+    merge_gate.sh already falls back to when a ledger carries no marker at all.
+    """
+    try:
+        status_label = ""
+        # Prefer the branch name: a rung PR binds its issue with `Refs #n`, so
+        # `closingIssuesReferences` is empty for exactly the intent-rung PRs
+        # this fix exists for. It carries the number only when a PR body used a
+        # closing keyword, which makes it the better fallback for a branch the
+        # regex cannot parse (#464).
+        issue_num = ""
+        m = re.match(r'^[a-zA-Z0-9_-]+/([0-9]+)-', pr_data.get("headRefName", ""))
+        if m:
+            issue_num = m.group(1)
+        else:
+            for ref in pr_data.get("closingIssuesReferences", []):
+                if isinstance(ref, dict) and ref.get("number"):
+                    issue_num = str(ref["number"])
+                    break
+        if issue_num:
+            issue_res = subprocess.run(
+                ["gh", "api", f"repos/{repo}/issues/{issue_num}"],
+                capture_output=True, text=True,
+            )
+            if issue_res.returncode == 0 and issue_res.stdout.strip():
+                issue_data = json.loads(issue_res.stdout)
+                for l in issue_data.get("labels", []):
+                    name = l.get("name", "") if isinstance(l, dict) else ""
+                    if name.startswith("status:"):
+                        status_label = name
+                        break
+
+        pr_labels = sorted(
+            l.get("name", "") for l in pr_data.get("labels", []) if isinstance(l, dict) and l.get("name")
+        )
+
+        files_res = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{pr}/files", "--paginate", "--jq", ".[].filename"],
+            capture_output=True, text=True,
+        )
+        if files_res.returncode != 0:
+            raise RuntimeError(f"gh api pulls/files exited {files_res.returncode}: {files_res.stderr}")
+        pr_paths = [line for line in files_res.stdout.splitlines() if line]
+
+        sub_args = [sys.executable, str(EXECUTION_PY), "--subscribers", "pull_request"]
+        if status_label:
+            sub_args += ["--status-label", status_label]
+        paths_file = None
+        if pr_paths:
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+                paths_file = f.name
+                f.write("\n".join(pr_paths) + "\n")
+            sub_args += ["--paths-file", paths_file]
+        if pr_labels:
+            sub_args += ["--labels", *pr_labels]
+
+        try:
+            sub_res = subprocess.run(sub_args, capture_output=True, text=True)
+        finally:
+            if paths_file:
+                Path(paths_file).unlink(missing_ok=True)
+        if sub_res.returncode != 0:
+            raise RuntimeError(f"execution.py --subscribers exited {sub_res.returncode}: {sub_res.stderr}")
+
+        names = sorted({line.split("\t", 1)[0] for line in sub_res.stdout.splitlines() if line.strip()})
+        if not names:
+            raise RuntimeError("execution.py --subscribers returned no subscribers")
+        return ",".join(names)
+    except Exception as e:
+        print(f"assigned-set resolution failed: {e}; falling back to {DEFAULT_ASSIGNED}", file=sys.stderr)
+        return DEFAULT_ASSIGNED
 
 
 def main():
@@ -409,10 +494,11 @@ def main():
         sys.exit(0)
 
     # Build new consensus ledger comment body
+    assigned = resolve_assigned(pr, repo, pr_data)
     lines = [
         f"### Findings ledger for #{pr}",
         f"<!-- consensus-ledger:{pr} -->",
-        "<!-- assigned:argus,atlas -->"
+        f"<!-- assigned:{assigned} -->"
     ]
     if "argus" in accepted_heads:
         lines.append(f"<!-- reviewed-head:argus:{accepted_heads['argus']} -->")
