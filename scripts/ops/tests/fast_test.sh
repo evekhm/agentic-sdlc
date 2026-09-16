@@ -409,5 +409,78 @@ set -e
 grep -q "missing preflight script: .*sanitize_check.sh" <<<"$err_out" || fail "missing preflight message mismatch"
 pass "18. missing preflight gate script fails closed (R2-2)"
 
+# --- Test 19: Inferred issue from active worktree path and description confirmation ---
+cat > "$FIXTURES/repos_test_repo_issues_200.json" <<'JSON'
+{
+  "state": "open",
+  "title": "Behavior issue",
+  "body": "Problem description line 1.\nProblem line 2.\nProblem line 3.",
+  "labels": [{"name": "status:implementing"}]
+}
+JSON
+
+set +e
+out="$(cd "$TEST_WT" && "$FAST_SH" --no-pr --no-dispatch 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "inferred issue in worktree did not exit 0 (got $status: $out)"
+grep -q "Inferred target issue #200 from worktree/branch" <<<"$out" || fail "inferred target issue message missing"
+grep -q "Target issue: #200 · Behavior issue" <<<"$out" || fail "target issue confirmation missing"
+grep -q "Description:  Problem description line 1. Problem line 2. Problem line 3." <<<"$out" || fail "description confirmation missing"
+pass "19. inferred issue from active worktree path and description confirmation"
+
+# --- Test 20: Inferred issue from branch name when worktree directory has no issue digits ---
+TEST_WT_NODIGITS="$WORK/plain-worktree"
+git -C "$TEST_REPO" worktree add -b "actor/305-slug-name" "$TEST_WT_NODIGITS" main >/dev/null
+cat > "$FIXTURES/repos_test_repo_issues_305.json" <<'JSON'
+{
+  "state": "open",
+  "title": "Branch inferred issue",
+  "body": "Branch issue description",
+  "labels": [{"name": "status:implementing"}]
+}
+JSON
+set +e
+out="$(cd "$TEST_WT_NODIGITS" && "$FAST_SH" --dry-run 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "inferred issue from branch did not exit 0 (got $status: $out)"
+grep -q "Inferred target issue #305 from worktree/branch" <<<"$out" || fail "branch inferred issue message missing"
+grep -q "Target issue: #305 · Branch inferred issue" <<<"$out" || fail "branch target issue confirmation missing"
+pass "20. inferred issue from branch name when worktree has no issue digits"
+
+# --- Test 21: Failure when invoked outside issue worktree / branch without issue argument ---
+set +e
+err_out="$(cd "$TEST_REPO" && "$FAST_SH" 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 1 ] || fail "running without issue in primary repo did not exit 1 (got $status)"
+grep -q "no issue number specified and could not infer issue number from worktree or branch" <<<"$err_out" || fail "missing inference failure error message"
+pass "21. fails closed when invoked outside issue worktree without issue argument"
+
+# --- Test 22: Refuses when worktree name and branch name disagree (Argus R1-1) ---
+TEST_WT_MISMATCH="$WORK/mismatch-2-test"
+git -C "$TEST_REPO" worktree add -b eva/999-other-issue "$TEST_WT_MISMATCH" main >/dev/null
+set +e
+err_out="$(cd "$TEST_WT_MISMATCH" && "$FAST_SH" 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 1 ] || fail "worktree/branch disagreement did not exit 1 (got $status: $err_out)"
+grep -q "worktree name suggests #2 but branch name suggests #999; refusing to guess" <<<"$err_out" \
+    || fail "disagreement diagnostic message missing -- got: $err_out"
+pass "22. refuses when worktree name and branch name disagree (R1-1)"
+
+# --- Test 23: Digit-suffixed directory with no slug and numberless branch fails closed (Argus R1-1) ---
+TEST_WT_DIGITS_ONLY="$WORK/agentic-sdlc-2"
+git -C "$TEST_REPO" worktree add -b "chore/cleanup" "$TEST_WT_DIGITS_ONLY" main >/dev/null
+set +e
+err_out="$(cd "$TEST_WT_DIGITS_ONLY" && "$FAST_SH" 2>&1)"
+status=$?
+set -e
+[ "$status" -eq 1 ] || fail "digit-suffixed directory without a slug did not exit 1 (got $status: $err_out)"
+grep -q "no issue number specified and could not infer issue number from worktree or branch" <<<"$err_out" \
+    || fail "missing inference failure error message -- got: $err_out"
+pass "23. fails closed on a digit-suffixed directory with no slug and a numberless branch (R1-1)"
+
 echo ""
 echo "=== All fast_test.sh tests passed ==="

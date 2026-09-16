@@ -219,6 +219,7 @@ living-spec, changelog, test, and dual-review consensus gates fully intact.
    not an autonomous bot. If unverified, refuse and follow the regular ladder rungs.
 2. **Enter Worktree.** Create and switch to the issue's isolated worktree:
    `CLAIM_ACTOR=<actor> CLAIM_SESSION=fast scripts/ops/claim.sh <issue>`
+   When already inside the issue's worktree, `<issue>` is optional for `/fast` and `scripts/ops/fast.sh` (inferred from worktree or branch).
 3. **Implement Code, Tests, and Living Spec.**
    - Implement the solution in the worktree.
    - Upsert `docs/SPEC.md` if behavior changes.

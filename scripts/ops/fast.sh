@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/ops/fast.sh <issue-number> [options]
+# scripts/ops/fast.sh [<issue-number>] [options]
 #
 # Operator fast-track door (#444): initiates and executes owner-authorized
 # ladder compression, transitioning an issue directly to status:implementing
@@ -20,6 +20,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$REPO_ROOT/scripts/ops/lib/issue_inference.sh"
 GITHUB_REPO="${GITHUB_REPO:-${GITHUB_REPOSITORY:-evekhm/agentic-sdlc}}"
 DRY_RUN="${DRY_RUN:-0}"
 AS_PERSONA="${AS_PERSONA:-odyssey}"
@@ -30,13 +31,14 @@ NO_DISPATCH=0
 
 usage() {
     cat <<'USAGE_EOF'
-Usage: scripts/ops/fast.sh <issue-number> [options]
+Usage: scripts/ops/fast.sh [<issue-number>] [options]
 
 Operator fast-track door: initiates and executes owner-authorized ladder
 compression, combining intent, spec, plan, and implementation into one round.
 
 Arguments:
-  <issue-number>             The GitHub issue number to fast-track.
+  <issue-number>             The GitHub issue number to fast-track (optional;
+                             inferred from active worktree or branch if omitted).
 
 Options:
   --as <persona>             Persona identity to dispatch (default: odyssey).
@@ -79,7 +81,18 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-[ -n "$ISSUE" ] || { usage >&2; exit 1; }
+if [ -z "$ISSUE" ]; then
+    if INFER_OUTPUT="$(infer_issue_from_context 2>&1)"; then INFER_RC=0; else INFER_RC=$?; fi
+    if [ "$INFER_RC" -eq 0 ]; then
+        ISSUE="$INFER_OUTPUT"
+        echo "==> Inferred target issue #$ISSUE from worktree/branch"
+    elif [ -n "$INFER_OUTPUT" ]; then
+        die "$INFER_OUTPUT"
+    else
+        usage >&2
+        die "no issue number specified and could not infer issue number from worktree or branch"
+    fi
+fi
 [[ "$ISSUE" =~ ^[0-9]+$ ]] || die "issue must be a positive integer, got '$ISSUE'"
 
 # Preflight: gh CLI availability
@@ -145,7 +158,17 @@ if [ "${#STATUS_LABELS[@]}" -gt 1 ]; then
     refuse "issue #$ISSUE carries contradictory status labels (${STATUS_LABELS[*]}); state machine corrupted"
 fi
 
-echo "==> Issue #$ISSUE: $ISSUE_TITLE"
+echo "==> Target issue: #$ISSUE · $ISSUE_TITLE"
+ISSUE_BODY="$(jq -r '.body // empty' <<<"$ISSUE_JSON")"
+if [ -n "$ISSUE_BODY" ]; then
+    ISSUE_DESC="$(printf '%s\n' "$ISSUE_BODY" | grep -v '^[[:space:]]*$' | head -n 3 | paste -sd ' ' - || true)"
+    if [ -n "$ISSUE_DESC" ]; then
+        if [ "${#ISSUE_DESC}" -gt 140 ]; then
+            ISSUE_DESC="${ISSUE_DESC:0:137}..."
+        fi
+        echo "==> Description:  $ISSUE_DESC"
+    fi
+fi
 echo "==> Verified owner authorization: $OWNER_SIGNATURE"
 
 # Helper: re-read hold immediately before writing (D13/D14, fail-closed on API error R2-1)

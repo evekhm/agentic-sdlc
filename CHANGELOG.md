@@ -26,6 +26,9 @@ Drafting an intent.md or spec.md with a non-empty "Open questions" section used 
 
 ## 2026-09-11
 
+### Optional Issue Number for /fast Inferred from Worktree ([#454](https://github.com/evekhm/agentic-sdlc/issues/454))
+Makes the `<issue-number>` argument optional in `/fast`, `scripts/ops/fast.sh`, and `scripts/ops/digest.sh`. When omitted, the issue number is automatically inferred from the active worktree directory name or git branch. The command outputs confirmation of the target issue number, title, and description summary, enabling operators and interactive sessions to fast-track changes without redundant keyboard input. Worktree-directory inference (Argus R1-1, round 3) requires the full `<actor>-<n>-<slug>` naming convention `claim.sh` writes: a directory whose name merely ends in digits, with no slug following them, is no longer read as an issue number, closing a case where a second clone such as `agentic-sdlc-2` silently inferred an unrelated issue. `digest.sh` (Argus R2-1, round 3) also now surfaces the same worktree/branch disagreement diagnostic `fast.sh` uses in its own `(unavailable)` line, so a mismatch reads as the real cause and not a generic "no context" message.
+
 ### README Opens With the Use Case, Names the Orchestrator, and Explains the Living Spec ([#441](https://github.com/evekhm/agentic-sdlc/issues/441))
 Adds a "What it solves" section at the front of README.md (the two ways of working, the seven doors), a "The living spec" section on the deterministic guardrails, and rewrites "The orchestrator" around the advisor seat. Readers previously met the actors and the rungs before any statement of the problem or of how an operator works with the system. Originally proposed as PR #451, closed unmerged; lands here alongside `/work`'s own plumbing rather than as a separate PR.
 

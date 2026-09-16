@@ -987,7 +987,10 @@ Past that circuit breaker, the door runs `scripts/ops/digest.sh <n>`
 follows, degrading to an `(unavailable)`-style line per field on any
 lookup failure rather than aborting; it prints the number's title and
 state, its labels, any open pull request referencing it, and the most
-recent comment), claims the issue via `scripts/ops/claim.sh <n>` if it
+recent comment; `<n>` is optional here too, absent or flag-leading
+falls back to `scripts/ops/lib/issue_inference.sh`'s worktree/branch
+inference, the same rule `fast.sh` uses, #454), claims the issue via
+`scripts/ops/claim.sh <n>` if it
 does not already carry `in-progress`, and stops there: `work.sh` is
 never invoked in this mode. The claim is posted as the stage's owning
 persona rather than under whatever identity happens to be ambient
@@ -1126,14 +1129,14 @@ both the `intent:new` and `bug` labels in that one call.
 Tests: `scripts/ops/tests/intake_test.sh`.
 
 ### ops.fast_track
-The operator fast-track door (`/fast <issue>`, backed by `scripts/ops/fast.sh`, command `.claude/commands/fast.md`, and skill `personas/skills/fast-track.md`) initiates and executes owner-authorized ladder compression (#415, #444). Ladder compression combines intent, spec, plan, and implementation into a single round for urgent or fully-scoped changes, bypassing intermediate gate halts without bypassing safety:
-1. Caller boundary and authorization: fast-tracks capture caller signature (supporting on-issue owner comment `/fast-track`), require collaborator write permissions, and refuse unattended GitHub Actions. Autonomous bot self-authorization policies remain open for exploration in a follow-up issue.
+The operator fast-track door (`/fast [<issue>]`, backed by `scripts/ops/fast.sh`, command `.claude/commands/fast.md`, and skill `personas/skills/fast-track.md`) initiates and executes owner-authorized ladder compression (#415, #444, #454). When `<issue>` is omitted, `fast.sh` and `digest.sh` both infer the target issue number through the shared `scripts/ops/lib/issue_inference.sh` (worktree directory name first, then git branch name), confirm the issue number, title, and description summary in output, and proceed autonomously without requiring interactive typing. When the worktree name and branch name each yield a number and the two disagree, `fast.sh` refuses with exit 1, naming both candidates; `digest.sh` stays fail-open, exits 0, and degrades to an `(unavailable)` line that quotes that same disagreement diagnostic (R2-1) as the reason. Ladder compression combines intent, spec, plan, and implementation into a single round for urgent or fully-scoped changes, bypassing intermediate gate halts without bypassing safety:
+1. Caller boundary and authorization: fast-tracks capture caller signature (supporting on-issue owner comment `/fast-track`), require collaborator write permissions, and refuse unattended GitHub Actions. Autonomous bot self-authorization policies remain open for exploration in a follow-up issue (#453).
 2. State transition: removes obsolete intake and stage labels, transitions the issue directly to `status:implementing`, and posts the structured fast-track initiation comment.
 3. PR construction: opens a single-round PR with mandatory header `Owner-authorized ladder compression: combines intent/spec/plan/implement into one round (Refs #<n>)` and `Closes #<n>`.
 4. Gate protection: runs preflight checks (`sanitize_check.sh`, `spec_check.sh`, `changelog_check.sh`) before PR creation. If behavior-bearing files are touched and `CHANGELOG.md` is unmodified, automatically requires or populates `Changelog: none — <reason>`.
 5. Living spec obligation: living spec upserts into `docs/SPEC.md` remain mandatory in the PR diff whenever user or system behavior changes.
 6. Dual-reviewer consensus: fast-tracking accelerates authoring rungs only; review is inviolable. Every fast-track PR requires independent dual review consensus from Argus and Atlas before the autonomous merge gate merges it.
-Tests: `scripts/ops/tests/fast_test.sh`.
+Tests: `scripts/ops/tests/fast_test.sh` and `scripts/ops/tests/digest_test.sh`.
 
 ### ops.identity
 A dispatched session runs as its own persona, never as the operator

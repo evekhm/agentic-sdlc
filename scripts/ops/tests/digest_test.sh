@@ -82,10 +82,30 @@ echo "$out" | grep -q '^digest: no open PR references it$' \
 pass "degraded pr list: still exits 0 and falls back cleanly"
 
 # --- no number given: still exits 0 -----------------------------------------
-out="$("$DIGEST" 2>&1)"; rc=$?
+# Hermetic: run from a throwaway repo on `main` so the result does not
+# depend on the actual caller's cwd/branch (this test previously ran
+# with no explicit `cd`, inheriting whatever branch/worktree the suite
+# itself happened to be checked out on).
+NODIGITS_REPO="$WORK/nodigits_repo"
+git init -q -b main "$NODIGITS_REPO"
+git -C "$NODIGITS_REPO" config user.email "test@example.com"
+git -C "$NODIGITS_REPO" config user.name "Test User"
+git -C "$NODIGITS_REPO" commit --allow-empty -m "initial commit" >/dev/null
+
+out="$(cd "$NODIGITS_REPO" && ISSUE_VIEW_RC=0 PR_LIST_RC=0 "$DIGEST" 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] || fail "no number: expected exit 0, got $rc"
 echo "$out" | grep -q 'unavailable' \
     || fail "no number: expected an unavailable line -- got:\n$out"
 pass "no number given: still exits 0"
+
+# --- flags-only invocation infers the issue from context; the leading
+# flag is never mistaken for the issue number (Argus R1-2) ---------------
+FLAG_WT="$NODIGITS_REPO-wt-7"
+git -C "$NODIGITS_REPO" worktree add -b eva/7-flag-test "$FLAG_WT" main >/dev/null
+out="$(cd "$FLAG_WT" && ISSUE_VIEW_RC=0 PR_LIST_RC=0 "$DIGEST" --dry-run 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] || fail "flags-only: expected exit 0, got $rc"
+echo "$out" | grep -q '^digest: #7 (issue)' \
+    || fail "flags-only: expected inference to resolve #7 from branch -- got:\n$out"
+pass "flags-only invocation infers issue from worktree/branch (R1-2)"
 
 echo "digest_test.sh: all scenarios passed"
