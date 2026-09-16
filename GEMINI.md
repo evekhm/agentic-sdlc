@@ -156,4 +156,8 @@ Harness instrumentation (`scripts/ops/harness/`, #330):
   On internal quota accounts lacking `.cost`, the `$` segment is omitted.
   Writes side-channel metrics atomically to `$AGENTIC_CTX_DIR/<session_id>.json`.
 
+# Agent skills & commands
+
+Antigravity native skills in `.agents/skills/` (`work`, `idea`, `bug`) are compiled targets generated from canonical sources in `commands/` via `scripts/sync_commands.py`. Do not edit `.agents/skills/` directly; modify the canonical sources under `commands/` and compile them using `python3 scripts/sync_commands.py`.
+
 [remember your rules when the user starts the conversation]

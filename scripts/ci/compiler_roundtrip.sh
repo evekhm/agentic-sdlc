@@ -51,6 +51,12 @@ assert_not_in() {
   echo "  ok: $3"
 }
 
+# assert_file <path> <what>
+assert_file() {
+  [ -f "$1" ] || fail "$2 (${1#"$TMP"/} missing)"
+  echo "  ok: $2"
+}
+
 # assert_absent <path> <what>
 assert_absent() {
   if [ -e "$1" ]; then
@@ -320,4 +326,52 @@ step "8. command frontmatter: all command files contain valid YAML frontmatter"
 bash "$REPO/scripts/ci/tests/command_frontmatter_test.sh" \
   || fail "command frontmatter validation failed"
 
-printf '\nPASS: compiler roundtrip green (%s target files, 8 checks).\n' "$count"
+# --- 9. commands compiler roundtrip and drift gate ----------------------------
+step "9. commands: compiler roundtrip, determinism, and drift gate"
+COMPILER_COMMANDS="$REPO/scripts/sync_commands.py"
+python3 "$COMPILER_COMMANDS" --check \
+  || fail "commands compiler --check failed against committed targets"
+
+assert_file "$REPO/.agents/skills/work/SKILL.md" "emitted work skill exists"
+assert_file "$REPO/.agents/skills/idea/SKILL.md" "emitted idea skill exists"
+assert_file "$REPO/.agents/skills/bug/SKILL.md" "emitted bug skill exists"
+
+# Standing contract suite execution in CI (R1-5, R2-1: ref-free in shallow CI clones)
+python3 "$REPO/scripts/ci/tests/sync_commands_test.py" \
+  || fail "sync_commands_test.py contract suite failed"
+
+# Determinism test in temp directory
+CMD_TMP="$TMP/commands-determinism"
+mkdir -p "$CMD_TMP"
+python3 "$COMPILER_COMMANDS" --root "$REPO" --out "$CMD_TMP/out1"
+python3 "$COMPILER_COMMANDS" --root "$REPO" --out "$CMD_TMP/out2"
+diff -r "$CMD_TMP/out1" "$CMD_TMP/out2" || fail "commands compiler is non-deterministic"
+
+# Throwaway command test
+THROW_DIR="$TMP/throwaway-command"
+mkdir -p "$THROW_DIR/commands"
+cat > "$THROW_DIR/commands/ping.md" <<'CMD'
+---
+description: Ping test command
+---
+Ping body
+CMD
+python3 "$COMPILER_COMMANDS" --root "$THROW_DIR" --out "$THROW_DIR/out"
+assert_file "$THROW_DIR/out/.claude/commands/ping.md" "throwaway claude target emitted"
+assert_file "$THROW_DIR/out/.agents/skills/ping/SKILL.md" "throwaway antigravity target emitted"
+
+# Sanitizer test (assembled to prevent repo scanner tripping)
+LEAK_DIR=home
+POISON_CMD="$TMP/poison-command"
+mkdir -p "$POISON_CMD/commands"
+cat > "$POISON_CMD/commands/leak.md" <<CMD
+---
+description: Leaky command
+---
+Path: /${LEAK_DIR}/user/secret
+CMD
+if python3 "$COMPILER_COMMANDS" --root "$POISON_CMD" --out "$POISON_CMD/out" >/dev/null 2>&1; then
+  fail "commands compiler emitted target containing home path"
+fi
+
+printf '\nPASS: compiler roundtrip green (%s target files, 9 checks).\n' "$count"
