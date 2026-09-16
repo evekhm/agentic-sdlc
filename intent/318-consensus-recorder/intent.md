@@ -1,6 +1,6 @@
 # Intent: Anchored Verdict Marker Parsing and Loud Declines in Consensus Recorder
 
-**Issue:** #318 · **Author:** athena (evekhm-athena-app[bot]) · **Status:** Draft
+**Issue:** #318 · **Author:** athena (evekhm-athena-app[bot]) · **Status:** Accepted
 
 > [!NOTE]
 > Notation: Every marker in this document is written with bracketed notation (such as `[review-verdict:<reviewer>:<verdict>]` or `[reviewed-head:<sha>]`) where real comments emit HTML comment syntax. This ensures the document cannot be parsed as live verdict input by existing unanchored recorder parsers.
@@ -47,7 +47,7 @@ The consensus recorder (`scripts/ci/review_recorder.py`) parses structured revie
 ## Constraints
 
 - **Autonomous authority limits**: Athena authors only `intent/**`. Code, workflow edits, and test implementations belong to Daedalus (plan) and Odyssey (implementation) in subsequent lifecycle stages.
-- **Fail-closed security posture**: Any ambiguous or malformed verdict block must fail closed with an explicit refusal, never admitted as clean and never silently discarded.
+- **Fail-closed security posture**: Any ambiguous or malformed verdict block must fail closed with an explicit refusal. Ambiguous blocks are barred from admission as clean and must not be silently discarded.
 - **Provenance verification preservation**: The Actions API run ID provenance checks established in #267 D3 and #353 D1 remain active and mandatory.
 - **Preservation of conversational comments**: Human maintainer comments and discussions without structured verdict blocks must continue to pass unparsed without disrupting consensus ledger generation.
 - **Documentation format safety**: All markdown examples of review markers in issues, pull requests, and documentation must use bracketed or escaped forms to prevent recursive parser triggers.
