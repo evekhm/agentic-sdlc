@@ -1,6 +1,6 @@
 # Intent: Exclude Withdrawn Findings From Merge Gate Dispute Check
 
-**Issue:** #508 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #508 · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
