@@ -309,7 +309,7 @@ else
         for i in 3 4 5 11; do WHY[$i]="the consensus ledger has a row this gate cannot parse"; done
     else
         BLOCKING="$(awk -F: '(($2 == "security" || $2 == "high") && $3 == "open") || ($2 == "security" && $3 == "fixed" && $4 != "agree") {print $1}' <<<"$CTUP")"
-        DISPUTED="$(awk -F: '$4 == "dispute" {print $1}' <<<"$CTUP")"
+        DISPUTED="$(awk -F: '$3 != "withdrawn" && $4 == "dispute" {print $1}' <<<"$CTUP")"
         PENDING_SEC="$(awk -F: '$2 == "security" && $4 == "pending" {print $1}' <<<"$CTUP")"
         AT_OPEN="$(awk -F: '$1 ~ /^AT-/ && $3 == "open" {print $1}' <<<"$CTUP")"
         if [ "$ASSIGNED" = "atlas" ]; then
