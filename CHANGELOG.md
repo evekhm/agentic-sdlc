@@ -9,6 +9,9 @@ All notable behavioral and user-facing changes to this repository are documented
 
 ## 2026-09-16
 
+### Native Issue Dependencies Replace Prose Parsing in claim.sh ([#372](https://github.com/evekhm/agentic-sdlc/issues/372))
+Replaces regex body scanning for "Depends on" in claim.sh with GitHub's native Issue Dependencies API. Eliminates false-positive claim refusals caused by descriptive prose while preserving hard dependency gating via issue_dependencies_summary and blocked_by. Migrates existing active tracker dependencies to native links.
+
 ### The Consensus Ledger Derives Its Assigned Reviewer Set ([#328](https://github.com/evekhm/agentic-sdlc/issues/328))
 `scripts/ci/review_recorder.py` wrote the literal `<!-- assigned:argus,atlas -->` on every ledger it emitted, so `scripts/ci/merge_gate.sh`'s dynamic fallback through `scripts/ops/execution.py --subscribers` (built for the case the marker is absent) had no path to run: the marker was always present. Live on PR #504, a PR touching only `intent/**` with its issue at `status:planning` should assign Atlas alone, but the hardcoded marker claimed both reviewers, and merge-gate conjuncts (3) and (11) waited forever on a reviewer the workflow correctly never dispatched. The recorder now resolves the assigned set the same way `.github/workflows/unattended.yml` resolves `pull_request` subscribers for a live dispatch — status label of the linked issue, PR changed paths, PR labels, all fed through the same `execution.py --subscribers` call — and falls back to `argus,atlas` on any resolution failure, the same default `merge_gate.sh` already uses when a ledger carries no marker at all.
 

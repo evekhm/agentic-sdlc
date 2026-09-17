@@ -211,6 +211,17 @@ stage, owner, folder and branch from the labels and the repository
 (`ops.dispatch`), so the tracker, not the operator, says what is
 current. There is deliberately no STATUS.md.
 
+Issue claimability is governed by GitHub's native Issue Dependencies API
+(`blocked_by`). When `scripts/ops/claim.sh` claims an issue, it inspects
+`issue_dependencies_summary.total_blocked_by` in the issue payload. When
+zero, the check succeeds with zero extra API calls. When non-zero,
+`claim.sh` queries `repos/:owner/:repo/issues/:number/dependencies/blocked_by`
+and verifies that every blocking issue has `state == "closed"`. If any
+blocker remains open, the claim is refused, naming each open blocker by
+number and title (`#<n> is blocked by #<m> (open): <title>`). Issue body
+text is never parsed for dependency declarations: prose mentions of
+"depends on" have zero mechanical effect.
+
 ### tracker.provisioning
 `scripts/setup/bootstrap_tracker.sh` provisions the base labels and
 the backlog issues idempotently from reviewable body files in

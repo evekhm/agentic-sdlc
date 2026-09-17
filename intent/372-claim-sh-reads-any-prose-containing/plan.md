@@ -362,3 +362,10 @@ Before the implementation PR merges, an operational backfill migrates the six ac
 | **D5** | AT-372-8 | T5 | `scripts/ops/tests/claim_native_dependencies_contract_test.sh` (Assertions 9, 10) |
 | **D7** | AT-372-9 | T6 | Live API read across {408, 31, 399, 148, 147, 44} |
 | **D8** | AT-372-10 | T7, T8 | `scripts/ops/tests/claim_native_dependencies_contract_test.sh` (Assertion 12) & `spec_check.sh`, `changelog_check.sh` |
+
+---
+
+## 6. Plan Sync (Deviations)
+
+- **Task T5 / T9 Sync (sync_commands_test.py):** Updating `commands/idea.md` and `commands/bug.md` and regenerating `.claude/commands/` exposed that `scripts/ci/tests/sync_commands_test.py` (`test_d2_at_416_2_claude_targets_byte_identity`) was comparing emitted `.claude/commands/*` against `origin/main` rather than checking drift against committed targets in `REPO_ROOT`. In issue #416 D10, the commands compiler roundtrip was specified to be ref-free without `git` invocations against `origin/main`. `scripts/ci/tests/sync_commands_test.py` was updated to compare emitted targets against committed targets in `REPO_ROOT` (drift check) and verify no `GENERATED` comments exist in frontmatter, making it ref-free and allowing command sources in `commands/` to evolve as intended.
+- **Task T9 Sync (.github/workflows/ci-gates.yml):** Task T9 specified wiring `claim_native_dependencies_contract_test.sh` and `claim_test.sh` into `.github/workflows/ci-gates.yml`. However, pushes modifying `.github/workflows/*.yml` are mechanically rejected by GitHub for GitHub App tokens lacking the `workflows` permission (`refusing to allow a GitHub App to create or update workflow without workflows permission`). Per trusted-posting rules (Rule 3/4: stay inside declared authority, never retry by switching identities), the workflow modification cannot be pushed by Odyssey App bot and is omitted from this PR. Both `claim_native_dependencies_contract_test.sh` (12/12 passing) and `claim_test.sh` are fully verified locally and can be wired into CI by a maintainer / followup with workflow scopes.
