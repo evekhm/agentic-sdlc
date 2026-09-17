@@ -1,6 +1,6 @@
 # Intent: price Gemini Flash and Pro at current pinned versions in session_spend and work.sh
 
-**Issue:** #269 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`)
+**Issue:** #269 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted (accepted via merge of PR #504)
 
 ## Problem
 
