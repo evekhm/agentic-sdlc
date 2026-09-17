@@ -515,6 +515,12 @@ run "MG-12e: human mention of atlas after its last verdict exits 0" 123
 has "conjunct (3): false" "MG-12e: an outstanding human mention blocks carry-forward (D7 (iv))"
 not_merged "MG-12e"
 
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H0" "R1-1:normal:withdrawn:dispute")" 2026-01-04T00:00:00Z 828)"
+run "MG-12f: atlas at older head with withdrawn dispute carries forward" 123
+has "conjunct (3): true" "MG-12f: atlas carries forward with withdrawn dispute (D7 (iv))"
+merged "MG-12f"
+
 banner "MG-13 · conjuncts (4) (5) · blocking set and consensus axis from ledger rows"
 mk_green
 comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" R1-1:security:open:pending)" 2026-01-04T00:00:00Z 809)"
@@ -549,6 +555,18 @@ comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" "R1-
 run "MG-13f: suggestion with Decision-tagged ID passes and merges" 123
 has "conjunct (4): true" "MG-13f: suggestion is non-blocking"
 merged "MG-13f"
+
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" "R1-1:normal:withdrawn:dispute")" 2026-01-04T00:00:00Z 826)"
+run "MG-13g: withdrawn dispute row passes conjunct (5) and merges" 123
+has "conjunct (5): true" "MG-13g: withdrawn dispute passes conjunct (5)"
+merged "MG-13g"
+
+mk_green
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" "R1-1:high:fixed:dispute")" 2026-01-04T00:00:00Z 827)"
+run "MG-13h: fixed dispute row fails conjunct (5)" 123
+has "conjunct (5): false" "MG-13h: a fixed dispute fails the axis"
+not_merged "MG-13h"
 
 banner "MG-14 · conjunct (11) · a ledger with no head marker earns nothing"
 mk_green
@@ -623,6 +641,12 @@ run "MG-18: exits 0" 123
 wrote "loop-ledger-row: refusal:security-open rung:4 head-oid:$H pr:123" "MG-18: the refusal row"
 wrote "<!-- escalation:status:implementing:security-open:$H -->" "MG-18: the escalation marker"
 not_merged "MG-18"
+
+mk_green; PR_LABELS='["review:3"]'; pr_fixture 123
+comments_fixture 123 "$(comment "$MERGER" "$(consensus_ledger 123 "$H" "$H" "R1-1:normal:withdrawn:dispute")" 2026-01-04T00:00:00Z 829)"
+run "MG-18b: at round cap review:3 a withdrawn dispute does not escalate dispute-at-cap" 123
+not_wrote "loop-ledger-row: refusal:dispute-at-cap" "MG-18b: no dispute-at-cap refusal row"
+not_wrote "<!-- escalation:status:implementing:dispute-at-cap" "MG-18b: no dispute-at-cap escalation marker"
 
 banner "MG-19 · escalate.sh · D9 D23 · idempotent on a trusted marker only; body is real lines"
 mk_green

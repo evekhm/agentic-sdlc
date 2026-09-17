@@ -1441,10 +1441,11 @@ is keyed per-commit SHA to eliminate cancel-in-progress races between
 successive pushes (#298). The gate merges only when all eleven D5 conjuncts
 hold at the pull request's current head, among them: both reviewers reviewed
 that head (Atlas may carry forward under D7), the blocking set is empty,
-the consensus axis is agreed, neither `hold` nor `blocked` is present, the
-merger is a different identity from the author, the target rung outranks every
-rung the loop ledger records, and the ledger's head marker is present. With the
-flag off the same evaluation runs and nothing is written.
+the consensus axis is agreed (findings with status `withdrawn` are excluded from the dispute check
+in conjunct (5), Atlas carry-forward condition (iv), and round-cap escalation; #508),
+neither `hold` nor `blocked` is present, the merger is a different identity from the author,
+the target rung outranks every rung the loop ledger records, and the ledger's head marker is present.
+With the flag off the same evaluation runs and nothing is written.
 When evaluating conjuncts 9 and 10, an issue carrying only `intent:new` with no `status:*` label resolves as ladder rung 1 (`status:planning`, artifact `intent.md`), enabling initial intent pull requests to merge autonomously once reviewer consensus is reached (#321, D1); if an explicit single `status:*` label is present alongside `intent:new`, the `status:*` label takes precedence (D5); unranked issues lacking both `status:*` and `intent:new` fail closed (D5). Budget refusals on `intent:new` issues record `refusal:budget rung:1` (D4).
 
 Before merge evaluation executes, `.github/workflows/merge-gate.yml` runs

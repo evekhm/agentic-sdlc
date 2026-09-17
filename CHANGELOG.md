@@ -2,6 +2,11 @@
 
 All notable behavioral and user-facing changes to this repository are documented in this file in reverse-chronological order. Each entry describes what capability changed, why the change was made, and the operational or user-visible impact on operators, personas, or workflows.
 
+## 2026-09-17
+
+### Exclude Withdrawn Findings From Merge Gate Dispute Check ([#508](https://github.com/evekhm/agentic-sdlc/issues/508))
+`scripts/ci/merge_gate.sh:312` extracted disputed findings by evaluating field 4 alone (`$4 == "dispute"`), ignoring field 3 (`status`). When a reviewer withdrew a finding after a peer dispute, the finding status transitioned to `withdrawn` while the peer consensus column historically retained `dispute` (`withdrawn:dispute`). This falsely evaluated withdrawn findings as active disputes, causing conjunct (5) to fail (`dispute on: ...`), denying Atlas carry-forward under Decision #64 D7 condition (iv), and triggering spurious `dispute-at-cap` escalations at round cap `review:3`. The filter now excludes findings with status `withdrawn` (`$3 != "withdrawn" && $4 == "dispute"`), consumed uniformly across conjunct (5), Atlas carry-forward, and round-cap escalation, while active disputes (`open:dispute` and `fixed:dispute`) remain enforced.
+
 ## 2026-09-16
 
 ### The Consensus Ledger Derives Its Assigned Reviewer Set ([#328](https://github.com/evekhm/agentic-sdlc/issues/328))
