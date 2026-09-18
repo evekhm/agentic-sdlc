@@ -60,7 +60,7 @@ This plan details the implementation to introduce mechanical auto-resolution of 
 
 ### Strict File Manifest Partitioning (D7)
 
-The implementing change is strictly confined to:
+The implementing change (Odyssey) is strictly confined to:
 1. `scripts/ci/merge_gate.sh`
 2. `scripts/ci/tests/merge_gate_test.sh`
 3. `docs/SPEC.md`
@@ -75,6 +75,8 @@ The implementing change is strictly confined to:
 - `scripts/ci/review_recorder.sh` and `scripts/ci/review_recorder.py`: consensus recording is untouched.
 - `scripts/ci/escalate.sh`: escalation execution logic is untouched.
 - `scripts/ci/lifecycle_advance.sh`: ladder transitions are untouched.
+
+Note on Contract Test Suite (`scripts/ci/tests/merge_gate_transient_polling_contract_test.sh`): Authored and committed in this Build PR (#528) by Daedalus under Daedalus's authority (`scripts/*/tests/**`). It does not appear in Odyssey's diff against `origin/main` because it merges as part of this Build PR.
 
 ---
 
@@ -92,18 +94,26 @@ The implementing change is strictly confined to:
 
 ### P2 · In-Gate Bounded Polling Loop (D1, D4)
 - When `OTHER_CONJUNCTS_OK=1`, if foreign checks in `CHECKS_TSV` are in transient states (`IN_PROGRESS`, `QUEUED`, `PENDING`, `WAITING`, `REQUESTED`) or `MERGE_STATE` is `UNKNOWN`, enter the transient polling loop.
-- Polling bounds:
+- **Handling of `mergeStateStatus: UNKNOWN` (D1, R1-4):**
+  In `merge_gate.sh:480-482`, `UNKNOWN` is currently handled by short-circuiting to unevaluable:
+  ```bash
+  elif [ "$MERGE_STATE" = "UNKNOWN" ]; then
+      WHY[2]="mergeStateStatus is still UNKNOWN after $merge_state_attempt re-read(s) — unevaluable (D24)"
+      ledger_append "refusal:unknown" "$RUNG"
+  ```
+  When `OTHER_CONJUNCTS_OK=1`, `UNKNOWN` mergeStateStatus must not decline immediately. Instead, `merge_gate.sh` enters the bounded transient polling loop, continuing to re-read merge state via `read_merge_state`. If `MERGE_STATE` transitions to `CLEAN` or `UNSTABLE` and checks pass, the gate proceeds to merge. If the timeout expires while `MERGE_STATE` remains `UNKNOWN`, the gate records `WHY[2]="mergeStateStatus is still UNKNOWN after ${elapsed}s — unevaluable (D24)"` and logs `refusal:unknown`. If `OTHER_CONJUNCTS_OK=0`, the gate declines immediately without polling.
+- **Polling bounds:**
   ```bash
   MERGE_GATE_TRANSIENT_TIMEOUT="${MERGE_GATE_TRANSIENT_TIMEOUT:-120}"
   MERGE_GATE_TRANSIENT_POLL_INTERVAL="${MERGE_GATE_TRANSIENT_POLL_INTERVAL:-5}"
   ```
-- Polling loop structure:
+- **Polling loop structure:**
   1. Record loop start timestamp: `poll_start="$(date +%s)"`.
   2. While elapsed time does not exceed `MERGE_GATE_TRANSIENT_TIMEOUT`:
      - Evaluate current check roll-up and merge state.
      - **Success condition:** If all checks are `SUCCESS`, `NEUTRAL`, or `SKIPPED`, and merge state is `CLEAN` or `UNSTABLE`: set `C[2]=1`, record `WHY[2]`, and break loop.
      - **Terminal failure abort (D3):** If any check has reached a terminal failure state (`FAILURE`, `CANCELLED`, `TIMED_OUT`, `ACTION_REQUIRED`, `STALE`, `STARTUP_FAILURE`) or merge state is `DIRTY`, `BLOCKED`, or `DRAFT`: abort polling immediately, set `C[2]=0`, record `WHY[2]`, and break loop.
-     - Calculate remaining time. If elapsed time >= `MERGE_GATE_TRANSIENT_TIMEOUT`, break loop with timeout.
+     - Calculate remaining time. If elapsed time >= `MERGE_GATE_TRANSIENT_TIMEOUT`, break loop with timeout diagnostic.
      - Sleep `MERGE_GATE_TRANSIENT_POLL_INTERVAL` (if interval > 0).
      - Re-read merge state and check roll-up via `read_merge_state`.
 
@@ -138,14 +148,21 @@ The implementing change is strictly confined to:
 - **Decisions implemented:** D1, D2, D3, D4, D5, D6, D7
 - **Acceptance criteria proven:** AT-514-1 through AT-514-9
 - **Description:** Implement standalone contract test suite validating:
-  1. `scripts/ci/merge_gate.sh` defines configurable `MERGE_GATE_TRANSIENT_TIMEOUT` and `MERGE_GATE_TRANSIENT_POLL_INTERVAL` (D1, D4, AT-514-1, AT-514-5).
-  2. In-flight check polls to `SUCCESS` and merges PR when all other conjuncts hold (D1, AT-514-1).
-  3. Precondition gating guards transient polling, preventing polling when other conjuncts fail (D2, AT-514-2).
-  4. Immediate abort on terminal check failure states (D3, AT-514-3).
+  1. `scripts/ci/merge_gate.sh` defines configurable `MERGE_GATE_TRANSIENT_TIMEOUT` and `MERGE_GATE_TRANSIENT_POLL_INTERVAL`, and executes zero-delay overrides with immediate timeout diagnostic (D1, D4, AT-514-1, AT-514-5).
+  2. In-flight checks and `UNKNOWN` mergeStateStatus poll to resolution (`SUCCESS` / `CLEAN`) and merge PR when all other conjuncts hold (D1, AT-514-1).
+  3. Precondition gating guards transient polling: positive control polls when preconditions hold, negative control declines immediately without polling when conjunct (4) fails (`C[4]=0`) (D2, AT-514-2).
+  4. Immediate abort on terminal check failure states: positive control polls when transient, negative control aborts immediately without polling remaining attempts when a terminal failure exists (D3, AT-514-3).
   5. In-flight check timeout emits `check(s) in flight timed out after <N>s:` diagnostic (D4, D5, AT-514-4, AT-514-6).
-  6. `scripts/ci/tests/merge_gate_test.sh` includes regression test coverage for transient polling (D1, D2, D3, D4, AT-514-1..6).
+  6. `scripts/ci/tests/merge_gate_test.sh` includes regression test coverage for transient polling (scenarios `MG-2c` through `MG-2f` and `MERGE_GATE_TRANSIENT_TIMEOUT`) (D1, D2, D3, D4, AT-514-1..6).
   7. `docs/SPEC.md` records living spec update for conjunct (2) transient polling (D6, AT-514-7).
   8. `CHANGELOG.md` records auto-resolution of transient conjunct (2) declines (D7, AT-514-9).
+- **Harness Details:**
+  - Extracts mock harness from `merge_gate_test.sh` cleanly up to `banner "MG-1` (`sed -e ... /banner "MG-1/,$d`), preventing truncation on comment separators (R1-7).
+  - Verifies harness sourced successfully via `type mk_green`.
+  - Fixes assertion count invariant (`TOTAL=8`, each assertion calls `pass` or `fail` exactly once, no phantom totals from harness helper exit codes) (R1-8).
+  - Uses `mergestate_checks_attempt` with dynamic state padding and `$n` / `$idx` dispatch in `gh` stub to ensure multi-attempt check fixtures advance cleanly (R1-1).
+  - Tests actual gate behavior with positive and negative controls rather than source string comments (R1-2, R1-3).
+  - Asserts dual-case transient polling covering in-flight checks and `UNKNOWN` mergeStateStatus (R1-4).
 - **Done-When:**
   Running `bash scripts/ci/tests/merge_gate_transient_polling_contract_test.sh` executes all 8 assertions, reports clean assertion failures (`Total: 8, Passed: 0, Failed: 8`) without syntax or runtime errors, and exits with code 1.
 
@@ -170,17 +187,20 @@ The implementing change is strictly confined to:
      [ "${C[6]}" = 1 ] && [ "${C[7]}" = 1 ] && [ "${C[8]}" = 1 ] && [ "${C[9]}" = 1 ] && \
      [ "${C[10]}" = 1 ] && [ "${C[11]}" = 1 ] && OTHER_CONJUNCTS_OK=1
      ```
-  3. When `MERGE_STATE` is `CLEAN` or `UNSTABLE`:
-     Parse checks with an awk script separating `passing`, `transient`, and `terminal` states.
-     - If all checks pass: set `C[2]=1`.
-     - If foreign checks are in transient states and `OTHER_CONJUNCTS_OK=1`:
-       Enter a bounded polling loop. Sleep `MERGE_GATE_TRANSIENT_POLL_INTERVAL` (if > 0) unless elapsed time exceeds `MERGE_GATE_TRANSIENT_TIMEOUT`.
-       On each iteration, call `read_merge_state` and re-evaluate.
-       - If all checks reach passing states: set `C[2]=1` and break.
-       - If any check reaches terminal failure (`FAILURE`, `CANCELLED`, `TIMED_OUT`, `ACTION_REQUIRED`, `STALE`, `STARTUP_FAILURE`): abort polling immediately, set `WHY[2]="mergeStateStatus $MERGE_STATE but check(s) not success:$failing"`, and break.
-       - If timeout expires: set `WHY[2]="mergeStateStatus $MERGE_STATE but check(s) in flight timed out after ${elapsed}s:$transient"`, and break.
-     - If foreign checks are transient but `OTHER_CONJUNCTS_OK=0`:
-       Skip polling, decline immediately with `check(s) not success:$transient`.
+  3. When `OTHER_CONJUNCTS_OK=1`:
+     a. If `MERGE_STATE` is `UNKNOWN`: enter the bounded polling loop re-reading `read_merge_state`. If it resolves to `CLEAN`/`UNSTABLE`, continue to check evaluation. If timeout expires while still `UNKNOWN`, set `WHY[2]="mergeStateStatus is still UNKNOWN after ${elapsed}s — unevaluable (D24)"`, append `refusal:unknown` to ledger, and break.
+     b. When `MERGE_STATE` is `CLEAN` or `UNSTABLE`:
+        Parse checks with an awk script separating `passing`, `transient`, and `terminal` states.
+        - If all checks pass: set `C[2]=1`.
+        - If foreign checks are in transient states (`IN_PROGRESS`, `QUEUED`, `PENDING`, `WAITING`, `REQUESTED`):
+          Enter bounded polling loop. Sleep `MERGE_GATE_TRANSIENT_POLL_INTERVAL` (if > 0) unless elapsed time exceeds `MERGE_GATE_TRANSIENT_TIMEOUT`.
+          On each iteration, call `read_merge_state` and re-evaluate.
+          - If all checks reach passing states: set `C[2]=1` and break.
+          - If any check reaches terminal failure (`FAILURE`, `CANCELLED`, `TIMED_OUT`, `ACTION_REQUIRED`, `STALE`, `STARTUP_FAILURE`): abort polling immediately, set `WHY[2]="mergeStateStatus $MERGE_STATE but check(s) not success:$failing"`, and break.
+          - If timeout expires: set `WHY[2]="mergeStateStatus $MERGE_STATE but check(s) in flight timed out after ${elapsed}s:$transient"`, and break.
+  4. When `OTHER_CONJUNCTS_OK=0`:
+     - If `MERGE_STATE` is `UNKNOWN`: decline immediately as unevaluable (`refusal:unknown`) without polling.
+     - If checks are transient under `CLEAN`/`UNSTABLE`: decline immediately with `check(s) not success:$transient` without polling.
 - **Done-When:**
   Contract test assertions 1, 2, 3, 4, and 5 pass.
 
@@ -192,18 +212,21 @@ The implementing change is strictly confined to:
 - **Decisions implemented:** D1, D2, D3, D4, D5
 - **Acceptance criteria proven:** AT-514-1, AT-514-2, AT-514-3, AT-514-4, AT-514-5, AT-514-6
 - **Step-by-step diff description:**
-  1. Support per-attempt check files in `merge_gate_test.sh`'s `gh` stub:
+  1. Support per-attempt check files in `merge_gate_test.sh`'s `gh` stub using call count `$n` and clamped `$idx`:
      ```bash
-     c_file="$FX/mergestate-$pr.checks.$idx"; [ -f "$c_file" ] || c_file="$FX/mergestate-$pr.checks"
+     c_file="$FX/mergestate-$pr.checks.$n"; [ -f "$c_file" ] || c_file="$FX/mergestate-$pr.checks.$idx"; [ -f "$c_file" ] || c_file="$FX/mergestate-$pr.checks"
      ```
+     Ensure `mergestate_fixture` or helpers provide multiple state lines when multiple attempts are expected so `$idx` does not clamp to 0.
   2. Add test scenario `MG-2c: in-flight check polls to success and merges`:
      PR has an `IN_PROGRESS` check on attempt 0 that transitions to `SUCCESS` on attempt 1. Assert PR merges.
   3. Add test scenario `MG-2d: precondition gating skips polling when conjunct (4) fails`:
-     PR has `C[4]=0` (open blocking finding) and an `IN_PROGRESS` check. Assert gate declines immediately without polling attempts.
+     PR has `C[4]=0` (open blocking finding) and an `IN_PROGRESS` check. Assert gate declines immediately without polling attempts (`mergestate-$pr.count` == 1).
   4. Add test scenario `MG-2e: immediate abort on terminal check failure`:
-     PR has one `FAILURE` check and one `IN_PROGRESS` check. Assert gate aborts immediately without waiting for in-flight checks.
+     PR has one `FAILURE` check and one `IN_PROGRESS` check. Assert gate aborts immediately without waiting for in-flight checks (`mergestate-$pr.count` == 1).
   5. Add test scenario `MG-2f: in-flight check timeout diagnostic`:
      PR has `IN_PROGRESS` check through timeout. Assert `WHY[2]` contains `check(s) in flight timed out after`.
+  6. Add test scenario `MG-2g: UNKNOWN mergeStateStatus polls to CLEAN and merges`:
+     PR has `UNKNOWN` mergeStateStatus on attempt 0 that transitions to `CLEAN` on attempt 1. Assert PR merges.
 - **Done-When:**
   `bash scripts/ci/tests/merge_gate_test.sh` exits 0 with all test assertions passing, and contract test assertion 6 passes.
 
@@ -261,3 +284,20 @@ The implementing change is strictly confined to:
 | **D5** | Explicit diagnostic categorization in gate output and `WHY[2]` (`timed out after` vs `not success:`) | T1, T2, T3 | AT-514-6 (Assertion 5) |
 | **D6** | Living specification update obligation in `docs/SPEC.md` | T1, T4 | AT-514-7 (Assertion 7) |
 | **D7** | Scope boundary and permitted file manifest enforcement | T1, T2, T3, T4, T5, T6 | AT-514-8, AT-514-9 (Assertion 8) |
+
+---
+
+## 6. Review Round 1 Ledger Reconciliation
+
+This plan and contract test suite resolve the findings raised by Argus during Round 1 deep review of PR #528:
+
+| Finding ID | Severity | Disposition | Resolution Details |
+|---|---|---|---|
+| **R1-1@D1** | `high` | fixed | Multi-attempt checks fixture in `scripts/ci/tests/merge_gate_transient_polling_contract_test.sh` updated: `mergestate_checks_attempt` dynamically pads `mergestate-$pr.state` so `$idx` does not clamp to 0, and the `gh` stub checks `$n` then `$idx`. Task T3 explicitly instructs Odyssey to apply the same mechanism to `merge_gate_test.sh`. |
+| **R1-2@D3** | `normal` | fixed | Removed invalid literal-pipe grep (`\|`). Assertion 4 replaced with a pure behavioral assertion executing `run_gate` against a multi-attempt fixture with terminal failure, verifying immediate abort (calls <= 1) and decline diagnostics. |
+| **R1-3@D2** | `normal` | fixed | Replaced comment-matching greps across Assertions 1, 2, 3, 4, and 5 with behavioral executions of `run_gate` against the mock test harness with positive controls (requiring transient polling to succeed) and negative controls (verifying precondition gating and early abort). Comment-only mutations now cleanly fail 5 of 8 assertions. |
+| **R1-4@D1** | `normal` | fixed | `mergeStateStatus: UNKNOWN` polling trigger added to Plan §P2 and Task T2 step 3, replacing the line 480 short-circuit when `OTHER_CONJUNCTS_OK=1`. Assertion 2 Subcase B asserts `UNKNOWN` polls to `CLEAN` and merges. Task T3 adds regression scenario `MG-2g`. |
+| **R1-5@D7** | `normal` | fixed | Clarified in Section 2 that `scripts/ci/tests/merge_gate_transient_polling_contract_test.sh` is authored and committed by Daedalus on this Build PR (#528) within Daedalus's permitted authority (`scripts/*/tests/**`). The implementing PR (Odyssey) branches from main after this PR merges and touches only permitted files per D7. |
+| **R1-6@D7** | `normal` | noted | Acknowledged that workflow files (`.github/workflows/*`) are strictly forbidden by D7 to bound blast radius; contract suite execution is verified at build and implement rungs via Task T6 checklist. |
+| **R1-7@none** | `normal` | fixed | Test harness extraction boundary in `merge_gate_transient_polling_contract_test.sh` changed from `/^# ---*$/q` to `/^banner "MG-1/,$d`, decoupling helper sourcing from comment banners, and verified via `type mk_green`. |
+| **R1-8@none** | `suggestion` | fixed | Assertion total pinned as a constant `TOTAL=8`, and `run_gate` refactored so non-zero exits from the gate do not increment assertion counters or create phantom rows. |
