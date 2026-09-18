@@ -441,12 +441,15 @@ git init -q -b main "$LOC_REPO" 2>/dev/null
 git -C "$LOC_REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null
 git -C "$LOC_REPO" worktree add -q -b odyssey/529-statusline-location "$LOC_WT" 2>/dev/null
 
+# GIT_CEILING_DIRECTORIES stops git walking out of the sandbox, so a $TMPDIR
+# that itself sits inside a checkout cannot lend its repository to a case that
+# asserts there is none.
 loc_render() { # <cwd> [<worktree.branch>]
     jq -c --arg d "$1" --arg b "${2:-}" \
       '.workspace.current_dir = $d | .cwd = $d
        | if $b == "" then . else .worktree = {branch: $b} end' \
       "$FIXTURES_DIR/claude-with-cost-effort.json" \
-      | AGENTIC_CTX_DIR="$CTX_DIR" "$STATUSLINE" 2>/dev/null
+      | GIT_CEILING_DIRECTORIES="$WORK" AGENTIC_CTX_DIR="$CTX_DIR" "$STATUSLINE" 2>/dev/null
 }
 
 # --- AT-22 (#529): normal checkout renders folder and branch
@@ -496,6 +499,38 @@ if [[ "$clean" == *"📂 plainfolder" && "$clean" != *"⎇"* ]]; then
     pass "AT-26 (#529): non-git directory renders '📂 <folder>' with no branch"
 else
     fail "AT-26 (#529): expected trailing '📂 plainfolder' with no branch, got: '$clean'"
+fi
+
+# --- AT-27 (#529, R1-2): a worktree the branch does not name keeps its folder
+banner "AT-27 (#529, R1-2): worktree whose name the branch does not spell keeps the folder"
+LOC_HEX="$WORK/loc/trees/agent-deadbeef"
+git -C "$LOC_REPO" worktree add -q -b agentbr "$LOC_HEX" 2>/dev/null
+clean="$(strip_ansi "$(loc_render "$LOC_HEX")")"
+if [[ "$clean" == *"📂 agent-deadbeef ⑂ agentbr" ]]; then
+    pass "AT-27 (#529, R1-2): harness agent-<hex> worktree renders folder and branch"
+else
+    fail "AT-27 (#529, R1-2): expected trailing '📂 agent-deadbeef ⑂ agentbr', got: '$clean'"
+fi
+
+# --- AT-28 (#529, R1-1): a trailing slash does not erase the segment
+banner "AT-28 (#529, R1-1): trailing slash on the payload directory"
+clean="$(strip_ansi "$(loc_render "$LOC_REPO/")")"
+if [[ "$clean" == *"📂 agentic-sdlc ⎇ main" ]]; then
+    pass "AT-28 (#529, R1-1): directory with a trailing slash renders the same segment"
+else
+    fail "AT-28 (#529, R1-1): expected trailing '📂 agentic-sdlc ⎇ main', got: '$clean'"
+fi
+
+# --- AT-29 (#529, R1-6): detached HEAD renders the folder alone
+banner "AT-29 (#529, R1-6): detached HEAD renders the folder alone"
+LOC_DET="$WORK/loc/detached"
+git clone -q "$LOC_REPO" "$LOC_DET" 2>/dev/null
+git -C "$LOC_DET" checkout -q --detach 2>/dev/null
+clean="$(strip_ansi "$(loc_render "$LOC_DET")")"
+if [[ "$clean" == *"📂 detached" && "$clean" != *"⎇"* && "$clean" != *"⑂"* ]]; then
+    pass "AT-29 (#529, R1-6): detached HEAD renders '📂 <folder>' with no branch"
+else
+    fail "AT-29 (#529, R1-6): expected trailing '📂 detached' with no branch, got: '$clean'"
 fi
 
 # --- Summary ------------------------------------------------------------------

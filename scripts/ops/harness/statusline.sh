@@ -220,11 +220,13 @@ if [[ -n "$effort" ]]; then
   shopt -u nocasematch
 fi
 
-# Location: which checkout and branch this session is driving. In a linked
-# worktree the directory name is derived from the branch, so the branch alone
-# (marked ⑂) says it; a normal checkout shows folder and branch.
+# Location: which checkout and branch this session is driving. A claim.sh
+# worktree directory is named after its branch with the slashes flattened
+# (claim.sh: .claude/worktrees/<actor>-<n>-<slug> against <actor>/<n>-<slug>),
+# so there the branch alone (marked ⑂) says it. Any other directory name
+# carries information the branch does not — the harness's own
+# .claude/worktrees/agent-<hex> among them — and is rendered beside it.
 LOC=""
-folder="${cwd##*/}"
 branch="$wt_branch"
 is_wt=0
 [[ -n "$wt_branch" ]] && is_wt=1
@@ -235,10 +237,14 @@ if [[ -z "$branch" && -n "$cwd" && -d "$cwd" ]]; then
   [[ "$branch" == "HEAD" ]] && branch=""
   [[ "$gitdir" == */worktrees/* ]] && is_wt=1
 fi
+folder="${cwd%/}"          # a trailing slash would empty the basename
+folder="${folder##*/}"
 if (( is_wt )) && [[ -n "$branch" ]]; then
-  LOC="$(printf '  %s⑂ %s%s' "$DIM" "$branch" "$D")"
-elif [[ -n "$folder" ]]; then
-  LOC="$(printf '  %s📂 %s%s%s' "$DIM" "$folder" "${branch:+ ⎇ $branch}" "$D")"
+  # Suppress the folder only when the branch already spells it.
+  [[ "$folder" == "${branch//\//-}" ]] && folder=""
+  LOC="$(printf '  %s%s⑂ %s%s' "$DIM" "${folder:+📂 $folder }" "$branch" "$D")"
+elif [[ -n "$folder" || -n "$branch" ]]; then
+  LOC="$(printf '  %s%s%s%s' "$DIM" "${folder:+📂 $folder}" "${branch:+${folder:+ }⎇ $branch}" "$D")"
 fi
 
 printf '%sctx %s.%sK/%sK %s%%%s%s%s%s%s  %s%s%s%s%s%s\n' \

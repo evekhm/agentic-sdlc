@@ -89,15 +89,20 @@ by `install.sh` above).
 is what tells four open terminals apart when each holds a different
 claim (`CLAUDE.md`, "Parallel sessions"):
 
-- linked worktree — `⑂ odyssey/529-statusline-location`. The worktree
-  directory is named after the branch, so the branch alone carries it.
+- `claim.sh` worktree — `⑂ odyssey/529-statusline-location`. That
+  directory is named after its branch with the slashes flattened, so
+  the branch alone carries it.
+- any other linked worktree — `📂 agent-deadbeef ⑂ agentbr`. A name the
+  branch does not spell (the harness's own `agent-<hex>` trees) is what
+  tells two trees apart, so it stays.
 - normal checkout — `📂 agentic-sdlc ⎇ main`.
-- outside a repository — `📂 <folder>`.
+- outside a repository, or on a detached HEAD — `📂 <folder>`.
 - a payload with no directory and no branch — nothing, as before.
 
 The branch comes from the payload's `worktree.branch` when the harness
 supplies one; otherwise from one `git rev-parse` against the payload's
-directory, which keeps a render at two subprocesses.
+directory — one extra subprocess per render, and only when the payload
+carries no branch.
 
 Full display contract, the side-channel file
 schema, and acceptance tests:
