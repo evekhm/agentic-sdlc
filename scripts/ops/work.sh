@@ -1309,13 +1309,16 @@ if [ -n "$WORK_COST_FILE" ] || { [ "$launch_harness" = "antigravity" ] && [ -n "
               if (f != "gemini") return ""
               v = model_version(m)
               if (m ~ /flash/) {
-                if (v == "1.5" || v == "2.0" || v == "2.5" ||
-                    v == "3.5" || v == "3.6" || v == "3.7" || v == "3.8")
+                if (v == "3.5" || v == "3.6" || v == "3.7" || v == "3.8")
+                  return "0.75 0 0 0.075 3.75"
+                if (v == "1.5" || v == "2.0" || v == "2.5")
                   return "0.15 0.1875 0.30 0.0375 0.60"
                 return ""
               }
               if (m ~ /pro/) {
-                if (v == "1.5" || v == "2.5" || v == "3.1")
+                if (v == "3.1")
+                  return "2.00 0 0 0.20 12.00"
+                if (v == "1.5" || v == "2.5")
                   return "1.25 1.5625 2.50 0.3125 5.00"
                 return ""
               }

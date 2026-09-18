@@ -10,8 +10,8 @@
 #
 # USD figures are list-rate estimates. Rates: Anthropic model pricing table
 # (platform.claude.com/docs/en/about-claude/pricing, fetched 2026-08-23) and
-# Google Cloud Vertex AI (cloud.google.com/vertex-ai/generative-ai/pricing,
-# effective 2026-09-04), per MTok: base input / 5m cache write / 1h cache write / cache read / output.
+# Google Cloud Gemini Enterprise platform pricing (cloud.google.com/vertex-ai/generative-ai/pricing,
+# effective 2026-09-08 per #269), per MTok: base input / 5m cache write / 1h cache write / cache read / output.
 # The cloud bill is authoritative — these numbers rank spend, they don't invoice it.
 # A model whose family+version the table does not list is left UNPRICED and
 # reported by name with its token count, rather than being charged at a
@@ -249,13 +249,16 @@ function rate_tier(m,   f, v) {
   }
   if (f == "gemini") {
     if (m ~ /flash/) {
-      if (v == "1.5" || v == "2.0" || v == "2.5" ||
-          v == "3.5" || v == "3.6" || v == "3.7" || v == "3.8")
+      if (v == "3.5" || v == "3.6" || v == "3.7" || v == "3.8")
+        return "0.75 0 0 0.075 3.75"
+      if (v == "1.5" || v == "2.0" || v == "2.5")
         return "0.15 0.1875 0.30 0.0375 0.60"
       return ""
     }
     if (m ~ /pro/) {
-      if (v == "1.5" || v == "2.5" || v == "3.1")
+      if (v == "3.1")
+        return "2.00 0 0 0.20 12.00"
+      if (v == "1.5" || v == "2.5")
         return "1.25 1.5625 2.50 0.3125 5.00"
       return ""
     }
