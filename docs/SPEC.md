@@ -492,6 +492,25 @@ contains a valid bypass marker: `Changelog: none — <reason>` or
 `Changelog-impact: none — <reason>` with a mandatory em dash and
 non-empty reason.
 
+### testing.suite_integrity
+`scripts/ops/tests/suite_integrity_test.sh` mechanically proves the
+verdict integrity of test suites under `scripts/*/tests/*.sh` (#405).
+It enforces three foundational integrity proofs:
+1. **Null-Implementation Proof (Proof 1):** Verifies that candidate
+   test suites (such as `scripts/ops/tests/wrap_test.sh`) fail closed
+   (exit nonzero) when evaluated against a non-conforming null stub
+   (`exit 0`), preventing false-green test suites.
+2. **Ambient-Environment Proof (Proof 2):** Verifies that candidate
+   suites (`harness_test.sh`, `placement_test.sh`, `wrap_test.sh`)
+   self-sanitize their execution environment at entry (`unset CLAUDE_SEAT
+   AGENTIC_SEAT WORK_MAX_USD`) and pass cleanly under hostile ambient
+   variables.
+3. **Static Audit / Subshell Anti-Pattern Check (Proof 3):** Scans all
+   shell test scripts across `scripts/*/tests/*.sh` to verify that failure
+   accounting does not rely on unprotected in-memory shell variables
+   (`FAILURES=...`) modified inside subshell blocks `( ... )` without
+   file-backed accumulation or explicit exit guards.
+
 ### lifecycle.labels
 Lifecycle state lives in GitHub issue labels (#4,
 `intent/4-labels/`, #267). Six labels are human-facing — `intent:new`,

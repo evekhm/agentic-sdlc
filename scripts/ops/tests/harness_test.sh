@@ -18,6 +18,10 @@ NEWEST_HANDOFF="$HARNESS_DIR/newest-handoff.sh"
 INSTALL_SH="$HARNESS_DIR/install.sh"
 FIXTURES_DIR="$REPO/scripts/ops/tests/fixtures/harness"
 
+# D3 (issue #405): Contract test suites must be self-sanitizing at entry.
+# Prevent ambient seated environment variables from leaking into statusline assertions.
+unset CLAUDE_SEAT AGENTIC_SEAT
+
 FAILURES=0
 TESTS_RUN=0
 TESTS_PASSED=0

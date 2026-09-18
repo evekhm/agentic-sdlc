@@ -709,6 +709,26 @@ and why, complementing the capability-keyed living spec
   lines, and flag inaccurate, low-quality, or frivolous entries as
   normal defects.
 
+## Contract test standards
+
+All contract and regression test suites under `scripts/*/tests/` must adhere to
+mechanical integrity standards ensuring their exit status faithfully reflects test verdicts:
+
+- **File-backed failure accumulation:** Aggregating test suites that execute test cases across
+  subshell boundaries `( ... )` must use a temporary file accumulator (`FAIL_LOG="$(mktemp ...)"`)
+  to record failures. Subshell exits discard in-memory variable mutations; suites must derive final
+  failure counts via `wc -l < "$FAIL_LOG"` rather than relying on in-memory counters (`FAILURES=...`).
+- **Fail-fast subshell discipline:** Test suites that do not use an accumulator must append explicit
+  exit guards (`|| exit 1`) to every subshell command block so subshell assertion failures immediately
+  propagate to the parent runner.
+- **Entry-point self-sanitization:** Test suites must sanitize their execution environment at startup
+  by unsetting ambient caller variables that could alter assertion semantics (such as `CLAUDE_SEAT`,
+  `AGENTIC_SEAT`, and `WORK_MAX_USD`). Test suites must never assume a clean ambient host environment.
+- **Mutant isolation with `env -u`:** Negative-proof mutation tests that assert an implementation
+  refuses when an environment variable or configuration ceiling is absent must explicitly isolate the
+  mutated runner execution using `env -u <VAR>` to prevent caller environment leaks from creating false
+  positives.
+
 ## Context and cost discipline
 
 Long sessions on large-context models burn money through cache reads:

@@ -188,9 +188,10 @@ The implementing change is strictly confined to:
 - **Step-by-step diff description:**
   1. In `scripts/ops/tests/wrap_test.sh`, verify that `FAIL_LOG` file-backed failure recording is exported and cleaned up on EXIT.
   2. Verify that any subshell assertions or test cases that invoke `fail` append to `$FAIL_LOG` and that the summary computes total failures via `wc -l < "$FAIL_LOG"`.
-  3. Verify that running `wrap_test.sh` against an `exit 0` stub exits 1 and counts all failures.
+  3. In `scripts/ops/tests/wrap_test.sh`, add `unset CLAUDE_SEAT AGENTIC_SEAT WORK_MAX_USD` at startup to ensure self-sanitization under ambient caller environments (D3).
+  4. Verify that running `wrap_test.sh` against an `exit 0` stub exits 1 and counts all failures.
 - **Done-When:**
-  `wrap_test.sh` exits 1 on null implementation stub and reports positive failure count matching FAIL lines.
+  `wrap_test.sh` exits 1 on null implementation stub and reports positive failure count matching FAIL lines, and passes under ambient test runner seat variables.
 
 ---
 

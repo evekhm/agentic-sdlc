@@ -25,6 +25,9 @@
 
 set -euo pipefail
 
+# D3 (issue #405): Contract test suites must be self-sanitizing at entry.
+unset WORK_MAX_USD
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -533,7 +536,7 @@ pass "#108: an explicit WORK_MAX_USD overrides the declared budget for one run"
 # "absent". Strip the export from a COPY of the adapter and confirm red.
 MUT="$(fixture_tree)"
 sed -i '/^export WORK_MAX_USD=/d' "$MUT/scripts/placement/gh-actions/run.sh"
-OUT="$(ARGUS_APP_PRIVATE_KEY="stub-key-value" STUB_REPOS="evekhm/agentic-sdlc" \
+OUT="$(env -u WORK_MAX_USD ARGUS_APP_PRIVATE_KEY="stub-key-value" STUB_REPOS="evekhm/agentic-sdlc" \
   HEADLESS=1 DRY_RUN=1 \
   "$MUT/scripts/placement/gh-actions/run.sh" 30 --as argus 2>&1)" \
   || { printf '%s\n' "$OUT" >&2; fail "#108: the mutated adapter did not even run"; }
