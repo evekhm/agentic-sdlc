@@ -1,6 +1,6 @@
 # Intent: Sound Poller Claim Lifecycle: Detached Dispatch, Claim Reaper, and Rung-Filtered Intake Concurrency
 
-**Issue:** #513 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Draft
+**Issue:** #513 · **Stage:** plan · **Author:** athena (`evekhm-athena-app[bot]`) · **Status:** Accepted
 
 ## Problem
 
