@@ -141,6 +141,35 @@ cat > "$FIXTURES/issue_101.json" <<'JSON'
 }
 JSON
 
+# Create fixture for issue 102 with status:in-review (multiple owners: argus and atlas)
+cat > "$FIXTURES/repos_test_repo_issues_102.json" <<'JSON'
+{
+  "number": 102,
+  "state": "open",
+  "title": "In Review Ambiguous Owner Issue",
+  "body": "Issue at review stage owned by both argus and atlas",
+  "labels": [
+    {"name": "status:in-review"}
+  ],
+  "issue_dependencies_summary": {"total_blocked_by": 0}
+}
+JSON
+cat > "$FIXTURES/repos_test_repo_issues_102_comments.json" <<'JSON'
+[]
+JSON
+cat > "$FIXTURES/issue_102.json" <<'JSON'
+{
+  "number": 102,
+  "state": "OPEN",
+  "title": "In Review Ambiguous Owner Issue",
+  "body": "Issue at review stage owned by both argus and atlas",
+  "labels": [
+    {"name": "status:in-review"}
+  ],
+  "comments": []
+}
+JSON
+
 # Hermetic git repository setup for claim and work execution
 git init -q --bare -b main "$WORK/origin.git"
 git clone -q "$WORK/origin.git" "$WORK/repo" 2>/dev/null
@@ -195,6 +224,16 @@ run_work() {
   set -e
 }
 
+run_work_headless() {
+  local num="$1"
+  shift
+  OUT=""
+  set +e
+  OUT="$(cd "$PRIMARY" && HEADLESS=1 DRY_RUN=1 bash "$WORK_SH" "$num" "$@" 2>&1)"
+  EXIT_CODE=$?
+  set -e
+}
+
 # ==============================================================================
 # Assertion 1: D1 / AT-481-1: Label taxonomy in bootstrap_tracker.sh defines status:needs-input
 # ==============================================================================
@@ -206,7 +245,17 @@ else
 fi
 
 # ==============================================================================
-# Assertion 2: D2 / AT-481-3: work_dispatch.sh refuses on status:needs-input
+# Assertion 2: D1 / AT-481-2: Label displacement and restoration semantics
+# ==============================================================================
+banner "D1 / AT-481-2: Label displacement and restoration semantics"
+if [ -f "$ALIGN_ESCALATIONS" ] && grep -Eq 'status:needs-input' "$ALIGN_ESCALATIONS" && grep -Eq 'stage=' "$ALIGN_ESCALATIONS"; then
+    pass "D1 / AT-481-2: align_escalations.sh implements label displacement and restoration semantics"
+else
+    fail "D1 / AT-481-2: align_escalations.sh does not exist or does not implement label displacement"
+fi
+
+# ==============================================================================
+# Assertion 3: D2 / AT-481-3: work_dispatch.sh refuses on status:needs-input
 # ==============================================================================
 banner "D2 / AT-481-3: work_dispatch.sh refuses on status:needs-input"
 run_work_dispatch 100
@@ -217,7 +266,7 @@ else
 fi
 
 # ==============================================================================
-# Assertion 3: D2 / AT-481-4: work.sh refuses on status:needs-input
+# Assertion 4: D2 / AT-481-4: work.sh refuses on status:needs-input
 # ==============================================================================
 banner "D2 / AT-481-4: work.sh refuses on status:needs-input"
 run_work 100
@@ -228,7 +277,7 @@ else
 fi
 
 # ==============================================================================
-# Assertion 4: D2 / AT-481-5: claim.sh refuses on status:needs-input
+# Assertion 5: D2 / AT-481-5: claim.sh refuses on status:needs-input
 # ==============================================================================
 banner "D2 / AT-481-5: claim.sh refuses on status:needs-input"
 run_claim 100
@@ -239,7 +288,7 @@ else
 fi
 
 # ==============================================================================
-# Assertion 5: D2 / AT-481-6: claim.sh refuses on status:review-stuck
+# Assertion 6: D2 / AT-481-6: claim.sh refuses on status:review-stuck
 # ==============================================================================
 banner "D2 / AT-481-6: claim.sh refuses on status:review-stuck"
 run_claim 101
@@ -250,7 +299,7 @@ else
 fi
 
 # ==============================================================================
-# Assertion 6: D2: commands/work.md documents status:needs-input circuit breaker
+# Assertion 7: D2 / AT-481-3 (doc): commands/work.md documents status:needs-input circuit breaker
 # ==============================================================================
 banner "D2: commands/work.md documents status:needs-input circuit breaker"
 if grep -qF "status:needs-input" "$COMMANDS_WORK"; then
@@ -260,7 +309,7 @@ else
 fi
 
 # ==============================================================================
-# Assertion 7: D3 / AT-481-7: poll.sh skips PRs when tracking issue carries status:needs-input
+# Assertion 8: D3 / AT-481-7: poll.sh skips PRs when tracking issue carries status:needs-input
 # ==============================================================================
 banner "D3 / AT-481-7: poll.sh skips PRs when tracking issue carries status:needs-input"
 if grep -Eq 'poll\.sh: skipping PR.*tracking issue.*carries status:needs-input' "$POLL_SH"; then
@@ -270,10 +319,9 @@ else
 fi
 
 # ==============================================================================
-# Assertion 8: D4 / AT-481-8: ESCALATION marker grammar validation
+# Assertion 9: D4 / AT-481-8: ESCALATION marker grammar validation
 # ==============================================================================
 banner "D4 / AT-481-8: ESCALATION marker grammar validation"
-# Check that align_escalations.sh exists and parses ESCALATION: grammar
 if [ -f "$ALIGN_ESCALATIONS" ] && grep -Eq '\^ESCALATION: #\(\[0-9\]\+\) kind=\(open-question\|blocked\|ambiguous-owner\) stage=\(\[a-z-\]\+\)\$' "$ALIGN_ESCALATIONS"; then
     pass "D4 / AT-481-8: align_escalations.sh implements ESCALATION marker grammar regex"
 else
@@ -281,43 +329,82 @@ else
 fi
 
 # ==============================================================================
-# Assertion 9: D5 / AT-481-9: work.sh unattended ambiguous-owner escalation
+# Assertion 10: D5 / AT-481-9: work.sh unattended ambiguous-owner escalation
 # ==============================================================================
 banner "D5 / AT-481-9: work.sh unattended ambiguous-owner escalation"
-if grep -Eq 'WORK-RESULT: blocked.*ambiguous owner' "$WORK_SH" && grep -qF 'kind=ambiguous-owner' "$WORK_SH"; then
-    pass "D5 / AT-481-9: work.sh implements ambiguous-owner escalation under HEADLESS=1"
+run_work_headless 102
+if [ "$EXIT_CODE" -eq 2 ] && grep -qF "WORK-RESULT: blocked #102 ambiguous owner" <<<"$OUT"; then
+    pass "D5 / AT-481-9: work.sh exits 2 with WORK-RESULT: blocked on ambiguous owner in unattended mode"
 else
-    fail "D5 / AT-481-9: work.sh missing unattended ambiguous-owner escalation logic"
+    fail "D5 / AT-481-9: work.sh did not escalate ambiguous owner under HEADLESS=1 (rc=$EXIT_CODE, out=$OUT)"
 fi
 
 # ==============================================================================
-# Assertion 10: D6 / AT-481-10: commands/escalations.md exists and compiles cleanly
+# Assertion 11: D6 / AT-481-10: commands/escalations.md exists and compiles cleanly via sync_commands.py
 # ==============================================================================
-banner "D6 / AT-481-10: commands/escalations.md exists and compiles cleanly"
-if [ -f "$COMMANDS_ESCALATIONS" ] && [ -f "$REPO/.claude/commands/escalations.md" ] && [ -f "$REPO/.agents/skills/escalations/SKILL.md" ]; then
-    pass "D6 / AT-481-10: commands/escalations.md and compiled targets exist"
+banner "D6 / AT-481-10: commands/escalations.md exists and compiles cleanly via sync_commands.py --check"
+if [ -f "$COMMANDS_ESCALATIONS" ] && python3 "$REPO/scripts/sync_commands.py" --check >/dev/null 2>&1; then
+    pass "D6 / AT-481-10: commands/escalations.md compiles cleanly via sync_commands.py --check"
 else
-    fail "D6 / AT-481-10: commands/escalations.md or its compiled targets do not exist"
+    fail "D6 / AT-481-10: commands/escalations.md does not exist or sync_commands.py --check failed"
 fi
 
 # ==============================================================================
-# Assertion 11: D6, D7 / AT-481-12, AT-481-13: scripts/ops/align_escalations.sh exists and is executable
+# Assertion 12: D6 / AT-481-11: /escalations command specification defines listing, ruling comment, and stage restoration
 # ==============================================================================
-banner "D6, D7 / AT-481-12, AT-481-13: scripts/ops/align_escalations.sh exists and is executable"
+banner "D6 / AT-481-11: /escalations command specification defines listing, ruling comment, and stage restoration"
+if [ -f "$COMMANDS_ESCALATIONS" ] && grep -qF "status:needs-input" "$COMMANDS_ESCALATIONS" && grep -qF "Decision:" "$COMMANDS_ESCALATIONS"; then
+    pass "D6 / AT-481-11: /escalations command specification defines required operator workflow"
+else
+    fail "D6 / AT-481-11: commands/escalations.md does not exist or missing workflow steps"
+fi
+
+# ==============================================================================
+# Assertion 13: D7 / AT-481-12: scripts/ops/align_escalations.sh audit mode runs without --apply and makes zero mutations
+# ==============================================================================
+banner "D7 / AT-481-12: scripts/ops/align_escalations.sh audit mode runs without --apply and makes zero mutations"
 if [ -x "$ALIGN_ESCALATIONS" ]; then
-    pass "D6, D7 / AT-481-12, AT-481-13: scripts/ops/align_escalations.sh exists and is executable"
+    set +e
+    ALIGN_OUT="$("$ALIGN_ESCALATIONS" 2>&1)"
+    ALIGN_RC=$?
+    set -e
+    if [ "$ALIGN_RC" -eq 0 ] && [ ! -s "$WRITES" ]; then
+        pass "D7 / AT-481-12: align_escalations.sh runs in audit mode without mutating tracker state"
+    else
+        fail "D7 / AT-481-12: align_escalations.sh failed audit mode run or attempted mutations (rc=$ALIGN_RC)"
+    fi
 else
-    fail "D6, D7 / AT-481-12, AT-481-13: scripts/ops/align_escalations.sh missing or not executable"
+    fail "D7 / AT-481-12: scripts/ops/align_escalations.sh does not exist or is not executable"
 fi
 
 # ==============================================================================
-# Assertion 12: D8 / AT-481-14: docs/SPEC.md documents status:needs-input and ESCALATION
+# Assertion 14: D7 / AT-481-13: scripts/ops/align_escalations.sh --apply applies status:needs-input and emits ESCALATION marker
 # ==============================================================================
-banner "D8 / AT-481-14: docs/SPEC.md documents status:needs-input and ESCALATION"
+banner "D7 / AT-481-13: scripts/ops/align_escalations.sh --apply applies status:needs-input and emits ESCALATION marker"
+if [ -x "$ALIGN_ESCALATIONS" ] && grep -qF -- "--apply" "$ALIGN_ESCALATIONS" && grep -qF "status:needs-input" "$ALIGN_ESCALATIONS"; then
+    pass "D7 / AT-481-13: align_escalations.sh implements --apply mutation mode"
+else
+    fail "D7 / AT-481-13: scripts/ops/align_escalations.sh does not exist or missing --apply support"
+fi
+
+# ==============================================================================
+# Assertion 15: D8 / AT-481-14: docs/SPEC.md documents status:needs-input and ESCALATION marker
+# ==============================================================================
+banner "D8 / AT-481-14: docs/SPEC.md documents status:needs-input and ESCALATION marker"
 if grep -qF "status:needs-input" "$SPEC_MD" && grep -qF "ESCALATION:" "$SPEC_MD"; then
     pass "D8 / AT-481-14: docs/SPEC.md documents status:needs-input and ESCALATION marker"
 else
     fail "D8 / AT-481-14: docs/SPEC.md missing documentation for status:needs-input and ESCALATION"
+fi
+
+# ==============================================================================
+# Assertion 16: D9 / AT-481-15: Implementation manifest delivery and compliance
+# ==============================================================================
+banner "D9 / AT-481-15: Implementation manifest delivery and compliance"
+if [ -f "$COMMANDS_ESCALATIONS" ] && [ -f "$ALIGN_ESCALATIONS" ] && [ -f "$REPO/scripts/ci/tests/escalation_queue_test.sh" ]; then
+    pass "D9 / AT-481-15: All manifest implementation files are present"
+else
+    fail "D9 / AT-481-15: Implementation manifest files are not yet created on this branch"
 fi
 
 # ==============================================================================

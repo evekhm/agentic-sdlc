@@ -20,7 +20,7 @@ This plan specifies the implementation of the **Operator Escalation Sweep Machin
 - Extends the circuit breaker across `work_dispatch.sh`, `work.sh`, and `claim.sh` to refuse issues carrying `status:needs-input` (and closes a pre-existing gap by adding `status:review-stuck` refusal to `claim.sh`).
 - Updates `scripts/placement/vm-local/poll.sh` to filter out PR candidates whose tracking issues carry `status:needs-input`.
 - Enforces a standard, machine-readable `ESCALATION: #<n> kind=<kind> stage=<stage>` marker grammar.
-- Updates `work.sh` so unattended ambiguous-owner stalls apply `status:needs-input`, emit the structured marker, and exit 2 with `WORK-RESULT: blocked #<n> ambiguous owner for stage <stage>`.
+- Updates `work.sh` so unattended ambiguous-owner stalls post the marker comment first, conditionally displace the stage label to `status:needs-input`, respect `DRY_RUN=1`, and exit 2 with `WORK-RESULT: blocked #<n> ambiguous owner for stage <stage>`.
 - Establishes a first-class `/escalations` command door and skill compiling cleanly via `scripts/sync_commands.py`.
 - Provides `scripts/ops/align_escalations.sh` with `--dry-run` audit and `--apply` mutation modes for retroactive alignment and loop health monitoring.
 
@@ -57,11 +57,11 @@ This plan specifies the implementation of the **Operator Escalation Sweep Machin
   - `Changelog: none — build stage contract tests and plan only; changelog entry is task of implementation PR`
 - **Implementation PR (Odyssey):**
   - Updates `docs/SPEC.md` documenting `status:needs-input`, `ESCALATION:` syntax, `/escalations` command door, and circuit breaker additions (D8, AT-481-14).
-  - Updates `CHANGELOG.md` under current release section documenting the enhancement (AT-481-15).
+  - Updates `CHANGELOG.md` under current release section documenting the enhancement (D8).
 
 ### Strict File Manifest Partitioning (D9)
 
-The implementing change is strictly confined to:
+The implementing change is strictly confined to the files declared in the approved spec:
 1. `scripts/setup/bootstrap_tracker.sh`
 2. `scripts/ops/work_dispatch.sh`
 3. `scripts/ops/work.sh`
@@ -76,11 +76,9 @@ The implementing change is strictly confined to:
 12. `scripts/ops/align_escalations.sh`
 13. `scripts/ops/tests/work_dispatch_test.sh`
 14. `scripts/ops/tests/claim_test.sh`
-15. `scripts/ops/tests/work_test.sh`
-16. `scripts/ci/tests/escalation_queue_test.sh`
-17. `docs/SPEC.md`
-18. `CHANGELOG.md`
-19. `intent/481-operator-escalation-sweep-machine/plan.md` (read-only reference; updated only if plan sync occurs)
+15. `scripts/ci/tests/escalation_queue_test.sh`
+16. `docs/SPEC.md`
+17. `CHANGELOG.md`
 
 **Forbidden Paths (Untouched per D9):**
 - `.github/workflows/**`: GitHub Actions workflow files are preserved unchanged.
@@ -89,6 +87,10 @@ The implementing change is strictly confined to:
 - `scripts/ci/review_recorder.py`: Consensus ledger derivation is preserved unchanged.
 - `scripts/ci/merge_gate.sh`: Merge gate conjuncts are preserved unchanged.
 
+**Design Boundaries & Out-of-Scope Rationale (D2, D9):**
+- `scripts/ops/fast.sh`: Per D2 and D9, `scripts/ops/fast.sh` is deliberately excluded from the scope of #481. `fast.sh` is an owner-authorized interactive door (`/fast`) requiring explicit collaborator authentication that transitions an issue directly to `status:implementing` upon human command, whereas `status:needs-input` guards autonomous and unattended dispatch entry points (`work_dispatch.sh`, `work.sh`, `claim.sh`). Fast-track refusal for `status:needs-input` is an out-of-scope design question left for a follow-up issue if desired.
+- Test Suite CI Registration: Per D9, `.github/workflows/**` must remain untouched. Continuous integration runs test suites registered in `.github/workflows/ci-gates.yml`. Because `scripts/ops/tests/work_dispatch_test.sh` is already registered and executed in `.github/workflows/ci-gates.yml:128-129`, the new tests in `scripts/ci/tests/escalation_queue_test.sh` and `scripts/ops/tests/escalation_queue_contract_test.sh` are wired into and invoked by `scripts/ops/tests/work_dispatch_test.sh`. This guarantees CI runs the complete #481 test suite on every pull request without violating D9.
+
 ---
 
 ## 3. Micro-Stepped Tasks (Ordered Work Plan)
@@ -96,9 +98,9 @@ The implementing change is strictly confined to:
 ### Task T1: Build-stage Contract Tests and Baseline Verification (Daedalus)
 - **Files touched:** `scripts/ops/tests/escalation_queue_contract_test.sh`
 - **Steps:**
-  1. Author hermetic contract test suite asserting Decisions D1 through D8 and Acceptance Tests AT-481-1 through AT-481-15.
+  1. Author hermetic contract test suite asserting Decisions D1 through D9 and Acceptance Tests AT-481-1 through AT-481-15 across 16 behavioral assertions.
   2. Execute `bash scripts/ops/tests/escalation_queue_contract_test.sh` against pre-implementation baseline.
-  3. Verify all 12 contract assertions fail cleanly (red) with exit code 1, proving behavior is not smuggled.
+  3. Verify all 16 contract assertions fail cleanly (red) with exit code 1, proving behavior is not smuggled.
 - **Risk:** `risk: low`
 - **Proves:** Baseline gate satisfied.
 
@@ -122,10 +124,10 @@ The implementing change is strictly confined to:
      ```
   2. Add test cases in `scripts/ops/tests/work_dispatch_test.sh` verifying refusal and exit code 2 when an issue carries `status:needs-input`.
 - **Risk:** `risk: high` (touches entry door circuit breaker)
-- **Proves:** Satisfies D2, AT-481-3 (Contract test Assertion 2).
+- **Proves:** Satisfies D2, AT-481-3 (Contract test Assertion 3).
 
-### Task T4: Circuit Breaker Integration and Unattended Escalation in `work.sh` (D2, D5, AT-481-4, AT-481-9)
-- **Files touched:** `scripts/ops/work.sh`, `scripts/ops/tests/work_test.sh`
+### Task T4: Ambiguous-Owner Escalation and Circuit Breaker Integration in `work.sh` (D2, D5, AT-481-4, AT-481-9)
+- **Files touched:** `scripts/ops/work.sh`
 - **Steps:**
   1. In `scripts/ops/work.sh` under refusal ladder step (c) (line 314), add refusal for `status:needs-input`:
      ```bash
@@ -137,14 +139,16 @@ The implementing change is strictly confined to:
      - When `owner_count > 1` and `--as` is not provided:
        - If `[ "${HEADLESS:-0}" = "1" ]`:
          - Resolve displaced stage label (`status:<stage>`).
-         - Remove displaced stage label and apply `status:needs-input` via `gh api`.
-         - Post issue comment: `ESCALATION: #$ISSUE kind=ambiguous-owner stage=$stage` followed by `WORK-RESULT: blocked #$ISSUE ambiguous owner for stage $stage`.
-         - Exit 2 with `refused: stage $stage has $owner_count owners (ambiguous owner in unattended run)`.
-       - If `[ "${HEADLESS:-0}" != "1" ]`:
+         - Guard writes under `DRY_RUN=1`: If `[ "${DRY_RUN:-0}" = "1" ]`, print the intended escalation actions to stdout and exit 2 with `WORK-RESULT: blocked #$ISSUE ambiguous owner for stage $stage` without mutating GitHub state.
+         - For live runs (`DRY_RUN=0`):
+           1. **Post marker comment FIRST:** Post issue comment with body `ESCALATION: #$ISSUE kind=ambiguous-owner stage=$stage` followed by `WORK-RESULT: blocked #$ISSUE ambiguous owner for stage $stage` via `scripts/ops/post.sh` or `gh api`.
+           2. **Verify comment creation:** Check the exit status of the comment post. If posting fails (403/429), abort immediately without touching tracker labels, preventing an orphaned `status:needs-input` state where the displaced stage is lost.
+           3. **Swap labels conditionally:** Only after the comment is verified to have landed, remove the displaced stage label (`status:<stage>`) and apply `status:needs-input`.
+         - Emit to stderr and exit 2 with `WORK-RESULT: blocked #$ISSUE ambiguous owner for stage $stage`.
+       - If `[ "${HEADLESS:-0}" != "1" ]` (interactive mode):
          - Preserve existing behavior (echo owner list and exit 0).
-  3. Add test cases in `scripts/ops/tests/work_test.sh` covering both interactive exit 0 and headless exit 2 with escalation comment and label update.
-- **Risk:** `risk: high` (touches state machine labels and unattended exit semantics)
-- **Proves:** Satisfies D2, D5, AT-481-4, AT-481-9 (Contract test Assertions 3 and 9).
+- **Risk:** `risk: high` (touches state machine labels, write order safety, and unattended exit semantics)
+- **Proves:** Satisfies D2, D5, AT-481-4, AT-481-9 (Contract test Assertions 4 and 10).
 
 ### Task T5: Circuit Breaker Integration in `claim.sh` (D2, AT-481-5, AT-481-6)
 - **Files touched:** `scripts/ops/claim.sh`, `scripts/ops/tests/claim_test.sh`
@@ -156,7 +160,7 @@ The implementing change is strictly confined to:
      ```
   2. Add test cases in `scripts/ops/tests/claim_test.sh` verifying that both labels trigger refusal before any mutation occurs.
 - **Risk:** `risk: high` (touches claim mutex state machine)
-- **Proves:** Satisfies D2, AT-481-5, AT-481-6 (Contract test Assertions 4 and 5).
+- **Proves:** Satisfies D2, AT-481-5, AT-481-6 (Contract test Assertions 5 and 6).
 
 ### Task T6: Circuit Breaker Documentation in `commands/work.md` (D2)
 - **Files touched:** `commands/work.md`
@@ -164,7 +168,7 @@ The implementing change is strictly confined to:
   1. Update lines 17–20 in `commands/work.md` to document `status:needs-input`:
      `If the output above contains "refused:" (exit 2 — the issue carries "hold", carries "blocked", is closed, carries "status:review-stuck", or carries "status:needs-input"), stop there...`
 - **Risk:** `risk: low`
-- **Proves:** Satisfies D2 (Contract test Assertion 6).
+- **Proves:** Satisfies D2 (Contract test Assertion 7).
 
 ### Task T7: Continuous Poller PR Candidate Filtering in `poll.sh` (D3, AT-481-7)
 - **Files touched:** `scripts/placement/vm-local/poll.sh`
@@ -179,7 +183,7 @@ The implementing change is strictly confined to:
      fi
      ```
 - **Risk:** `risk: high` (touches autonomous loop candidate selection)
-- **Proves:** Satisfies D3, AT-481-7 (Contract test Assertion 7).
+- **Proves:** Satisfies D3, AT-481-7 (Contract test Assertion 8).
 
 ### Task T8: Author `/escalations` Command and Compile Harness Targets (D6, AT-481-10, AT-481-11)
 - **Files touched:** `commands/escalations.md`, `.claude/commands/escalations.md`, `.agents/skills/escalations/SKILL.md`
@@ -195,9 +199,9 @@ The implementing change is strictly confined to:
   2. Run `python3 scripts/sync_commands.py` to compile `.claude/commands/escalations.md` and `.agents/skills/escalations/SKILL.md`.
   3. Verify with `python3 scripts/sync_commands.py --check`.
 - **Risk:** `risk: medium` (DEEP-7 compiler blast radius)
-- **Proves:** Satisfies D6, AT-481-10, AT-481-11 (Contract test Assertion 10).
+- **Proves:** Satisfies D6, AT-481-10, AT-481-11 (Contract test Assertions 11 and 12).
 
-### Task T9: Implement `scripts/ops/align_escalations.sh` (D4, D7, AT-481-8, AT-481-12, AT-481-13)
+### Task T9: Implement `scripts/ops/align_escalations.sh` (D1, D4, D7, AT-481-2, AT-481-8, AT-481-12, AT-481-13)
 - **Files touched:** `scripts/ops/align_escalations.sh`
 - **Steps:**
   1. Implement standalone alignment script supporting `--dry-run` (default) and `--apply`.
@@ -206,45 +210,46 @@ The implementing change is strictly confined to:
      - Open issues with open questions in `intent.md` / `spec.md`.
      - Stalled ambiguous-owner issues.
      - Unreflected blocked comments.
-  4. In `--dry-run`, print findings without tracker mutations, exiting 0.
-  5. In `--apply`, apply `status:needs-input` and post formatted `ESCALATION:` marker.
-  6. Audit stalled loop resources (dead claims, residue branches, consensus-unmerged PRs) and print diagnostic report.
-  7. Make file executable (`chmod +x scripts/ops/align_escalations.sh`).
+  4. In `--dry-run` (default), print findings and stalled resources without tracker mutations, exiting 0.
+  5. In `--apply`, remove displaced stage label, apply `status:needs-input`, and post formatted `ESCALATION:` marker.
+  6. Support clearing / restoration: removing `status:needs-input` and restoring the displaced stage label recorded in the marker.
+  7. Audit stalled loop resources (dead claims, residue branches, consensus-unmerged PRs) and print diagnostic report.
+  8. Make file executable (`chmod +x scripts/ops/align_escalations.sh`).
 - **Risk:** `risk: high` (tracker state mutations under `--apply`)
-- **Proves:** Satisfies D4, D7, AT-481-8, AT-481-12, AT-481-13 (Contract test Assertions 8 and 11).
+- **Proves:** Satisfies D1, D4, D7, AT-481-2, AT-481-8, AT-481-12, AT-481-13 (Contract test Assertions 2, 9, 13, and 14).
 
-### Task T10: Test Suite Expansion and Hermetic Regressions
-- **Files touched:** `scripts/ops/tests/work_dispatch_test.sh`, `scripts/ops/tests/claim_test.sh`, `scripts/ops/tests/work_test.sh`, `scripts/ci/tests/escalation_queue_test.sh`
+### Task T10: Author Regression Suite and Wire CI Verification (D8, D9, AT-481-9, AT-481-15)
+- **Files touched:** `scripts/ops/tests/work_dispatch_test.sh`, `scripts/ops/tests/claim_test.sh`, `scripts/ci/tests/escalation_queue_test.sh`
 - **Steps:**
-  1. Author `scripts/ci/tests/escalation_queue_test.sh` covering end-to-end alignment, label displacement, and marker roundtrips.
-  2. Run all modified test suites locally:
+  1. Author `scripts/ci/tests/escalation_queue_test.sh` covering end-to-end alignment, label displacement, marker parsing, interactive mode exit 0 preservation (D5(a)), and unattended ambiguous-owner exit 2 with write ordering and `DRY_RUN=1` guards.
+  2. In `scripts/ops/tests/work_dispatch_test.sh` (which is executed in `.github/workflows/ci-gates.yml:128-129`), invoke `scripts/ci/tests/escalation_queue_test.sh` and `scripts/ops/tests/escalation_queue_contract_test.sh`. This ensures CI automatically verifies all #481 contract and regression assertions without modifying `.github/workflows/**`.
+  3. Run all test suites locally:
      - `bash scripts/ops/tests/work_dispatch_test.sh`
      - `bash scripts/ops/tests/claim_test.sh`
-     - `bash scripts/ops/tests/work_test.sh`
      - `bash scripts/ci/tests/escalation_queue_test.sh`
 - **Risk:** `risk: low`
-- **Proves:** Prevents regressions across all modified CLI entry points.
+- **Proves:** Prevents regressions and satisfies CI registration obligation within D9 bounds.
 
 ### Task T11: Living Spec and Changelog Updates (D8, AT-481-14)
 - **Files touched:** `docs/SPEC.md`, `CHANGELOG.md`
 - **Steps:**
   1. Update `docs/SPEC.md` under lifecycle state machine and operational tooling, documenting `status:needs-input`, `ESCALATION:` marker grammar, circuit breaker integration, and `/escalations`.
-  2. Update `CHANGELOG.md` recording feature addition.
+  2. Update `CHANGELOG.md` recording feature addition under current release section.
   3. Verify with `bash scripts/ci/spec_check.sh origin/main` and `bash scripts/ci/changelog_check.sh origin/main`.
 - **Risk:** `risk: low`
-- **Proves:** Satisfies D8, AT-481-14 (Contract test Assertion 12).
+- **Proves:** Satisfies D8, AT-481-14 (Contract test Assertion 15).
 
-### Task T12: End-to-End Gate Verification and Green Contract Suite
+### Task T12: End-to-End Gate Verification and Green Contract Suite (D9, AT-481-15)
 - **Files touched:** None (execution only)
 - **Steps:**
-  1. Run `bash scripts/ops/tests/escalation_queue_contract_test.sh` and verify all 12 assertions pass (green).
+  1. Run `bash scripts/ops/tests/escalation_queue_contract_test.sh` and verify all 16 assertions pass (green).
   2. Verify git status confirms diff touches only files in the scope manifest (D9, AT-481-15).
   3. Execute CI preflight checks:
      - `python3 scripts/sync_commands.py --check`
      - `bash scripts/ci/spec_check.sh origin/main`
      - `bash scripts/ci/changelog_check.sh origin/main`
 - **Risk:** `risk: low`
-- **Proves:** Complete rung readiness.
+- **Proves:** Complete rung readiness (Contract test Assertion 16).
 
 ---
 
@@ -252,19 +257,19 @@ The implementing change is strictly confined to:
 
 | Decision ID | Acceptance Test | Covered By Task | Contract Assertion |
 |---|---|---|---|
-| **D1** | AT-481-1 | T2 | Assertion 1 (`bootstrap_tracker.sh` defines `status:needs-input`) |
-| **D1** | AT-481-2 | T2, T9 | Assertion 1, Assertion 8 (Label displacement semantics) |
-| **D2** | AT-481-3 | T3 | Assertion 2 (`work_dispatch.sh` refusal) |
-| **D2** | AT-481-4 | T4 | Assertion 3 (`work.sh` refusal) |
-| **D2** | AT-481-5 | T5 | Assertion 4 (`claim.sh` refusal on `status:needs-input`) |
-| **D2** | AT-481-6 | T5 | Assertion 5 (`claim.sh` refusal on `status:review-stuck`) |
-| **D2** | — | T6 | Assertion 6 (`commands/work.md` refusal text) |
-| **D3** | AT-481-7 | T7 | Assertion 7 (`poll.sh` PR candidate filter) |
-| **D4** | AT-481-8 | T9 | Assertion 8 (`align_escalations.sh` marker grammar regex) |
-| **D5** | AT-481-9 | T4 | Assertion 9 (`work.sh` headless ambiguous-owner escalation) |
-| **D6** | AT-481-10 | T8 | Assertion 10 (`commands/escalations.md` compiles cleanly) |
-| **D6** | AT-481-11 | T8 | Assertion 10 (`/escalations` command definition) |
-| **D7** | AT-481-12 | T9 | Assertion 11 (`align_escalations.sh` audit mode) |
-| **D7** | AT-481-13 | T9 | Assertion 11 (`align_escalations.sh --apply` mode) |
-| **D8** | AT-481-14 | T11 | Assertion 12 (`docs/SPEC.md` living spec update) |
-| **D9** | AT-481-15 | T12 | Manifest audit in CI preflight |
+| **D1** | AT-481-1 | T2 | Assertion 1 (`bootstrap_tracker.sh` defines `status:needs-input` with color E11D21) |
+| **D1** | AT-481-2 | T9 | Assertion 2 (Label displacement and restoration semantics) |
+| **D2** | AT-481-3 | T3 | Assertion 3 (`work_dispatch.sh` refusal on `status:needs-input`) |
+| **D2** | AT-481-4 | T4 | Assertion 4 (`work.sh` refusal on `status:needs-input`) |
+| **D2** | AT-481-5 | T5 | Assertion 5 (`claim.sh` refusal on `status:needs-input`) |
+| **D2** | AT-481-6 | T5 | Assertion 6 (`claim.sh` refusal on `status:review-stuck`) |
+| **D2** | AT-481-3 (doc) | T6 | Assertion 7 (`commands/work.md` refusal text documents `status:needs-input`) |
+| **D3** | AT-481-7 | T7 | Assertion 8 (`poll.sh` PR candidate filter skips tracking issues with `status:needs-input`) |
+| **D4** | AT-481-8 | T9 | Assertion 9 (`align_escalations.sh` implements strict marker grammar regex) |
+| **D5** | AT-481-9 | T4 | Assertion 10 (`work.sh` unattended ambiguous-owner escalation behavior under `HEADLESS=1`) |
+| **D6** | AT-481-10 | T8 | Assertion 11 (`commands/escalations.md` compiles cleanly via `scripts/sync_commands.py --check`) |
+| **D6** | AT-481-11 | T8 | Assertion 12 (`/escalations` command specification defines listing, ruling, and restoration) |
+| **D7** | AT-481-12 | T9 | Assertion 13 (`align_escalations.sh` audit mode runs without `--apply` and makes zero mutations) |
+| **D7** | AT-481-13 | T9 | Assertion 14 (`align_escalations.sh --apply` applies `status:needs-input` and emits `ESCALATION:`) |
+| **D8** | AT-481-14 | T11 | Assertion 15 (`docs/SPEC.md` documents `status:needs-input` and passes `spec_check.sh`) |
+| **D9** | AT-481-15 | T12 | Assertion 16 (Implementation manifest delivery and compliance) |
