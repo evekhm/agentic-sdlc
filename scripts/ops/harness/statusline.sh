@@ -31,7 +31,7 @@ SEAT="${AGENTIC_SEAT:-${CLAUDE_SEAT:-}}"
 payload="$(cat)"
 
 # One jq pass; the rest is pure bash so a render costs a single subprocess.
-IFS=$'\t' read -r sid model used window cost dur hit warm ttl cwrite creq cmiss outtok effort has_req < <(
+IFS=$'\t' read -r sid model used window cost dur hit warm ttl cwrite creq cmiss outtok effort has_req cwd wt_branch < <(
   printf '%s' "$payload" | jq -r '
     def nz($d): if . == null or . == "" then $d else . end;
     . as $r
@@ -65,6 +65,13 @@ IFS=$'\t' read -r sid model used window cost dur hit warm ttl cwrite creq cmiss 
       , ( $cw.total_output_tokens // ($cu.output_tokens // 0) )
       , ($r.effort.level | nz($r.model.effort | nz("-")))
       , (if $pc.requests != null then "true" else "false" end)
+      # Where the session is working. Several sessions run against this repo
+      # at once, one worktree each (CLAUDE.md "Parallel sessions"); without
+      # these two the chrome cannot tell a claimed worktree from the primary
+      # read-only checkout. "-" stands in for absent: IFS=tab collapses
+      # adjacent empty fields, so no field may be emitted empty.
+      , ($r.workspace.current_dir | nz($r.cwd | nz("-")))
+      , ($r.worktree.branch | nz("-"))
       ] | @tsv' 2>/dev/null
 )
 [[ -n "${sid:-}" ]] || exit 0   # unparseable payload: print nothing, never break the chrome
@@ -74,6 +81,8 @@ IFS=$'\t' read -r sid model used window cost dur hit warm ttl cwrite creq cmiss 
 [[ "$ttl"  == "-" ]] && ttl=""
 [[ "$cost" == "-" ]] && cost=""
 [[ "$effort" == "-" ]] && effort=""
+[[ "${cwd:--}" == "-" ]] && cwd=""
+[[ "${wt_branch:--}" == "-" ]] && wt_branch=""
 
 pct=$(( CEILING > 0 ? used * 100 / CEILING : 0 ))
 
@@ -211,7 +220,28 @@ if [[ -n "$effort" ]]; then
   shopt -u nocasematch
 fi
 
-printf '%sctx %s.%sK/%sK %s%%%s%s%s%s%s  %s%s%s%s%s\n' \
+# Location: which checkout and branch this session is driving. In a linked
+# worktree the directory name is derived from the branch, so the branch alone
+# (marked ⑂) says it; a normal checkout shows folder and branch.
+LOC=""
+folder="${cwd##*/}"
+branch="$wt_branch"
+is_wt=0
+[[ -n "$wt_branch" ]] && is_wt=1
+if [[ -z "$branch" && -n "$cwd" && -d "$cwd" ]]; then
+  # One rev-parse: the absolute git dir, then the branch ("HEAD" when detached).
+  { read -r gitdir; read -r branch; } \
+    < <(GIT_OPTIONAL_LOCKS=0 git -C "$cwd" rev-parse --absolute-git-dir --abbrev-ref HEAD 2>/dev/null)
+  [[ "$branch" == "HEAD" ]] && branch=""
+  [[ "$gitdir" == */worktrees/* ]] && is_wt=1
+fi
+if (( is_wt )) && [[ -n "$branch" ]]; then
+  LOC="$(printf '  %s⑂ %s%s' "$DIM" "$branch" "$D")"
+elif [[ -n "$folder" ]]; then
+  LOC="$(printf '  %s📂 %s%s%s' "$DIM" "$folder" "${branch:+ ⎇ $branch}" "$D")"
+fi
+
+printf '%sctx %s.%sK/%sK %s%%%s%s%s%s%s  %s%s%s%s%s%s\n' \
   "$C" "$(( used / 1000 ))" "$(( used % 1000 / 100 ))" "$(( CEILING / 1000 ))" "$pct" "$TAG" "$D" \
   "$COST" "$TOK" "$CACHE" \
-  "$DIM" "$model" "${effort:+ [$effort]}" "${SEAT:+ · $SEAT}" "$D"
+  "$DIM" "$model" "${effort:+ [$effort]}" "${SEAT:+ · $SEAT}" "$D" "$LOC"

@@ -90,7 +90,10 @@ Harness instrumentation (`scripts/ops/harness/`, #330):
   `scripts/ops/harness/install.sh`, running `scripts/ops/harness/statusline.sh`.
   Tracks context usage against 200K ceiling, displaying graduated tags
   (`wrap soon` at 60%, `WRAP NOW` at 70%, `COMPACTING` at 90%), list-rate spend,
-  token accumulation in/out/tot, and cache health (with Claude cache-write tokens `cw <n>`).
+  token accumulation in/out/tot, cache health (with Claude cache-write tokens `cw <n>`),
+  and the session's location (#529) — `⑂ <branch>` in a claimed worktree,
+  `📂 <folder> ⎇ <branch>` in a normal checkout — so parallel sessions are
+  told apart at a glance.
   Writes atomic side-channel metrics to `$AGENTIC_CTX_DIR/<session_id>.json`
   (defaulting to `$CLAUDE_CTX_DIR` or `~/.claude/context/<session_id>.json`, with fallback to `/tmp/agentic-context/`).
 - **SessionStart hook:** configured in `<repo>/.claude/settings.json` via

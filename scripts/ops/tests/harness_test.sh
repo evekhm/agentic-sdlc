@@ -431,6 +431,73 @@ else
     fi
 fi
 
+# --- Location segment (#529): which checkout and branch the session drives ----
+# A payload carries the session's directory; several sessions run against this
+# repo at once, one worktree each, and the line has to say which one this is.
+LOC_REPO="$WORK/loc/agentic-sdlc"
+LOC_WT="$WORK/loc/trees/odyssey-529-statusline-location"
+mkdir -p "$WORK/loc/trees"
+git init -q -b main "$LOC_REPO" 2>/dev/null
+git -C "$LOC_REPO" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null
+git -C "$LOC_REPO" worktree add -q -b odyssey/529-statusline-location "$LOC_WT" 2>/dev/null
+
+loc_render() { # <cwd> [<worktree.branch>]
+    jq -c --arg d "$1" --arg b "${2:-}" \
+      '.workspace.current_dir = $d | .cwd = $d
+       | if $b == "" then . else .worktree = {branch: $b} end' \
+      "$FIXTURES_DIR/claude-with-cost-effort.json" \
+      | AGENTIC_CTX_DIR="$CTX_DIR" "$STATUSLINE" 2>/dev/null
+}
+
+# --- AT-22 (#529): normal checkout renders folder and branch
+banner "AT-22 (#529): normal checkout renders folder and branch"
+clean="$(strip_ansi "$(loc_render "$LOC_REPO")")"
+if [[ "$clean" == *"📂 agentic-sdlc ⎇ main" ]]; then
+    pass "AT-22 (#529): normal checkout renders '📂 <folder> ⎇ <branch>'"
+else
+    fail "AT-22 (#529): expected trailing '📂 agentic-sdlc ⎇ main', got: '$clean'"
+fi
+
+# --- AT-23 (#529): linked worktree renders the branch alone, marked
+banner "AT-23 (#529): linked worktree renders the branch alone, marked"
+clean="$(strip_ansi "$(loc_render "$LOC_WT")")"
+if [[ "$clean" == *"⑂ odyssey/529-statusline-location" && "$clean" != *"📂"* ]]; then
+    pass "AT-23 (#529): linked worktree collapses to '⑂ <branch>' with no folder"
+else
+    fail "AT-23 (#529): expected trailing '⑂ odyssey/529-statusline-location' and no folder, got: '$clean'"
+fi
+
+# --- AT-24 (#529): a payload-supplied worktree branch is taken as authoritative
+banner "AT-24 (#529): payload worktree.branch wins without consulting git"
+clean="$(strip_ansi "$(loc_render "$WORK" "odyssey/529-from-payload")")"
+if [[ "$clean" == *"⑂ odyssey/529-from-payload" ]]; then
+    pass "AT-24 (#529): payload worktree.branch renders without a git lookup"
+else
+    fail "AT-24 (#529): expected trailing '⑂ odyssey/529-from-payload', got: '$clean'"
+fi
+
+# --- AT-25 (#529): absent location keys leave the line exactly as before
+banner "AT-25 (#529): absent location keys add no segment"
+out="$(AGENTIC_CTX_DIR="$CTX_DIR" "$STATUSLINE" \
+        < <(jq -c 'del(.workspace, .cwd, .worktree)' "$FIXTURES_DIR/claude-with-cost-effort.json") 2>/dev/null)"
+clean="$(strip_ansi "$out" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+expected="ctx 105.3K/200K 52%  \$81.40  tok 105.3K in/4 out/105.3K tot  cache 88% 5m cw 3.5M  Fable 5.1 [high]"
+if [ "$clean" = "$expected" ]; then
+    pass "AT-25 (#529): payload without workspace/cwd renders no location segment"
+else
+    fail "AT-25 (#529): expected '$expected', got: '$clean'"
+fi
+
+# --- AT-26 (#529): a directory outside git renders the folder alone
+banner "AT-26 (#529): non-git directory renders the folder alone"
+mkdir -p "$WORK/loc/plainfolder"
+clean="$(strip_ansi "$(loc_render "$WORK/loc/plainfolder")")"
+if [[ "$clean" == *"📂 plainfolder" && "$clean" != *"⎇"* ]]; then
+    pass "AT-26 (#529): non-git directory renders '📂 <folder>' with no branch"
+else
+    fail "AT-26 (#529): expected trailing '📂 plainfolder' with no branch, got: '$clean'"
+fi
+
 # --- Summary ------------------------------------------------------------------
 banner "Harness Contract Test Summary"
 echo "Ran $TESTS_RUN tests: $TESTS_PASSED passed, $FAILURES failed"

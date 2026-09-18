@@ -2,6 +2,11 @@
 
 All notable behavioral and user-facing changes to this repository are documented in this file in reverse-chronological order. Each entry describes what capability changed, why the change was made, and the operational or user-visible impact on operators, personas, or workflows.
 
+## 2026-09-18
+
+### The Statusline Says Which Checkout a Session Is Driving ([#529](https://github.com/evekhm/agentic-sdlc/issues/529))
+`scripts/ops/harness/statusline.sh` reported context against the 200K ceiling, spend, tokens, cache health, model and seat, and said nothing about where the session was working. Several Claude Code and Antigravity sessions run against this repo on one machine at once, one worktree and one claim each, so four terminals rendered four identical-looking lines and the read-only primary checkout was indistinguishable from a claimed worktree. The line now ends with a location segment: `⑂ <branch>` in a linked worktree (the worktree directory is named after the branch, so the branch carries it), `📂 <folder> ⎇ <branch>` in a normal checkout, `📂 <folder>` outside a repository, and nothing when the payload carries no directory and no branch. The branch comes from the harness payload's `worktree.branch` where one is supplied, otherwise from a single `git rev-parse` against the payload's directory. Everything to the left of the segment is unchanged, as is the side-channel file that hooks read. Both harnesses point their `statusLine.command` at this one script, so the segment appears in Claude Code and Antigravity with no second copy to install.
+
 ## 2026-09-17
 
 ### Exclude Withdrawn Findings From Merge Gate Dispute Check ([#508](https://github.com/evekhm/agentic-sdlc/issues/508))
