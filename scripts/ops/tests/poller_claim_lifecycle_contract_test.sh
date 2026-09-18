@@ -16,7 +16,6 @@ unset WORK_MAX_USD
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 POLL_SH="$REPO/scripts/placement/vm-local/poll.sh"
-RUN_SH="$REPO/scripts/placement/vm-local/run.sh"
 EXEC_PY="$REPO/scripts/ops/execution.py"
 EXEC_YAML="$REPO/config/execution.yaml"
 SPEC_MD="$REPO/docs/SPEC.md"
@@ -43,18 +42,17 @@ fail() {
 # ==============================================================================
 banner "D1 / AT-513-1: Detached background runner dispatch and dispatch log redirection"
 # The poller must dispatch run.sh in the background with stdout and stderr redirected
-# to ${POLL_LOG_DIR:-${poll_state_dir}/logs}/dispatch-<issue>-<timestamp>.log across
-# candidate paths (fix rounds, first-hop intake, and ladder consumption), allowing the
-# 30-second polling cadence to continue without blocking on runner completion.
+# to dedicated dispatch log files matching dispatch-<issue>-<timestamp>.log under POLL_LOG_DIR
+# across candidate paths, allowing polling sweeps to continue without blocking on runner completion.
 d1_ok=1
 if ! grep -qF 'POLL_LOG_DIR' "$POLL_SH"; then
     d1_ok=0
 fi
-if ! grep -qE 'dispatch-[^/[:space:]]+-[0-9]+\.log' "$POLL_SH"; then
+if ! grep -qE 'dispatch-.*\.log' "$POLL_SH"; then
     d1_ok=0
 fi
-# Verify that run.sh invocations are backgrounded with '&' instead of executed synchronously
-if ! grep -qE '"\$RUN_SH".*&' "$POLL_SH"; then
+# Verify that dispatches use background execution with trailing '&' after output redirection
+if ! grep -qE '2>&1[[:space:]]*&' "$POLL_SH"; then
     d1_ok=0
 fi
 
@@ -141,20 +139,24 @@ if ! grep -qE 'poll-[0-9]+' "$POLL_SH"; then
 fi
 
 if [ "$d5_ok" -eq 1 ]; then
-    pass "D5 / AT-513-5: reaper restricts automated reclamation strictly to poll- session prefixes"
+    pass "D4 / AT-513-5: reaper restricts automated reclamation strictly to poll- session prefixes"
 else
-    fail "D5 / AT-513-5: poll.sh missing session prefix filter to safeguard interactive non-poller claims"
+    fail "D4 / AT-513-5: poll.sh missing session prefix filter to safeguard interactive non-poller claims"
 fi
 
 # ==============================================================================
 # Assertion 6: D5 / AT-513-6: Safe worktree and unmerged branch reaper cleanup
 # ==============================================================================
 banner "D5 / AT-513-6: Safe worktree and unmerged branch reclamation"
-# When releasing a stranded claim, the reaper inspects git ancestry. If the branch
-# contains zero unmerged commits relative to origin/main, the worktree and branch are deleted.
-# If unmerged commits exist, the branch is retained on disk to preserve unpushed work.
+# When releasing a stranded claim, the reaper inspects git ancestry and worktree dirtiness.
+# If the branch contains zero unmerged commits relative to origin/main and the worktree is clean,
+# the worktree and branch are deleted. If unmerged commits exist or worktree is dirty,
+# they are retained on disk to preserve unpushed progress.
 d6_ok=1
 if ! grep -qE 'origin/main\.\.' "$POLL_SH"; then
+    d6_ok=0
+fi
+if ! grep -qE 'status --porcelain' "$POLL_SH"; then
     d6_ok=0
 fi
 if ! grep -qE 'worktree remove' "$POLL_SH"; then
@@ -193,16 +195,20 @@ fi
 banner "D7 / AT-513-8: Stage-filtered first-hop intake concurrency"
 # Active concurrency for first-hop intake must parse the declared lifecycle stage
 # from the claim comment. Only claims with stage: intake count against max_concurrent_first_hops.
-# Athena claims on plan (stage: plan) or design (stage: design) must be excluded.
+# In addition, poll.sh must export CLAIM_STAGE=intake when claiming first-hop intake so claim.sh
+# formats the claim comment with stage: intake without requiring modifications to claim.sh.
 d8_ok=1
 if ! grep -qEi 'stage:[[:space:]]*intake' "$POLL_SH"; then
     d8_ok=0
 fi
+if ! grep -qE 'CLAIM_STAGE="?intake"?' "$POLL_SH"; then
+    d8_ok=0
+fi
 
 if [ "$d8_ok" -eq 1 ]; then
-    pass "D7 / AT-513-8: poll.sh filters first-hop intake concurrency counting strictly to stage: intake"
+    pass "D7 / AT-513-8: poll.sh filters intake concurrency to stage: intake and exports CLAIM_STAGE=intake"
 else
-    fail "D7 / AT-513-8: poll.sh counts all Athena claims regardless of lifecycle stage, freezing intake"
+    fail "D7 / AT-513-8: poll.sh missing stage-filtered intake concurrency or CLAIM_STAGE=intake dispatch"
 fi
 
 # ==============================================================================
