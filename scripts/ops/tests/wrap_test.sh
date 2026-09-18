@@ -54,6 +54,9 @@
 
 set -uo pipefail
 
+# D3 (issue #405): Contract test suites must be self-sanitizing at entry.
+unset CLAUDE_SEAT AGENTIC_SEAT WORK_MAX_USD
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WRAP_SH="${WRAP_SH:-$REPO/scripts/ops/wrap.sh}"
 CLAUDE_DOOR="$REPO/.claude/commands/wrap.md"
