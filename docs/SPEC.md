@@ -797,15 +797,19 @@ dispatched a subagent owns cleanup of the worktree that dispatch
 created, including unlocking it once the subagent exits.
 Tests: `scripts/ops/tests/worktrees_test.sh`.
 
-### ops.spend
+### ops.spend (#269)
 `scripts/ops/session_spend.sh <transcript-dir>` measures session
 cost: cache hit rate `read/(read+write+fresh)` and
-tokens-per-message. It prices both Claude and Gemini models against
-official list rates (Anthropic and Google Cloud Vertex AI rates effective
-2026-09-04), ingests Antigravity dispatch JSON envelopes alongside
-Claude transcript logs, and reports unpriced models with explicit
-warnings and non-zero unpriced token counts, suppresses the TOTAL spend
-line, and exits with a non-zero status to fail loudly (PR #177).
+tokens-per-message. It prices Claude models against Anthropic list rates
+(effective 2026-08-23) and Gemini models against Google Cloud Gemini
+Enterprise platform pricing: Gemini 3.8 Flash ($0.75 input, $0.075 cache read,
+$3.75 output per MTok) and Gemini 3.1 Pro ($2.00 input, $0.20 cache read,
+$12.00 output per MTok) with automatic caching and zero cache write fees
+effective 2026-09-08 (#269), while preserving legacy 1.5/2.x rates for
+historical transcripts. It ingests Antigravity dispatch JSON envelopes alongside
+Claude transcript logs, reports unpriced models with explicit warnings and
+non-zero unpriced token counts, suppresses the TOTAL spend line, and exits
+with a non-zero status to fail loudly (PR #177).
 Tests: `scripts/ops/tests/session_spend_test.sh`.
 
 ### ops.wrap

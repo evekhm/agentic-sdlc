@@ -1152,9 +1152,9 @@ cost_file="$WORK/cost.txt"
 # — read from the sidecar below, same reason as D9). The cost figure
 # survives a re-pin within the tier: session_spend.sh's gemini table
 # matches on family and version, not on the effort suffix.
-# Flash rates (#271 repin): input: 0.15, cache_read: 0.0375, output: 0.60
-# cost = (100000 * 0.15 + 20000 * 0.0375 + (10000 + 5000) * 0.60) / 1000000
-# cost = (15000 + 750 + 9000) / 1000000 = 24750 / 1000000 = 0.024750
+# Flash rates (#271 repin, #269): input: 0.75, cache_read: 0.075, output: 3.75
+# cost = (100000 * 0.75 + 20000 * 0.075 + (10000 + 5000) * 3.75) / 1000000
+# cost = (75000 + 1500 + 56250) / 1000000 = 132750 / 1000000 = 0.132750
 printf '%s\n' '{"status":"SUCCESS","response":"done\nWORK-RESULT: ok #113 plan committed","usage":{"input_tokens":100000,"output_tokens":10000,"thinking_tokens":5000,"cache_read_tokens":20000,"total_tokens":135000}}' \
   > "$WORK/agy_cost.json"
 TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost.json" \
@@ -1162,13 +1162,26 @@ TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_cost.json" \
   run 0 "#150: Antigravity dispatch writes cost and model to WORK_COST_FILE" -- 113
 cost_line1="$(sed -n '1p' "$cost_file")"
 cost_line2="$(sed -n '2p' "$cost_file")"
-[ "$cost_line1" = "0.024750" ] || fail "#150: expected cost 0.024750, got '$cost_line1'"
+[ "$cost_line1" = "0.132750" ] || fail "#150: expected cost 0.132750, got '$cost_line1'"
 pass "#150: Antigravity dispatch calculates list-rate cost from .usage"
 pinned_model="$(sed -n 's/.*"model": "\([^"]*\)".*/\1/p' \
                 "$REPO/.agents/agents/daedalus/agent.json")"
 [ -n "$pinned_model" ] || fail "#150: no model in daedalus's compiled sidecar"
 [ "$cost_line2" = "$pinned_model" ] || fail "#150: expected model $pinned_model, got '$cost_line2'"
 pass "#150: Antigravity dispatch writes resolved model to line 2"
+
+# Legacy Pro envelope scenario (#269 AT-269-10)
+legacy_cost_file="$WORK/legacy_cost.txt"
+sed -i 's/"gemini-3.8-flash-high"/"gemini-1.5-pro-002"/' "$T/.agents/agents/daedalus/agent.json"
+printf '%s\n' '{"status":"SUCCESS","response":"done\nWORK-RESULT: ok #113 plan committed","model":"gemini-1.5-pro-002","usage":{"input_tokens":1000000,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":1000000}}' \
+  > "$WORK/agy_legacy_cost.json"
+TREE="$T" DRY=0 HL=1 LAUNCH_OK=1 AGY_JSON="$WORK/agy_legacy_cost.json" \
+  WORK_COST_FILE="$legacy_cost_file" \
+  run 0 "#269: Legacy Pro envelope computes cost against legacy rates" -- 113
+legacy_cost_line1="$(sed -n '1p' "$legacy_cost_file")"
+[ "$legacy_cost_line1" = "1.250000" ] || fail "#269: expected legacy cost 1.250000, got '$legacy_cost_line1'"
+pass "#269: Legacy Pro envelope computes cost against legacy rates"
+sed -i 's/"gemini-1.5-pro-002"/"gemini-3.8-flash-high"/' "$T/.agents/agents/daedalus/agent.json"
 
 # Missing usage truncates WORK_COST_FILE
 unpriced_cost_file="$WORK/unpriced_cost.txt"
