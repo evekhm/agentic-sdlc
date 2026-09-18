@@ -13,8 +13,95 @@ this file whenever an issue in it merges, closes, or changes gate, and
 carry the date on the status line. Live `gh issue list` state always
 beats this file.
 
-Status line: 2026-09-10, revision fourteen (~20:10 UTC, main at
-`019986c`).
+Status line: 2026-09-16, revision fifteen (~07:45 UTC, main at
+`9e19fa1`).
+
+Since revision fourteen, six days passed and the loop dispatched
+nothing. This revision is mostly the account of why, and the ordering
+that comes out of it.
+
+**The loop was jammed from 2026-09-10 to 2026-09-16.** Poller pid
+3847103 started 2026-09-10 18:30 and wrote 40,755 lines to
+`ops/poller/poll.log` without dispatching a single rung. About 37,000
+of those lines are four refusals repeating every 30 seconds:
+
+| Refusals | Cause |
+|---|---|
+| 9,645 | `branch odyssey/308-merge-gate-yml-repository-wide already exists` — a stale local branch with zero unique commits; the real work was PR #477 |
+| 9,646 | `#329 carries in-progress` — a claim held by dead poller pid `poll-575894` |
+| 9,461 | `#415 carries in-progress` — same, another dead pid |
+| 9,486 | `first-hop intake concurrency limit reached` |
+
+The fourth is the one that matters, because it is not a stuck branch
+or a stuck issue but the design working as written. `poll.sh:357-384`
+counts open issues whose last `Claim:` comment was written by
+`evekhm-athena-app` and compares that to
+`max_concurrent_first_hops`, which is `1`. Twelve of the eighteen
+`in-progress` claims were stale, five of them athena's (#415, #405,
+#329, #259, #204). **Any single one of those five held first-hop
+intake shut for the whole six days.** Nothing in the system releases a
+claim when the process holding it dies; that gap is #252 and #148. A
+121-issue backlog accumulated for that reason alone. No single defect
+in the ladder explains it.
+
+Two structural causes sit underneath the accumulation, and neither is
+a bug in a script. First, intake admits an issue only when it carries
+BOTH `intent:new` and `intake:auto` (`poll.sh:381`); of 72 `intent:new`
+issues, exactly one (#269) carried `intake:auto`, so the front door was
+open to one issue in seventy-two. Second, nothing closes a finished
+issue: the close rung (#148) was specified and never built, so an issue
+whose last rung merged sits at `status:in-review` forever. Most of the
+backlog was not unfinished work. It was finished work nobody swept up.
+
+**Full backlog triage, 2026-09-16** — every open issue read against the
+tree, written up in `runs/2026-09-16_062144_backlog-triage/triage.md`.
+Of 121 open issues, **40 needed no engineering at all**: 27 already
+delivered on `main`, 13 duplicates of another issue, 2 epics
+misfiled as work. 39 of those were closed the same morning with their
+commit citations (the 27th, #410, is corrected below). Open count went
+121 → 85; the delta from 82 is #482, #483 and #484, filed that morning.
+
+**PR #477 merged autonomously** at `0d5f0dd`, all eleven conjuncts
+true, landing #308's per-PR concurrency fix and retiring the largest
+jam. The poller restarted at ~06:58Z and made its first self-directed
+dispatch in six days (athena on #415, via PR #421) within ninety
+seconds.
+
+**#328 has a working route around it; the defect itself remains.** `deep-review` is in argus's
+`assigned_when.labels` (`config/execution.yaml:67`), so labelling a PR
+makes argus genuinely assigned and `unattended.yml`'s `labeled`
+trigger dispatches it. Applied to PR #480, #475 and #421; on PR #480
+the ledger took both `reviewed-head` markers and the gate returned
+**conjunct (3) true** for the first time. Argus performs a genuine
+review on this path, and no clean head has to wait on #328 any more. Worth
+recording for whoever fixes #328: the gate already resolves the
+assigned set correctly at `merge_gate.sh:297-303` via
+`execution.py --subscribers`; that path is simply unreachable, because
+it is guarded on the `assigned:` marker being *absent* and
+`review_recorder.py:415` writes it unconditionally. The fix is to make
+the recorder call the same resolver in place of the hardcoded string.
+
+**#410 was scored CLOSE-DONE by the triage and that verdict was
+wrong.** Branch protection on `main` requires exactly `drift`,
+`execution`, `sanitize` and `spec-check`. The `changelog-check` job
+exists and runs (`ci-gates.yml:210`), but it is not required, which is
+precisely the "merely a red X" the issue says is insufficient — Themis
+will merge a PR that skipped its changelog. The flip is one line of
+repo config and is deliberately deferred: PR #421, #369 and #423 carry
+no `changelog-check` run at all, and #423's fix is a PR-body edit,
+which fires no `pull_request` run, so requiring the check now would
+strand it permanently. #410 stays open until the flip lands.
+
+**#269 is larger than it reads.** `session_spend.sh:249-262` prices
+every Gemini Flash version 1.5 through 3.8 at Gemini 1.5 Flash's rate,
+and every pinned tier is `gemini-3.8-flash-*`, so 100% of antigravity
+spend this repo has ever reported is roughly 5x low in and 6x low out.
+That is not only a reporting error: `config/execution.yaml` gates
+dispatch on USD ceilings measured by this same function, so a ceiling
+meant to stop a runaway agy loop currently permits about five times the
+intended spend. Fixing the rates tightens live ceilings, so runs that
+pass today may start being refused. The choice of price basis is an
+operator decision, below.
 
 Since revision thirteen: Gate S landed its implement rung. Odyssey's
 PR #403 opened at 19:15Z and took three review rounds. Round 1 carried
@@ -54,11 +141,11 @@ Two more merges since revision thirteen: #85's plan PR #365 merged as
 `7045b7f`, and PR #400 (the README handoff paragraph, from a peer
 session) merged as `61c7a7f` at 19:27Z.
 
-#308's implement rung is still stalled. The poller refuses it every
-cycle with `branch odyssey/308-merge-gate-yml-repository-wide already
-exists`, left behind by a dead run whose worktree sits at `e946ce8`
-with one unpushed commit. Removing the branch or pushing it is an
-operator decision.
+#308's implement rung is DONE as of 2026-09-16. The stale branch
+`odyssey/308-merge-gate-yml-repository-wide` held zero unique commits
+and is gone; the real work was PR #477, which Themis merged at
+`0d5f0dd` on all eleven conjuncts. #308 itself stays open at
+`status:in-review`, waiting on #148 like every other finished issue.
 
 ## Scope (operator directive, 2026-09-10)
 
@@ -102,6 +189,20 @@ workflow refuses a PR whose issue carries `status:review-stuck`, so no
 reviewer re-verifies and D10 self-clear can never fire. The retier
 verb `@argus retier` needs a non-Bot OWNER or MEMBER, so a bot cannot
 take the retier path.
+
+**State correction, 2026-09-16.** The `State` column below was written
+on 2026-09-10 and the rows are left as they stood, so the history reads
+straight. Live state has moved; `gh issue list` beats both. Closed
+since revision fourteen: **#321, #324, #354, #361, #265, #337, #353,
+#312, #252, #251, #366, #376, #330, #85** — of which #324 retired as
+superseded by #354, and #376 folded into #412. Still open: **#331,
+#328, #339, #148, #147, #245, #345, #363, #397**, all `intent:new`, and
+**#308** at `status:in-review` with its implement rung merged. The
+practical effect on this gate is that Y1, Y3, Y4, Y5, Y8 and the #366
+half of Y13 are finished, Y6 is finished on the #308 side, Y14 is
+folded elsewhere, and what remains of Gate Y is the recorder pair
+(#331, #328), the housekeeping set (#148, #397, #363) and the policy
+items (#339, #147, #245, #345).
 
 | # | Issue | Why it is here | State |
 |---|-------|----------------|-------|
@@ -178,7 +279,244 @@ pinned in `config/deployments.yaml`, and the same line with the
 override opens it on the other harness; both start from the newest
 handoff.
 
+## Gate H: the handover contract holds without a human
+
+Gate Y assumes the handover between rungs works. Six days of poller
+logs say it holds only while every dispatch exits cleanly and every
+artifact is read by a human. This gate makes the contract carry its
+own state, its own liveness and its own visibility. All four rows were
+filed on 2026-09-16; they are the three-issue gap between the triage's
+projected open count and the measured one. The peer session that
+diagnosed them holds PR #485 for the `process.handover` capability.
+
+| # | Issue | Why it is here | State |
+|---|-------|----------------|-------|
+| H1 | #482 | Dispatch carries no state. The unattended prompt (`scripts/ops/work.sh:637`) names an issue number and nothing else: no stage, no intent folder path, no artifact paths, no prior findings; a fix round hands over a bare PR number (`scripts/placement/vm-local/poll.sh:351`). The agent discovers its own rung by reading, and that discovery is the largest controllable cost in the system. The proposal puts stage, rung number, intent folder path, existing artifacts and reviewer finding IDs into the dispatch, and replaces the grepped `WORK-RESULT:` prose with a structured marker. `scripts/ops/digest.sh` already assembles most of it for the interactive `/work` door. | Filed 2026-09-16T06:30:51Z, `intent:new`. Evidence on the issue: 24 poller runs over six days, 20,193,937 fresh input (841K per run), 191,691,158 cache reads, 1,374,388 output, 751,314 thinking; cache-read ratio min 0.688, median 0.913, mean 0.894, tracking run duration, so the whole cache economy sits inside one rung and the 841K survives no rung boundary |
+| H2 | #483 | No contract resource has a liveness check. The `in-progress` label and its `Claim:` comment, the dispatch branch and the worktree can each be held by a process that no longer exists, and nothing reaps any of them, so a crashed dispatch becomes a permanent stop. The poller already implements this pattern for its own local PR lock files (`poll.sh:244-262`, `POLL_LOCK_MAX_AGE=7200`, removes the lock when the recorded PID is dead); none of the three shared resources gets it. This is the same defect the six-day jam ran on, seen from the process side: five athena claims outlived their processes and `max_concurrent_first_hops: 1` counted every one of them. | Filed 2026-09-16T06:30:52Z, `intent:new`. Prior sightings named on the issue: #252, #363, #383, all three still open. One live instance as of 2026-09-16, reported by a peer session and confirmed here with `ps`: pid 1737758, `bash runs/2026-09-10_050016_agy-waves/run-350f.sh`, child agy pid 1737762 holding a FIX ROUND 1 prompt for #321 on PR #350, elapsed 6-02:03:54 and still running. PR #350 merged on 2026-09-10 at 05:33Z, so the prompt has been stale since roughly three minutes after it started. Revision fourteen flagged tmux and agy residue as unverified; this is the confirmed instance. Killing it is an operator decision below |
+| H3 | #484 | The machine-readable state every rung reads is stated in bash comments. The loop ledger row schema lives in `scripts/ci/merge_gate.sh:32-44` and is duplicated in `scripts/ci/lifecycle_advance.sh:560-591`; the consensus ledger schema lives in `merge_gate.sh:18-30`. docs/SPEC.md covers the loop behaviourally without stating the grammars, so a third harness has to read bash to implement the contract. PR #485 lands a `process.handover` capability holding the resource table; #484 is the grammars themselves plus drift coverage. | Filed 2026-09-16T06:30:53Z, `intent:new` |
+| H4 | #481 | The observability gap. Dispatch stops in well-defined places — `work_dispatch.sh`'s `refused:` circuit breaker, a headless `WORK-RESULT: blocked`, a non-empty "Open questions" section — and every one is prose buried in a diff, a comment or a log line. This is also the home the triage proposed for the ~25 unfiled agent open questions. | Filed 2026-09-16T06:02:55Z, `enhancement,in-progress,status:planning`. Athena's intent landed as PR #487 at 06:47Z: `status:needs-input` label, `ESCALATION: #<n> kind=… stage=…` marker, `/escalations` compiled door. The only Gate H row with a rung under way |
+
+Exit criterion: a dispatch killed mid-run self-heals within a bounded
+interval — the claim, the branch and the worktree are released by a
+sweeper reading a liveness signal, and the rung relaunches with no
+operator touch — and one command shows an operator the whole loop's
+live state: every issue waiting on a human decision, the reason, and
+the stage it stopped at.
+
 ## Order of landing
+
+Revisions ten through fourteen ordered by dependency. Revision fifteen
+re-orders by **what stops the loop from running unattended**, because
+the six-day jam showed the binding constraint is not the ladder's
+capability but its housekeeping: claims that outlive their process,
+issues nothing closes, a front door open to one issue in seventy-two.
+The 2026-09-16 triage is the evidence; the gates below are its output.
+
+### Gate 3 — the loop stops needing a human
+
+Nothing here is new capability. Each item is a place the loop stalls
+silently and waits for a person who does not know they are needed.
+
+1. **#148** — the close rung. It was specified and has never been
+   built. Without it every
+   finished issue sits at `status:in-review` forever, which is most of
+   what the 121-issue backlog actually was. Highest leverage item in
+   the file.
+2. **#483 (H2), with #252 / #251 re-verified under it** — release a
+   claim when its holder dies. #252 and #251 are closed as delivered,
+   and the six-day jam happened anyway, so the delivered fix does not
+   cover a poller process that dies without unwinding. #483 was filed
+   the same morning from the process side and is the live home for
+   this; re-verify the delivered fix against it and leave the closed
+   issues closed.
+3. **#397** — the withheld dispatch row. An artifact PR that merges
+   while `in-progress` is held produces no ledger row, and nothing
+   re-issues it, so the rung stalls with no marker saying why.
+4. **#363** — the poller dispatches from a stale ledger rung and keeps
+   the claim when `work.sh` refuses. Same class: a refusal that leaves
+   state dirtier than it found it.
+5. **#239** — give the review-dispatch refusals the same
+   `REVIEW_DISPATCH != 1` guard the fast-track door already has at
+   `work.sh:497`. XS, and it removes the review-stuck deadlock.
+6. **#386** — `merge_gate_test.sh` red on `main` at MG-38 under the
+   #308 contract. #308's implement landed, so re-run before assuming
+   this is still true.
+7. **#489** — a PR that links more than one issue dies at
+   `scripts/ops/lib/github.sh:149-151` with `die` (exit 1), so both
+   reviewer checks go red permanently. The zero-issue branch three
+   lines below already returns 2, the refusal contract `unattended.yml`
+   honours by exiting 0 with a stated reason. #216 fixed the
+   zero-issue half and closed; this is the sibling it left behind.
+   Filed 2026-09-16 from PR #423, which sat red for six days on it
+   because the fix was a body edit and a body edit fires no
+   `pull_request` run. An earlier revision of this line said a by-hand
+   `workflow_dispatch` clears such a red. That is wrong, and #491 below
+   is why. A red required check is the one stall in this loop that no
+   agent can clear, which is why it belongs in Gate 3; its diff size
+   alone would have put it in the XS batch.
+8. **#490** — a Vertex `RESOURCE_EXHAUSTED` (429) costs a reviewer run
+   its entire window. Filed 2026-09-16 from PR #480's atlas job. The
+   retry loop does exist, and the first reading of this issue said
+   otherwise: PR #480's tail reads `attempt 1` while PR #458's reads
+   `attempt 6`, so `agy` retries. The defect is that the loop has no
+   terminal state of its own. It runs until `--print-timeout 30m` ends
+   it, so the attempt count it reaches is arbitrary and a saturated
+   quota always bills the full window before anything downstream learns
+   the turn was refused. A measured cohort, all `atlas` on
+   gemini-3.8-flash-high, all launched inside six minutes on
+   2026-09-16:
+
+   | run | PR | attempt at failure | duration | input | cache read |
+   |---|---|---|---|---|---|
+   | 35064689660 | #480 | 1 | 1762s | 421,032 | 537,465 |
+   | 35064696473 | #421 | 2 | 1762s | 445,970 | 602,644 |
+   | 35065046628 | #458 | 6 | 1791s | 645,403 | 1,373,400 |
+   | 35065153132 | #486 | 1 | 1358s | 248,680 | 314,445 |
+   | 35067230086 | #423 | 1 | 1834s | 1,057,947 | 2,165,446 |
+
+   The first four are 1,761,085 fresh input and 2,827,954 cache read
+   for four empty responses, four permanently red required checks and
+   about 100 minutes of runner time. The fifth row was added at 07:45Z
+   after this revision's other entries and it alone cost more input
+   than the first four averaged; across all five, 2,819,032 fresh input
+   and 4,993,400 cache read for five empty responses. The fix is a terminal state: give up after a
+   bounded number of attempts and exit distinctly enough that the layer
+   above can tell a quota refusal from a review verdict. Distinct from
+   #312, which is a *completed* review whose stream was interrupted;
+   here the API refused the turn and no work exists. Same consequence
+   as #489 — the check goes red for a reason that carries no opinion
+   about the PR, and today only a human clears it. Feeder for #481's
+   escalation queue and a candidate for #483's sweeper.
+
+   The quota refuses **intermittently**, which matters more than the
+   raw failure count. `argus` succeeded throughout the same window and
+   an `atlas` run at 07:03 (35066601100, PR #485) succeeded, so any
+   release condition phrased as "one round came back clean" can pass on
+   luck while the underlying condition is unchanged.
+9. **#491** — the gate's conjunct (2) reads a stale reviewer check
+   context that a by-hand re-dispatch can never replace, so #489 and
+   #490 have no by-hand escape hatch. Filed 2026-09-16 while verifying
+   a peer session's unrelated claim about conjunct (2). Gate run
+   35068510323 on PR #423 at head `9cacb10` prints two lines that
+   contradict each other:
+
+   ```
+   conjunct (2): false — mergeStateStatus CLEAN but check(s) not success: argus via gh-actions=FAILURE atlas via gh-actions=FAILURE
+   conjunct (11): true — ledger carries reviewed-head:argus and the head probe read 9cacb109...
+   ```
+
+   (11) is right. The commit's REST check-run list carries
+   `103073609411 argus via gh-actions failure` from Sep 10 alongside
+   `104698079394 argus via gh-actions success` from the re-dispatch that
+   morning. The GraphQL `statusCheckRollup` the gate reads at
+   `merge_gate.sh:263` returns 15 of the 22 check runs on that SHA, and
+   for each reviewer name it returns one context — the Sep-10 failure.
+   The success never enters `CHECKS_TSV`, so the dedupe-by-highest-
+   `databaseId` at `merge_gate.sh:492-516` has nothing to act on. Both
+   `workflow_dispatch` suites report `pull_requests` length 1 on the
+   PR's own branch, so the link is sound and the omission is per
+   check-run name; contexts from those same suites do appear in the
+   rollup under other names. The consequence is the reason this sits in
+   Gate 3: **a re-dispatch clears conjuncts (3), (4) and (11) and can
+   never clear (2)**, so the documented unstick recipe cannot finish the
+   job, and only a push or a `synchronize` replaces the context. GitHub's
+   own `mergeStateStatus` on #423 reads CLEAN, so conjunct (2)'s rollup
+   half is stricter than the branch protection it mirrors. #298 built
+   that dedupe and the SKIPPED allowlist; this is the case the machinery
+   cannot reach. Land it before #489 and #490, because it is what makes
+   their fixes verifiable without an operator.
+
+   The rollup returns the **oldest** run for a reviewer name, and three
+   successive green dispatches across two names all failed to enter it
+   (`104696161088` argus 06:55:52Z, `104696335134` atlas 06:56:22Z,
+   `104698079394` argus 07:08:01Z). That rules out a race or one unlucky
+   suite. **#491 and #490 compound**: #490 turns a reviewer check red
+   for an infrastructure reason, #491 makes that red unclearable by the
+   loop, and neither alone strands a PR permanently. PR #480 and PR #458
+   both took a 429 within about ninety seconds of each other on
+   2026-09-16 and both now hold an `atlas via gh-actions=FAILURE` that
+   no dispatch can replace. **PR #423 joined them at 07:41Z.** Its
+   atlas dispatch, run 35067230086, was fired to satisfy conjunct (3),
+   the only conjunct besides (2) that gate run 35068510323 had declined
+   on. It took a 429 at attempt 1 and held its window open to
+   `--print-timeout 30m`, so it satisfies neither conjunct and leaves
+   behind the red that #491 makes permanent. Three PRs sit in that
+   state as of 2026-09-16. An empty commit on each branch is the only
+   mechanic, and it is an operator decision.
+
+   PR #423 is the sharpest single case in this plan. Every conjunct
+   except (2) and (3) reads true on it, GitHub's own `mergeStateStatus`
+   reads CLEAN, argus has reviewed it twice at the current head, and it
+   still cannot merge without a human.
+
+   A second conjunct (2) hypothesis was tested and dropped. A CANCELLED
+   context that is newest for its name would count as failing under the
+   allowlist at `merge_gate.sh:513`, and the concurrency group looked
+   like a way to produce one. It is not: the evicted run 35066559069 on
+   PR #423 reports `completed/cancelled` with an empty `jobs` array, so
+   a run evicted while queued starts nothing and registers no check
+   context. The 22 check runs on `9cacb10` are 19 success, 2 failure, 1
+   skipped and 1 in progress, with no cancelled among them. Reaching
+   that state needs a run whose jobs start and are then cancelled by
+   hand or by timeout; until someone produces one it stays out of this
+   list.
+
+### Gate 4 — the fast-track batch
+
+Roughly eighteen XS fixes, one `/fast` PR each, batched by theme so a
+reviewer reads one coherent diff in place of eighteen unrelated ones.
+The identity-and-slug theme runs first because it is self-contained and
+several other issues fold into it: **#224 → #227 → #236 → #463 → #203
+→ #465b**.
+
+**This gate is held as of 2026-09-16, and the reason belongs in the
+plan.** Model quota is the binding constraint on the day; agent time
+is free by comparison. #490 records a reviewer run that took a Vertex 429 on turn one,
+never retried, burned its full 30-minute window and billed roughly
+960K tokens for an empty response. Eighteen fast-track rounds each
+carry two reviewer dispatches, so opening the batch into a quota that
+is already refusing turns converts a scheduling decision into a wave
+of red checks that only a human can clear, which is exactly the class
+#489 and #490 describe. Two conditions release the gate. The second is
+phrased against the loop's behaviour, because the quota refuses
+intermittently and any condition satisfied by a single clean round can
+be met by luck: **(a)** #490's terminal state lands,
+so a quota refusal ends in bounded time and reports itself as a
+refusal; **(b)** an infrastructure-red check is re-runnable by the loop
+itself, with no operator in the path. (b) now has a named blocker:
+**#491**, which proves that a re-dispatched reviewer check stays red at
+the gate no matter how it finishes. Until #491 lands, (b) is
+unreachable by construction, so this is the single change that opens
+Gate 4. #481 and #483 build the queue and the sweeper on top of it, and
+until all three hold, every red check this batch produces is a
+human-only stall however few of them there are. Sequencing note for whoever
+opens it — #227 and #489
+touch the same resolver in `scripts/ops/lib/github.sh`, so they are one
+diff or two strictly ordered ones, and #463 already carries a live
+`status:planning` rung, so it stays on the ladder and out of this
+batch.
+
+### Gate 5 — the real work
+
+Everything that needs a spec: #355, #82, #405, #417, #479,
+#104/#108/#190, #356, #318, #11, #117, #481, #482, #484. Ordered inside
+the gate by whichever unblocks another item. Size does not set the
+order here. #481, #482 and #484 are Gate H rows H4, H1 and H3; H1 pays
+for itself in cache economy the moment it lands, so run it early in
+this gate.
+
+Two cautions carried from the triage, both of which would cost a wasted
+round if missed:
+
+- **#356's proposed preflight cannot work as written.** It suggests
+  `gh api user` to assert the acting identity, which returns 403 for a
+  GitHub App token (`smoke_launch.sh:43,641`). The preflight has to
+  resolve the App slug instead.
+- **`personas/nestor.yaml` does not exist**, so nothing under #199 can
+  land until it does. #199 is now an epic; the child that creates the
+  file is the one that unblocks the rest.
+
+### Superseded ordering (revisions ten to fourteen)
 
 1. PR #350 merges (Y1). DONE 05:33Z, confirmed 06:52Z. From then on
    intent-stage PRs merge on their own.
@@ -226,6 +564,40 @@ it is until the scope changes.
 
 Each item ends as an issue, a PR, or an explicit "deferred, no
 tracker"; the advisor's recommendation is stated where it has one.
+
+Opened by the 2026-09-16 triage, newest first:
+
+- **#269: which price basis `rate_tier()` encodes.** Either the Gemini
+  Developer API list price (3.8 Flash \$0.75/\$3.75, 3.1 Pro
+  \$2.00/\$12.00, already in the issue) or the real Vertex/Enterprise
+  rate. The Vertex pricing page renders its tables client-side and
+  returns no table body to an unauthenticated fetch — tried twice, on
+  2026-09-08 and again on 2026-09-16, same result — so only a
+  signed-in console read settles it. Recommended: land the list price
+  now with the source and date written above the table, and treat the
+  Vertex reconciliation as a follow-up. A number that is 5x low is a
+  worse failure than a number that is right for the wrong price book.
+  Secondary, unanswered either way: Gemini's cache multipliers. The
+  write-5m/write-1h/cache-read columns currently apply Claude's
+  1.25x/2x/0.1x to the Gemini base, which nobody has verified.
+- **When to make `changelog-check` a required context (#410).**
+  Recommended: immediately after PR #421, #369 and #423 are resolved.
+  Doing it sooner strands #423, whose fix fires no `pull_request` run.
+- **Whether the #252/#251 claim release actually covers a dead poller
+  process.** Both issues are closed as delivered and the jam happened
+  regardless. If the gap is real it wants a new issue; the delivered
+  behaviour is correct and simply narrower than the failure it met.
+- **103 stale git worktrees** are on the VM. Cleanup is not proposed
+  here; it is noted so the number is not a surprise later.
+- **PR #369 must not merge in its current state.** Its
+  `intent/329-context-ceiling/spec.md` is truncated at line 170 inside
+  an unterminated heredoc; the verifier returned BLOCK with two `high`
+  rows, and **those rows were never written to the ledger**, which
+  holds only `AT-R1-1@D2:normal:open`. Conjunct (4) therefore reads
+  true, so clearing (3) and (11) would merge a truncated spec. #329
+  carries `hold` for this reason, which the poller honours
+  (`poll.sh:300`). Athena owes a full redraft. The ledger-versus-verdict
+  divergence is itself a recorder defect and belongs with #328.
 
 - **Home of the seat launch without an issue number.** Under #199's
   plan (recommended: D15 already owns the launch convention) or a new
@@ -279,8 +651,17 @@ tracker"; the advisor's recommendation is stated where it has one.
   refusals. The workflow token does it today under `issues: write`.
 - **Stale processes**: a bare `agy` process 204 hours old, the #265
   REPL in tmux `waves:265i-odyssey` (11 hours), the #350 fix-round
-  REPL in `waves:350f-odyssey` (1 hour); the operator kills, never a
-  seat.
+  REPL in `waves:350f-odyssey`; the kill is the operator's call alone.
+  Updated 2026-09-16: the #350 row is still alive and `ps` puts it at
+  elapsed 6-02:03:54 — pid 1737758 running
+  `runs/2026-09-10_050016_agy-waves/run-350f.sh` with child agy pid
+  1737762 on a FIX ROUND 1 prompt for #321. PR #350 merged at 05:33Z
+  on 2026-09-10, three minutes after that prompt started, so nothing
+  it does can land. It is the verified instance of the class #483 (H2)
+  describes, and no agent will reap it, because reaping is exactly the
+  behaviour #483 asks for. agy launches carry no per-token cost here,
+  so the harm is a held slot and a confused timeline. Recommended:
+  kill both pids now and let #483 make it automatic.
 - **Reopen #321.** Closed by accident at 07:34:52Z by a closing
   reference inside PR #368's body, a sentence listing operator
   decisions, the #245 trap; the advisor note on the issue at 07:42Z
